@@ -1,1 +1,1 @@
-export * from '@workbench/domain';
+export * from "@workbench/domain";
