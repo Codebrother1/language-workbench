@@ -1,3 +1,5 @@
+import type { InsertionAnchor } from "./SectionInsertion";
+import { closeHistory } from "@tiptap/pm/history";
 import {
   useCallback,
   useEffect,
@@ -10,6 +12,10 @@ import StarterKit from "@tiptap/starter-kit";
 import { EditorState } from "@tiptap/pm/state";
 import {
   type Document,
+  type WritingSection,
+  insertSectionAt,
+  duplicateSection as duplicateSectionInstance,
+  removeSection as removeSectionInstance,
   type Settings,
   type EditTarget,
   type AIResponse,
@@ -179,6 +185,7 @@ export function useWorkspace() {
   }, []);
   const updateRef = useRef<(fn: (d: Document) => Document) => void>(() => {});
   const selectRef = useRef<() => void>(() => {});
+  const [insertion, setInsertion] = useState<InsertionAnchor | null>(null);
   const editor = useEditor({
     autofocus: false,
     extensions: [
@@ -521,11 +528,14 @@ export function useWorkspace() {
   };
   const sync = (next: Document) => {
     update(() => next);
+    if (editor) editor.view.dispatch(closeHistory(editor.state.tr));
     editor?.commands.setContent(toEditor(next), { emitUpdate: false });
+    if (editor) editor.view.dispatch(closeHistory(editor.state.tr));
     setTarget(null);
     if (editor) highlight(editor, null);
   };
   const load = (next: Document) => {
+    setInsertion(null);
     sectionMetadata.current = new Map(next.sections.map((s) => [s.id, s]));
     current.current = next;
     setDoc(next);
@@ -670,10 +680,72 @@ export function useWorkspace() {
         : t,
     );
   };
+  const requestSectionInsertion = (
+    beforeId: string | null,
+    button: HTMLElement,
+  ) => {
+    if (!isReady.current) return;
+    if (
+      beforeId !== null &&
+      !current.current.sections.some((s) => s.id === beforeId)
+    ) {
+      setError("The insertion position no longer exists.");
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    setInsertion({
+      documentId: current.current.id,
+      beforeSectionId: beforeId,
+      x: rect.left,
+      y: rect.bottom + 6,
+      returnFocus: button,
+    });
+  };
+  const insertSection = (kind: WritingSection["kind"]) => {
+    try {
+      if (!insertion || insertion.documentId !== current.current.id)
+        throw new Error("Choose an insertion position in this document.");
+      const section = newSection(kind);
+      const next = insertSectionAt(
+        current.current,
+        section,
+        insertion.beforeSectionId,
+      );
+      sync(next);
+      setInsertion(null);
+      focusSection(section.id);
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  };
+  // The existing Add section shortcut remains a one-click blank append.
   const addSection = () => {
     const next = newSection();
-    sync({ ...current.current, sections: [...current.current.sections, next] });
+    sync(insertSectionAt(current.current, next, null));
     focusSection(next.id);
+  };
+  const duplicateSection = (id: string) => {
+    try {
+      const index = current.current.sections.findIndex((s) => s.id === id);
+      const next = duplicateSectionInstance(current.current, id);
+      sync(next);
+      focusSection(next.sections[index + 1].id);
+      setNotice(
+        "Independent section copy created, including its local workbench.",
+      );
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  };
+  const deleteSection = (id: string) => {
+    try {
+      sync(removeSectionInstance(current.current, id, newSection("Freeform")));
+      setNotice(
+        "Section removed. Undo restores it during this editing session.",
+      );
+    } catch (error) {
+      setError((error as Error).message);
+    }
   };
   const moveSection = (id: string, to: number) => {
     const next = [...current.current.sections];
@@ -1370,6 +1442,12 @@ export function useWorkspace() {
     }
   };
   return {
+    insertion,
+    closeInsertion: () => setInsertion(null),
+    requestSectionInsertion,
+    insertSection,
+    duplicateSection,
+    deleteSection,
     library,
     libraryReady,
     librarySaveState,

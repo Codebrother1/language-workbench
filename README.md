@@ -61,6 +61,10 @@ When you invoke a real writing request, the backend sends the supplied document 
 
 **Live OpenAI calls have not been verified in this sandbox because no credential was available.** Provider tests exercise the official SDK through a fake HTTP transport, including request serialization and validation; they do not establish live account/model availability or output quality.
 
+## Unrestricted section composition
+
+Sections are an ordered array of reusable instances—not fixed Hook/Point/Segue slots. Repeat any type, omit any type, and reorder freely. Hover or keyboard-focus a boundary to reveal **+** and insert exactly there; **All section types** always remains available. Section options also provide Insert above/below, Duplicate section, conversion, drag/reorder, merge and confirmed deletion. The last deletion leaves an empty Freeform caret surface, with session undo available. See [docs/SECTION-INSTANCES.md](docs/SECTION-INSTANCES.md) for the invariant and verification.
+
 ## Working with a document
 
 1. Write or paste into the editor. Add, label, reorder, split, or merge sections as needed. Section names describe the writing; they are not mandatory templates.
@@ -153,7 +157,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/absolute/path/to/chromium pnpm test:e2e
 
 The repository also includes an npm-packaged Chromium dependency for sandbox use. This workaround is optional, not the recommended desktop installation path.
 
-The current library/Structure checkpoint passed **223 unit/integration tests, 38 browser tests, TypeScript, the production build, and the extended real-process restart/security smoke check**. Evidence and limitations are in [docs/LIBRARY-VERIFICATION.md](docs/LIBRARY-VERIFICATION.md). All tests from protected baseline `266c0d0` remain unchanged and passing; historical records remain separate.
+The current unrestricted-composition checkpoint passed **267 unit/integration tests, 45 browser tests, TypeScript, the production build, and the extended real-process restart/security smoke check**. See [docs/SECTION-INSTANCES.md](docs/SECTION-INSTANCES.md). The prior library/Structure checkpoint passed 223 unit/integration and 38 browser tests. Evidence and limitations are in [docs/LIBRARY-VERIFICATION.md](docs/LIBRARY-VERIFICATION.md). All tests from protected baseline `266c0d0` remain unchanged and passing; historical records remain separate.
 
 The extended production smoke covers model choices, local histories, routing, and catalog state across an actual server-process restart. Its credential-leak checks use a **synthetic fake key**, inspecting served static JavaScript and HTTP responses for raw-key exposure without real provider network calls. Neither this check nor SDK fake-transport tests establish live third-party verification. Actual Wispr OS-overlay testing must be performed on a supported desktop: see [docs/WISPR-QA.md](docs/WISPR-QA.md).
 

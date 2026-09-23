@@ -1870,3 +1870,129 @@ summary {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* UI decorations, not writing blocks. Hidden until hover/focus; zero copied text. */
+.section-gap {
+  height: 24px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  line-height: 1;
+  font-family: "DM Sans Variable", sans-serif;
+}
+.section-gap::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+  opacity: 0;
+  pointer-events: none;
+}
+.section-gap-button {
+  position: relative;
+  width: 36px;
+  height: 32px;
+  min-width: 36px;
+  opacity: 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--accent);
+  padding: 0;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.section-gap-button::before {
+  content: "+";
+  font: 20px/1 sans-serif;
+}
+.section-gap:hover::before,
+.section-gap:focus-within::before,
+.section-gap:hover .section-gap-button,
+.section-gap:focus-within .section-gap-button {
+  opacity: 1;
+}
+.section-gap-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.section-insertion-picker {
+  position: fixed;
+  z-index: 80;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: 0 15px 60px #0003;
+}
+.section-insertion-picker h3 {
+  margin: 0;
+  font-size: 17px;
+}
+.section-insertion-picker .field {
+  margin: 12px 0;
+}
+.insertion-suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 14px 0;
+}
+.insertion-suggestions .button {
+  min-height: 40px;
+  font-size: 12px;
+}
+.instance-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+.instance-actions .button {
+  min-height: 36px;
+  font-size: 12px;
+  justify-content: flex-start;
+}
+@media (hover: none) {
+  .section-gap-button {
+    opacity: 0.6;
+  }
+}
+
+.section-gap-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.section-gap-layer .section-gap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.section-gap-layer .section-gap-button {
+  position: absolute;
+  left: -34px;
+  pointer-events: auto;
+}
+.section-gap[data-active="true"]::before,
+.section-gap[data-active="true"] .section-gap-button {
+  opacity: 1;
+}
+@media (max-width: 650px) {
+  .section-gap-layer .section-gap-button {
+    left: -23px;
+    width: 28px;
+    min-width: 28px;
+  }
+}

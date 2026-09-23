@@ -825,3 +825,5 @@ export function defaultSettings(): Settings {
 }
 
 export * from "./composition-knowledge";
+
+export * from "./section-operations";

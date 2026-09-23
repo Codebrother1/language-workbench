@@ -1,3 +1,7 @@
+import {
+  SectionInsertionPicker,
+  SectionInsertionGaps,
+} from "./SectionInsertion";
 import { useRef, useState } from "react";
 import { EditorContent } from "@tiptap/react";
 import {
@@ -119,6 +123,9 @@ function Structure({
                     onChange={(e) =>
                       w.patchSection(s.id, {
                         kind: e.target.value as typeof s.kind,
+                        ...(s.label === s.kind
+                          ? { label: e.target.value }
+                          : {}),
                       })
                     }
                   >
@@ -141,6 +148,28 @@ function Structure({
                     }
                   />
                 </Field>
+                <div className="instance-actions">
+                  <Button
+                    onClick={(e) =>
+                      w.requestSectionInsertion(s.id, e.currentTarget)
+                    }
+                  >
+                    Insert above
+                  </Button>
+                  <Button
+                    onClick={(e) =>
+                      w.requestSectionInsertion(
+                        w.doc.sections[i + 1]?.id ?? null,
+                        e.currentTarget,
+                      )
+                    }
+                  >
+                    Insert below
+                  </Button>
+                  <Button onClick={() => w.duplicateSection(s.id)}>
+                    Duplicate section
+                  </Button>
+                </div>
                 <div className="row wrap">
                   <Button
                     aria-label="Move section up"
@@ -166,7 +195,6 @@ function Structure({
                   </Button>
                   <Button
                     aria-label="Remove section"
-                    disabled={w.doc.sections.length === 1}
                     onClick={() => onRemove(s.id)}
                   >
                     <Trash2 size={13} />
@@ -560,6 +588,11 @@ export default function App() {
             </div>
             <div className={"editor-wrap " + (!text ? "empty" : "")}>
               <EditorContent editor={w.editor} />
+              <SectionInsertionGaps
+                editor={w.editor}
+                sections={w.doc.sections}
+                onInsert={w.requestSectionInsertion}
+              />
               {!text && (
                 <div className="editor-placeholder" aria-hidden="true">
                   Start with what you mean.
@@ -588,6 +621,15 @@ export default function App() {
         <WritingLabShell w={w} />
       </div>
       <UtilityPanel w={w} />
+      {w.insertion && (
+        <SectionInsertionPicker
+          key={`${w.insertion.documentId}:${w.insertion.beforeSectionId}`}
+          anchor={w.insertion}
+          sections={w.doc.sections}
+          onInsert={w.insertSection}
+          onClose={w.closeInsertion}
+        />
+      )}
       {confirmation && (
         <Dialog
           title={
@@ -600,7 +642,7 @@ export default function App() {
           <p>
             {confirmation.kind === "document"
               ? "The document, references, variants, and history will be permanently deleted. Export JSON first if you want a backup."
-              : "This removes the section and its saved variants. The rest of your writing is untouched."}
+              : "This removes the section and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session. Deleting the last section leaves an empty Freeform writing surface."}
           </p>
           <div className="row end">
             <Button onClick={() => setConfirmation(null)}>Keep writing</Button>
@@ -608,13 +650,7 @@ export default function App() {
               className="danger solid"
               onClick={() => {
                 if (confirmation.kind === "document") w.remove();
-                else
-                  w.sync({
-                    ...w.doc,
-                    sections: w.doc.sections.filter(
-                      (s) => s.id !== confirmation.id,
-                    ),
-                  });
+                else if (confirmation.id) w.deleteSection(confirmation.id);
                 setConfirmation(null);
               }}
             >
