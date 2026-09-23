@@ -1,6 +1,6 @@
 # Architecture
 
-This describes the implemented local application and its boundaries, not a roadmap presented as finished functionality. Installation and operational commands are in [README.md](../README.md); workflows are in [WORKBENCHES.md](WORKBENCHES.md).
+This describes the implemented local application and its boundaries, not a roadmap presented as finished functionality. Installation and operational commands are in [README.md](../README.md); workflows are in [WORKBENCHES.md](WORKBENCHES.md) and [PERSONAL-LIBRARY.md](PERSONAL-LIBRARY.md). Library, scoped-style, and Structure additions extend protected milestone `266c0d0`; the editor, Word/Phrase Lens, and workbench ownership remain the same.
 
 ## Components and data flow
 
@@ -8,8 +8,9 @@ This describes the implemented local application and its boundaries, not a roadm
 Browser: React + one TipTap/ProseMirror editor
   App / WritingLabShell / UtilityPanel
   ModelControls / ProviderSettings / WordLens / WorkbenchHistory
+  PersonalLibrary / LibraryTools / StructureTool (explicit/collapsed tools)
                       |
-         useWorkspace + pure workspace-helpers
+         useWorkspace + pure workspace-helpers / library-helpers
                       | same-origin /api requests
                       v
 Express application: loopback-only HTTP boundary (app.ts)
@@ -17,7 +18,8 @@ Express application: loopback-only HTTP boundary (app.ts)
        v                                  v
 SQLite Repository                  One ProviderRegistry
   documents JSON + revision          catalog, availability, routing
-  singleton settings JSON            one shared OpenAI SDK client
+  singleton settings JSON            writing-context: scope/bound/resolve
+  singleton library JSON + revision  one shared OpenAI SDK client
   provider_catalog JSON                      |
                                      LLMProvider interface
                                        |-- MockProvider: conservative/plain
@@ -29,6 +31,8 @@ Shared domain: packages/domain/src/
   index.ts      document/workbench schemas, targets, exports, defaults
   routing.ts    model/catalog/lens schemas + sole resolveModel algorithm
   ai-output.ts  common structured response schema
+  personal-library.ts  library schema, keyword search, scope/rank/style resolution
+  composition.ts / composition-knowledge.ts  Structure schema/helpers/original notes
 ```
 
 Development uses Vite on `127.0.0.1:5173` with `/api` proxied to `127.0.0.1:4318`. Production serves the Vite build from the same Express server as the API. `config.ts` resolves the repository root from the module path, loads root `.env`, and resolves relative `DATA_DIR` paths against that root rather than the current working directory.
@@ -43,11 +47,12 @@ The shared domain module is the contract between browser, API, storage, and prov
 
 - **Document** (`schemaVersion: 1`): ID, timestamps, revision, brief, ordered sections, sources, history; optional `defaultModel` and document `workbench`.
 - **WritingSection:** stable ID, kind/label, rich-node content, notes, variants; optional `modelOverride` and `workbench`.
-- **SectionWorkbench:** instruction/answer drafts, action/controls, lens options, one-off model, comparison choices, runs, `activeRunId`, and proposal-state map.
-- **WorkbenchRun:** ID/time, captured target/action/instruction/answer/controls/lens, actual model reference, and full structured response with routing provenance.
+- **SectionWorkbench:** instruction/answer drafts, action/controls, lens options, one-off model, comparison choices, runs, `activeRunId`, proposal-state map, and optional `structure` draft. Structure holds raw notes, verbatim units with UTF-16 offsets, A/B/optional slots, relationship, register, connector/scaffold choice, custom template, and optional-detail purpose.
+- **WorkbenchRun:** ID/time, captured target/action/instruction/answer/controls/lens, actual model reference, full structured response with routing provenance, and optional Structure request snapshot. Human library/Structure previews use the same run pipeline with a null model and explicit human provider label.
 - **EditTarget:** document ID/revision, scope, section ID, text offsets, selected text, and the source section's text snapshot.
 - **Variant:** text, original/human/AI origin, label, timestamp, target anchor, and optional model/run references.
 - **Iteration:** target, instruction, question, answer, proposal, decision state, provider label, and optional model/run references.
+- **PersonalLibrary** (`schemaVersion: 1`): separate singleton revision and at most 5,000 items. Each item has one of `snippet`, `pattern`, `move`, `style_example`, `style_rule`, `connector`; title/content/notes, scope lists, tags/effects/register, reference/like/avoid preference, `myLanguage`, optional named `ruleKey`, timestamps/use count, and optional document/section/run/model provenance. My Language is a flag, not a seventh kind or separate store.
 - **Settings:** Style DNA, packs, radar, theme, and optional application/type/task routing defaults. Global settings are not embedded in document export.
 - **ModelRef/catalog:** provider/model identity, provider implementation/configuration/enablement, model capability knowledge, and cache timestamp.
 - **AIRequest / AIResponse:** explicit readable context, edit target, action, stage, controls, and structured diagnosis/questions/findings/lexical results/proposals.
@@ -88,6 +93,43 @@ Document-wide critique and template analysis are analysis-only; they cannot repl
 The section snapshot check is intentionally conservative: a change elsewhere in the same section can invalidate a target. An unrelated section edit or autosave revision increment need not invalidate an unchanged target. `documentRevision` is recorded for provenance, but target validity is not simply equality with the latest save revision. Database revision CAS is a separate persistence concern.
 
 Stale variants **fail closed** instead of searching for similar text and guessing where it belongs. Original variants are text snapshots, not complete rich-format versions. Section replacement builds paragraphs from text; it can discard local rich formatting.
+
+## Shared library and style authority
+
+The library is global across local documents but separate from Style DNA/settings and canonical document JSON. Scoped guides are actual `style_rule` items, and connector favorites/avoids are `connector` items; there is no parallel guide or connector preference store. `createLibraryItem` saves caller-supplied language/metadata only. QuickSave's **Add to Hook Style** saves `style_example`, never an inferred rule. The scoped-guide form creates/updates a rule only on **Save style rule**. No provider response auto-approves rules, inserts references, or updates library usage.
+
+`matchesLibraryScope` applies OR within section/content/audience lists and AND across those dimensions plus register. Comparisons are exact case-insensitive labels, not substring audience matching. Empty lists/blank register are unrestricted; nonblank register requires known matching context. Tags are searchable metadata, not restrictions; effects participate in simple ranking, not scope restrictions. `searchLibrary` requires every whitespace-separated query term to occur somewhere in searchable fields; it is keyword substring search, not embeddings or semantic retrieval.
+
+`relevantLibraryItems` excludes rules and avoids, ranks explicit section/content scope and effects, and penalizes frequent use (a capped use-count penalty). It returns four references by default for the contextual UI. Copying does not mark use. Explicit acceptance of a tracked `human-library` preview calls `markLibraryUsed`; this is not comprehensive detection of manually pasted or model-reused language.
+
+Style authority is independent of model-routing precedence:
+
+```text
+current instruction > section notes > matching section-type guide
+                    > matching content-type guide > global Style DNA
+```
+
+`resolveWritingStyle` sorts matching rules within a layer by update time then ID, so later entries win same-key conflicts. Rules with section scope enter the section layer; other matching rules enter the content layer, even if their section/content lists are empty. Their audience/register restrictions still apply. Named rule keys and `key: value` lines in section notes/current instructions normalize to lowercase with spaces, underscores and hyphens removed. Blank directive values are ignored; an explicit `key: [clear]` sets an empty effective value. The `[clear]` parser is for notes/instruction directives, not arbitrary natural-language inference. Freeform text remains high-to-low ordered guidance for provider interpretation; deterministic named-key resolution is not deterministic natural-language contradiction detection or guaranteed model compliance.
+
+`writing-context.ts::enrichWritingRequest` is the sole server enrichment function, used by registry single runs, comparison, and legacy injected providers in `app.ts`. It replaces client-supplied library/resolved-style claims with context derived from the stored library and submitted document's actual target section, brief content type/audience, and Structure register or Style DNA register. Comparison captures one enriched snapshot for all models. This protects library selection from fabricated client scope/enrichment, not from a local client editing its own submitted document.
+
+External disclosure is bounded to **50 matching items total**: matching rules and avoids are sorted by stable ID and capped at **40**, then mechanically ranked non-rule/non-avoid references fill the remaining allowance. Resolution uses that bounded set. **Applicable rules/avoids beyond this limit are not sent or enforced by this path.** It is not a guarantee of complete large-library style enforcement; local UI resolution can show more than the provider receives. The cap counts items, not bytes/tokens, and does not bound whole-document histories. New writing calls flush pending library changes before requesting enrichment.
+
+Common provider policy uses effective phrase-policy keys (`dislikedPhrases`, `cornyPhrases`, `neverSuggest`), allowing explicit higher-priority overrides/clears without overriding protected source/target boundaries or excluded Radar terms. Selected avoided connector records prevent newly introduced exact phrases using Unicode-aware token boundaries (`so` is not a substring ban on `some`). Other style rules are directives, not literal bans. Semantic correctness remains a review task.
+
+## Structure without a second editor
+
+`composition-knowledge.ts` contains original practical notes for **17 relationships, 72 connector entries, and 52 scaffolds**, not copied book text. Each relationship has a principle, question, connector distinctions and register-associated scaffolds. Technical and conversational choices differ; these are usage associations, not rigid correctness classes. Considering a connector records an inspection choice, not a blind string substitution into a scaffold.
+
+`segmentRawThoughts` uses punctuation, line endings and limited conjunction/subject cues. Units are verbatim `raw.slice(start, end)` chunks with JavaScript **UTF-16 offsets**, end-exclusive, not UTF-8 byte positions. For nonblank input, joining units recovers the raw string unchanged, including Unicode, whitespace and punctuation; raw notes are retained separately and never rewritten. Blank-only input yields no units. Abbreviation/quotation/nested-clause heuristics are incomplete. Relationship suggestions expose surface cues and reasons, never proof of logic, evidence or causality.
+
+The human fills A/B directly or explicitly copies units into slots, chooses relationship/register/scaffold, and optionally supplies `[Z]` plus a detail job (qualifier/example/consequence/aside/punchline/reveal). Custom templates support literal `[X]`, `[Y]`, `[Z]`. `renderScaffold` only substitutes supplied strings; missing slots remain visible. It preserves casing, punctuation, whitespace and replacement-like text, so doubled stops, existing conjunctions or awkward case require human tidying. It supplies no facts. Optional detail is appended on a new line when the template has no `[Z]`.
+
+**Save structure** writes a library `pattern`; **Save this move** writes a `move`. **Use in builder** requires a pattern containing both `[X]` and `[Y]` and loads the custom template without applying text. Favorite/Avoid connector actions write register-, section- and content-scoped library records. Matching avoids are excluded by default in the connector list; **Show avoided connectors** reveals them for inspection/unhiding.
+
+**Stage for target** validates a local target and complete human preview, then `makeHumanRun`/`appendRun` create an ordinary proposal/history entry labelled `human-structure`. It does not apply prose or invoke AI. Explicit Accept/Replace follows the existing stale-target pipeline. Structure state and run inputs autosave inside the owning workbench, not a second editor/store.
+
+Model assistance uses action/task `structure` through the shared one-off → section → section type → task → document → application resolver. Analyze/critique are diagnosis-only regardless of requested stage. Tighten requires explicit propose, both human thoughts and a complete preview; Structure and lexical lens cannot be combined. Policy rejects unresolved placeholders, introduced token occurrences not present in the supplied preview, expansion beyond its character length, and changed protected quotations, in addition to ordinary target/phrase checks. Conservative deletion/reordering is not semantic proof. Neither mock nor live providers gain persistence or automatic acceptance permission.
 
 ## Providers and safeguards
 
@@ -142,6 +184,9 @@ Fidelity is a requested constraint, not semantic proof. The mock declines exact-
 | `GET /api/health` | Startup/default provider status |
 | `GET/POST /api/documents`, `GET/PUT/DELETE /api/documents/:id` | List/create/read/CAS save/delete |
 | `POST /api/import` | Validated identity-remapped document copy |
+| `GET /api/library` | Read shared library, including revision |
+| `PUT /api/library` | Validate full library body; revision CAS save, 409 on conflict |
+| `POST /api/library/import` | Body `{ library }`; validated transactional append with fresh item IDs, 201 response |
 | `GET/PUT /api/settings` | Non-secret global preferences, including routing |
 | `GET /api/providers` | Sanitized catalog, status and environment default |
 | `PATCH /api/providers/:id` | Enable/disable implemented provider; `enabled` only |
@@ -159,18 +204,21 @@ Fidelity is a requested constraint, not semantic proof. The mock declines exact-
 ```text
 documents(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL)
 settings(id INTEGER PRIMARY KEY CHECK(id = 1), body TEXT NOT NULL)
+library(id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, body TEXT NOT NULL)
 provider_catalog(id TEXT PRIMARY KEY, body TEXT NOT NULL)
 ```
 
-The catalog table is added with `CREATE TABLE IF NOT EXISTS`. A document's complete JSON, including optional workbenches and active-run selection, is stored in `body`. A save checks the incoming revision and updates with `WHERE id = ? AND revision = ?`, then increments the revision. A conflict returns HTTP 409 rather than overwriting a newer save. This is compare-and-swap, not real-time collaboration or conflict merging.
+The catalog and library tables are added with `CREATE TABLE IF NOT EXISTS`. A document's complete JSON, including optional workbenches and active-run selection, is stored in `body`. A save checks the incoming revision and updates with `WHERE id = ? AND revision = ?`, then increments the revision. A conflict returns HTTP 409 rather than overwriting a newer save. This is compare-and-swap, not real-time collaboration or conflict merging.
 
 The browser debounces changes by 700 ms, serializes saves, and loops if more edits arrived during an in-flight save. It merges the returned revision/timestamp without replacing newer in-memory text. Document navigation attempts to flush pending writes. Failed saves retain the in-memory document and expose an error; export it before reload if necessary.
 
+Library mutations and imports use a separate serialized client queue and independent revision CAS. Full-library PUT validates unique IDs and updates the singleton only at the expected revision. Import uses `BEGIN IMMEDIATE`, appends fresh item IDs, preserves other item metadata, and commits or rolls back as a unit. Client delta helpers preserve edits made while an import is in flight; they are not cross-tab conflict merging. Failed library writes retain local changes and expose **Retry library save** and export; a stale CAS revision can still require recovery/reload after export.
+
 There is a pending-edit before-unload warning but **no durable browser crash-recovery journal**. A browser crash/forced close can lose unflushed edits. Settings use a serialized client queue but server-side singleton settings writes do not have document-style CAS; multiple tabs can still overwrite preferences.
 
-Import validates a document and remaps document/section/source/variant identities, workbench run IDs, proposal/history IDs, active-run selection, proposal-state keys, target/finding references and run links. It is a new copy, not an in-place restore. JSON document export includes local workbenches/model defaults but excludes global settings/catalog/credentials. For a full persisted backup, stop the server and copy the entire data directory, including any SQLite WAL/SHM files. See the README for recovery precautions.
+Import validates a document and remaps document/section/source/variant identities, workbench run IDs, proposal/history IDs, active-run selection, proposal-state keys, target/finding references and run links. It is a new copy, not an in-place restore. JSON document export includes local workbenches/model defaults, Structure drafts and captured run inputs, but excludes global library/settings/catalog/credentials. Separate library JSON includes guides, preferences and item metadata; importing appends copies rather than overwriting or restoring the library revision. Library provenance is retained, not a cross-export document remapping guarantee. For a full persisted backup (including the library), stop the server and copy the entire data directory, including any SQLite WAL/SHM files. See the README for recovery precautions.
 
-**Scale limits:** JSON request bodies are capped at 2 MB. Full responses, section snapshots and workbench histories grow the stored document and AI read context. There is no current history compaction or bounded-context policy; large histories can exceed HTTP/provider limits. The single-document metadata cache also has memory cost. Archival and bounded-context selection are future work, not current guarantees.
+**Scale limits:** JSON request bodies are capped at 2 MB. Full responses, section snapshots and workbench histories grow the stored document and AI read context. There is no current history compaction or bounded whole-document context policy; large histories can exceed HTTP/provider limits. The single-document metadata cache also has memory cost. The library schema limit is 5,000 items, but full-library PUT/import may hit the 2 MB request-body limit much earlier. The 50-item provider cap is separate and is not a byte/token bound. Archival and bounded document-context selection are future work, not current guarantees.
 
 ## Local security and portability
 
@@ -184,6 +232,6 @@ A future browser extension should be a thin client to the local API with minimal
 
 ## UI scope and verification boundary
 
-The current UI exposes the brief, sources, section metadata, variants, history, Style DNA/packs, and radar alongside core writing/proposal flows. Sources are modal rather than a pinned side-by-side reference. Utilities use one-window dialogs. Broad action/schema coverage is not evidence that every deep rhetorical mode has a complete dedicated UI.
+The current UI exposes the brief, sources, section metadata, variants, history, Style DNA/packs, and radar alongside core writing/proposal flows. Sources are modal rather than a pinned side-by-side reference. Utilities use one-window dialogs. Library and guide dialogs open only explicitly; new Inspector tools start collapsed, although opening several produces a long scroll. There is no automatically learned style-guide GUI, semantic embedding search, or automatic rule approval. Broad action/schema coverage is not evidence that every deep rhetorical mode has a complete dedicated UI.
 
-Verification is layered: domain/editor tests, repository/API tests, provider transport/policy tests, Chromium E2E, and a real built-server restart smoke check. The unchanged historical [VERIFICATION.md](VERIFICATION.md) records baseline `4f681c6`. Final extension results belong in the separate [WORKBENCH-VERIFICATION.md](WORKBENCH-VERIFICATION.md), finalized after the new pass; baseline counts do not verify new code. The extended smoke covers model/local-history/routing/catalog persistence across an actual restart and synthetic-key absence from static JS/HTTP responses without live provider requests. No new final counts or live-third-party success are asserted here. Chromium-on-Linux input/clipboard checks are not a live Wispr OS-overlay test; the required desktop checklist is in [WISPR-QA.md](WISPR-QA.md).
+Verification is layered: domain/editor tests, repository/API tests, provider transport/policy tests, Chromium E2E, and a real built-server restart smoke check. Current library/Structure results belong in [LIBRARY-VERIFICATION.md](LIBRARY-VERIFICATION.md), finalized separately; no unconfirmed new totals are asserted here. The unchanged historical [WORKBENCH-VERIFICATION.md](WORKBENCH-VERIFICATION.md) records milestone `266c0d0` (99 unit/integration and 27 browser tests), and [VERIFICATION.md](VERIFICATION.md) records original baseline `4f681c6` (60 and 15). These records stay separate; historical counts do not verify new code. The workbench smoke covers model/local-history/routing/catalog persistence across an actual restart and synthetic-key absence from static JS/HTTP responses without live provider requests. Live OpenAI and Wispr have no credential/desktop verification here. Chromium-on-Linux input/clipboard checks are not a live Wispr OS-overlay test; see [WISPR-QA.md](WISPR-QA.md).

@@ -15,6 +15,7 @@ import { OpenAIProvider, type OpenAIClient } from "./openai-provider.js";
 import { MockProvider } from "./mock-provider.js";
 import { APIError } from "./errors.js";
 import { validateProviderResponse } from "./provider-policy.js";
+import { enrichWritingRequest } from "./writing-context.js";
 
 export type ProviderRegistryOptions = {
   repository: Repository;
@@ -242,6 +243,34 @@ export class ProviderRegistry {
     });
   }
   async run(input: AIRequest): Promise<AIResponse> {
+    return this.runEnriched(enrichWritingRequest(input, this.repository));
+  }
+  /** Capture one library/style snapshot so every comparison model sees identical context. */
+  async compare(input: AIRequest, models: ModelRef[]) {
+    const enriched = enrichWritingRequest(input, this.repository);
+    return Promise.all(
+      models.map(async (model) => {
+        try {
+          return {
+            model,
+            response: await this.runEnriched({
+              ...structuredClone(enriched),
+              modelOverride: model,
+            }),
+          };
+        } catch (error) {
+          return {
+            model,
+            error:
+              error instanceof APIError
+                ? error.message
+                : "Provider request failed; no document changes were made.",
+          };
+        }
+      }),
+    );
+  }
+  private async runEnriched(input: AIRequest): Promise<AIResponse> {
     const { model: ref, source } = this.resolve(input);
     const provider = this.provider(ref);
     try {

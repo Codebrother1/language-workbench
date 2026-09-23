@@ -33,6 +33,20 @@ import {
   type AIRequest,
   resolveModel,
   routingPreferencesSchema,
+  emptyLibrary,
+  personalLibrarySchema,
+  libraryItemSchema,
+  relevantLibraryItems,
+  resolveWritingStyle,
+  emptyStructure,
+  renderScaffold,
+  segmentRawThoughts,
+  getRelationship,
+  scaffoldsFor,
+  type PersonalLibrary,
+  type LibraryItem,
+  type StructureDraft,
+  type StructureRequest,
 } from "./domain";
 import {
   WritingDocument,
@@ -56,6 +70,13 @@ import {
   inspectRun,
   type RunCapture,
 } from "./workspace-helpers";
+import {
+  createLibraryItem,
+  libraryDelta,
+  makeHumanRun,
+  type SaveLibraryItemInput,
+  type LibraryItemPatch,
+} from "./library-helpers";
 export async function api<T>(
   path: string,
   method = "GET",
@@ -77,7 +98,15 @@ export async function api<T>(
   return response.status === 204 ? (undefined as T) : response.json();
 }
 export type Panel =
-  "brief" | "sources" | "style" | "radar" | "history" | "providers" | null;
+  | "brief"
+  | "sources"
+  | "style"
+  | "radar"
+  | "history"
+  | "providers"
+  | "library"
+  | "guides"
+  | null;
 function forkDocument(doc: Document, title = doc.title): Document {
   const id = uid();
   return {
@@ -111,6 +140,16 @@ export function useWorkspace() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const settingsRef = useRef(settings);
   const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const [library, setLibrary] = useState<PersonalLibrary>(emptyLibrary);
+  const libraryRef = useRef(library);
+  const [libraryReady, setLibraryReady] = useState(false);
+  const libraryReadyRef = useRef(false);
+  const libraryQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const libraryOperations = useRef(0);
+  const libraryPending = useRef<((base: PersonalLibrary) => PersonalLibrary)[]>(
+    [],
+  );
+  const [librarySaveState, setLibrarySaveState] = useState("Connecting");
   const [health, setHealth] = useState({
     ok: false,
     provider: "Connecting",
@@ -250,13 +289,21 @@ export function useWorkspace() {
     let alive = true;
     (async () => {
       try {
-        const [ds, s, h, c] = await Promise.all([
+        const [ds, s, h, c, loadedLibrary] = await Promise.all([
           api<Document[]>("/documents"),
           api<Settings>("/settings"),
           api<typeof health>("/health"),
           api<ProviderCatalog>("/providers").catch(() => null),
+          api<PersonalLibrary>("/library").then((value) =>
+            personalLibrarySchema.parse(value),
+          ),
         ]);
         if (!alive) return;
+        libraryRef.current = loadedLibrary;
+        setLibrary(loadedLibrary);
+        libraryReadyRef.current = true;
+        setLibraryReady(true);
+        setLibrarySaveState("Saved");
         setSettings(s);
         settingsRef.current = s;
         setHealth(h);
@@ -310,7 +357,12 @@ export function useWorkspace() {
   }, [editor, flush]);
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
-      if (dirty.current > saved.current || requestBusy.current) {
+      if (
+        dirty.current > saved.current ||
+        requestBusy.current ||
+        libraryPending.current.length ||
+        libraryOperations.current > 0
+      ) {
         e.preventDefault();
         e.returnValue = "";
       }
@@ -326,6 +378,147 @@ export function useWorkspace() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
+  // Queue all CAS writes/imports. Failed operations retain their explicit local deltas.
+  const publishLibrary = (next: PersonalLibrary) => {
+    libraryRef.current = next;
+    setLibrary(next);
+  };
+  const requireLibrary = () => {
+    if (!libraryReadyRef.current)
+      throw new Error("The personal library is not loaded yet.");
+  };
+  const drainLibrary = async () => {
+    requireLibrary();
+    while (libraryPending.current.length) {
+      const count = libraryPending.current.length;
+      const snapshot = libraryRef.current;
+      setLibrarySaveState("Saving");
+      const result = personalLibrarySchema.parse(
+        await api<PersonalLibrary>("/library", "PUT", snapshot),
+      );
+      libraryPending.current.splice(0, count);
+      publishLibrary(
+        libraryPending.current.reduce((base, apply) => apply(base), result),
+      );
+    }
+    setLibrarySaveState("Saved");
+  };
+  const queueLibrary = (operation: () => Promise<void>): Promise<void> => {
+    libraryOperations.current++;
+    const queued = libraryQueue.current
+      .catch(() => {})
+      .then(operation)
+      .finally(() => {
+        libraryOperations.current--;
+      });
+    libraryQueue.current = queued;
+    // Attach an error handler immediately, while still returning rejection to callers.
+    void queued.catch((e: Error) => {
+      setLibrarySaveState("Not saved");
+      setError(
+        "Library not saved: " +
+          e.message +
+          " Your local edits are still here. Retry saving or export them before leaving.",
+      );
+    });
+    return queued;
+  };
+  const flushLibrary = (): Promise<void> => queueLibrary(drainLibrary);
+  const saveLibrary = (next: PersonalLibrary): Promise<void> => {
+    try {
+      requireLibrary();
+      const parsed = personalLibrarySchema.parse({
+        ...next,
+        revision: libraryRef.current.revision,
+      });
+      const apply = libraryDelta(libraryRef.current, parsed);
+      libraryPending.current.push(apply);
+      publishLibrary(parsed);
+      setLibrarySaveState("Unsaved");
+      return flushLibrary();
+    } catch (e) {
+      setError((e as Error).message);
+      return Promise.reject(e);
+    }
+  };
+  const updateLibrary = (
+    fn: (previous: PersonalLibrary) => PersonalLibrary,
+  ): Promise<void> => {
+    try {
+      requireLibrary();
+      return saveLibrary(fn(libraryRef.current));
+    } catch (e) {
+      setError((e as Error).message);
+      return Promise.reject(e);
+    }
+  };
+  const saveLibraryItem = async (
+    input: SaveLibraryItemInput,
+  ): Promise<string> => {
+    const item = createLibraryItem(input);
+    await updateLibrary((previous) => ({
+      ...previous,
+      items: [...previous.items, item],
+    }));
+    return item.id;
+  };
+  const updateLibraryItem = (
+    id: string,
+    patch: LibraryItemPatch,
+  ): Promise<void> =>
+    updateLibrary((previous) => ({
+      ...previous,
+      items: previous.items.map((item) =>
+        item.id === id
+          ? libraryItemSchema.parse({
+              ...item,
+              ...patch,
+              id: item.id,
+              createdAt: item.createdAt,
+              updatedAt: new Date().toISOString(),
+            })
+          : item,
+      ),
+    }));
+  const deleteLibraryItem = (id: string): Promise<void> =>
+    updateLibrary((previous) => ({
+      ...previous,
+      items: previous.items.filter((item) => item.id !== id),
+    }));
+  const markLibraryUsed = (id: string): Promise<void> => {
+    const item = libraryRef.current.items.find((item) => item.id === id);
+    return item
+      ? updateLibraryItem(id, {
+          useCount: item.useCount + 1,
+          lastUsedAt: new Date().toISOString(),
+        })
+      : Promise.resolve();
+  };
+  const importLibrary = async (file: File): Promise<void> => {
+    try {
+      const imported = personalLibrarySchema.parse(
+        JSON.parse(await file.text()),
+      );
+      await queueLibrary(async () => {
+        await drainLibrary();
+        setLibrarySaveState("Saving");
+        const result = personalLibrarySchema.parse(
+          await api<PersonalLibrary>("/library/import", "POST", {
+            library: imported,
+          }),
+        );
+        // Edits made while import was in flight are rebased rather than overwritten.
+        publishLibrary(
+          libraryPending.current.reduce((base, apply) => apply(base), result),
+        );
+        await drainLibrary();
+      });
+      setNotice("Library imported");
+    } catch (e) {
+      setError("Library import failed: " + (e as Error).message);
+      throw e;
+    }
+  };
   const sync = (next: Document) => {
     update(() => next);
     editor?.commands.setContent(toEditor(next), { emitUpdate: false });
@@ -594,7 +787,148 @@ export function useWorkspace() {
   const setCompareModels = (v: SetStateAction<ModelRef[]>) =>
     setField("compareModels", v);
   const selectRun = (id: string) => patchWorkbench((wb) => inspectRun(wb, id));
+  const structure = currentWorkbench.structure ?? emptyStructure();
+  const setStructure = (value: SetStateAction<StructureDraft>) =>
+    patchWorkbench((wb) => ({
+      ...wb,
+      structure:
+        typeof value === "function"
+          ? value(wb.structure ?? emptyStructure())
+          : value,
+    }));
+  const segmentThoughts = () =>
+    setStructure((previous) => ({
+      ...previous,
+      units: segmentRawThoughts(previous.raw),
+    }));
+  const assembleStructure = (template: string): string => {
+    const draft =
+      getWorkbench(current.current, sectionId).structure ?? emptyStructure();
+    return renderScaffold(
+      template,
+      draft.thoughtA,
+      draft.thoughtB,
+      draft.optionalSlot,
+    );
+  };
+  const previewStructure = (template?: string): string => {
+    const draft =
+      getWorkbench(current.current, sectionId).structure ?? emptyStructure();
+    const selected = getRelationship(draft.relationship).scaffolds.find(
+      (option) => option.id === draft.scaffoldId,
+    );
+    return assembleStructure(
+      template ??
+        selected?.template ??
+        scaffoldsFor(draft.relationship, draft.register)[0]?.template ??
+        "[X] [Y]",
+    );
+  };
+  const structureInput = (
+    mode: StructureRequest["mode"],
+    template: string,
+  ): StructureRequest => {
+    if (
+      !target ||
+      target.scope === "document" ||
+      sectionId !== target.sectionId
+    )
+      throw new Error(
+        "Select a local section target before working with structure.",
+      );
+    const draft =
+      getWorkbench(current.current, sectionId).structure ?? emptyStructure();
+    const preview = renderScaffold(
+      template,
+      draft.thoughtA,
+      draft.thoughtB,
+      draft.optionalSlot,
+    );
+    if (
+      mode === "tighten" &&
+      (!draft.thoughtA.trim() ||
+        !draft.thoughtB.trim() ||
+        /\[[^\]]+\]/u.test(preview) ||
+        !preview.trim())
+    )
+      throw new Error(
+        "Fill thoughts A and B and every scaffold slot before staging or tightening.",
+      );
+    return { mode, draft: structuredClone(draft), scaffold: template, preview };
+  };
+  const previewLibraryItem = (item: LibraryItem): void => {
+    try {
+      const savedItem = libraryRef.current.items.find(
+        (saved) => saved.id === item.id,
+      );
+      if (!savedItem)
+        throw new Error("That saved item is no longer in your library.");
+      if (savedItem.kind !== "snippet" && savedItem.kind !== "style_example")
+        throw new Error(
+          "Only snippets and style examples can be previewed as exact text.",
+        );
+      if (!target || target.scope === "document")
+        throw new Error("Select a local target first.");
+      validateTarget(current.current, target);
+      const run = makeHumanRun({
+        target,
+        workbench: {
+          ...getWorkbench(current.current, target.sectionId),
+          controls: {
+            ...getWorkbench(current.current, target.sectionId).controls,
+            libraryItemId: savedItem.id,
+          },
+        },
+        text: savedItem.content,
+        title: savedItem.title,
+        provider: "human-library",
+        instruction: `Preview saved library item ${savedItem.id}: ${savedItem.title}`,
+      });
+      update((d) => appendRun(d, run));
+      setDocumentWorkbench(false);
+      setNotice("Saved text staged. Apply explicitly to change the target.");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const stageStructure = (template: string): void => {
+    try {
+      if (!target || target.scope === "document")
+        throw new Error("Select a local target first.");
+      validateTarget(current.current, target);
+      const input = structureInput("tighten", template);
+      const run = makeHumanRun({
+        target,
+        workbench: getWorkbench(current.current, target.sectionId),
+        text: input.preview,
+        title: "User-assembled structure",
+        provider: "human-structure",
+        instruction:
+          "Preview the user-filled scaffold exactly. Apply only after explicit acceptance.",
+        structure: input,
+      });
+      update((d) => appendRun(d, run));
+      setDocumentWorkbench(false);
+      setNotice("Structure staged. Apply explicitly to change the target.");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const selectedSection = doc.sections.find((s) => s.id === sectionId);
+  const libraryContext = {
+    sectionKind: selectedSection?.kind,
+    contentType: doc.brief.contentType,
+    audience: doc.brief.audience,
+    register: settings.styleDNA.register,
+  };
+  const relevantItems = relevantLibraryItems(library.items, libraryContext);
+  const resolvedStyle = resolveWritingStyle({
+    global: settings.styleDNA,
+    library,
+    context: libraryContext,
+    sectionNotes: selectedSection?.notes,
+    instruction,
+  });
   const effectiveModel = resolveModel({
     oneOff: oneOffModel,
     sectionOverride: selectedSection?.modelOverride,
@@ -625,16 +959,23 @@ export function useWorkspace() {
     lensMode?: LensOptions["mode"],
     comparing = false,
     explicitTarget?: EditTarget,
+    structureInput?: StructureRequest,
   ) => {
     if (requestBusy.current || navigating.current) return;
-    const chosen = lensMode ? "words" : (override ?? action);
+    const chosen = structureInput
+      ? "structure"
+      : lensMode
+        ? "words"
+        : (override ?? action);
     const t =
       explicitTarget ??
-      (override
-        ? documentTarget(current.current)
-        : lensMode || comparing || stage === "diagnose"
-          ? target
-          : responseTarget);
+      (structureInput
+        ? target
+        : override
+          ? documentTarget(current.current)
+          : lensMode || comparing || stage === "diagnose"
+            ? target
+            : responseTarget);
     if (!t)
       return setError(
         "Select text within one section. Cross-section selections are read-only.",
@@ -648,7 +989,7 @@ export function useWorkspace() {
     const selectedModels = [...wb.compareModels];
     if (comparing && (selectedModels.length < 2 || selectedModels.length > 4))
       return setError("Select between two and four models to compare.");
-    if (override) {
+    if (override && !structureInput) {
       setDocumentWorkbench(true);
       update((d) =>
         updateWorkbench(d, null, (local) => ({ ...local, action: chosen })),
@@ -683,7 +1024,11 @@ export function useWorkspace() {
       target: t,
       action: chosen,
       instruction: wb.instruction,
-      answer: wb.answer,
+      answer:
+        structureInput && !wb.answer.trim()
+          ? structureInput.preview
+          : wb.answer,
+      ...(structureInput ? { structure: structureInput } : {}),
       controls: { ...wb.controls },
       model: catalog ? route.model : null,
       question:
@@ -694,16 +1039,33 @@ export function useWorkspace() {
     setError("");
     try {
       await settingsQueue.current;
+      await flushLibrary();
       validateTarget(current.current, t);
       const request: AIRequest = {
         readContext: {
           document: current.current,
           styleDNA: settingsRef.current.styleDNA,
+          // Library records are loaded and scoped by the backend, not echoed wholesale.
+          resolvedStyle: resolveWritingStyle({
+            global: settingsRef.current.styleDNA,
+            library: libraryRef.current,
+            context: {
+              sectionKind: section?.kind,
+              contentType: current.current.brief.contentType,
+              audience: current.current.brief.audience,
+              register:
+                structureInput?.draft.register ??
+                settingsRef.current.styleDNA.register,
+            },
+            sectionNotes: section?.notes,
+            instruction: capture.instruction,
+          }),
           knowledgePacks: settingsRef.current.knowledgePacks,
           approvedLanguage: settingsRef.current.radar.filter(
             (r) => r.status !== "maybe",
           ),
         },
+        ...(structureInput ? { structure: structureInput } : {}),
         editTarget: t,
         action: chosen,
         stage,
@@ -766,8 +1128,41 @@ export function useWorkspace() {
       setBusy(false);
     }
   };
-  const ask = (stage: "diagnose" | "propose", override?: WritingAction) =>
-    operate(stage, override);
+  const runStructure = async (
+    mode: StructureRequest["mode"],
+    template: string,
+  ): Promise<void> => {
+    try {
+      const input = structureInput(mode, template);
+      await operate(
+        mode === "tighten" ? "propose" : "diagnose",
+        undefined,
+        undefined,
+        false,
+        undefined,
+        input,
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const ask = (stage: "diagnose" | "propose", override?: WritingAction) => {
+    if (!override && action === "structure") {
+      const draft =
+        getWorkbench(current.current, sectionId).structure ?? emptyStructure();
+      const options = scaffoldsFor(draft.relationship, draft.register);
+      const template =
+        draft.customTemplate ||
+        options.find((s) => s.id === draft.scaffoldId)?.template ||
+        options[0].template;
+      return runStructure(
+        stage === "propose" ? "tighten" : "analyze",
+        template +
+          (draft.optionalSlot && !template.includes("[Z]") ? "\n[Z]" : ""),
+      );
+    }
+    return operate(stage, override);
+  };
   const askLens = (mode: LensOptions["mode"], explicitTarget?: EditTarget) =>
     operate(
       mode === "explore" ? "diagnose" : "propose",
@@ -834,7 +1229,15 @@ export function useWorkspace() {
       const p = response?.proposals.find((p) => p.id === id),
         t = responseTarget;
       if (!p || !t) return;
-      if (state === "accepted") applyText(t, p.text, p.label);
+      if (state === "accepted") {
+        applyText(t, p.text, p.label);
+        const used = activeRun?.controls.libraryItemId;
+        if (
+          activeRun?.response.provider === "human-library" &&
+          typeof used === "string"
+        )
+          void markLibraryUsed(used).catch((e) => setError(e.message));
+      }
       if (state === "saved") {
         const variant: Variant = {
           id: uid(),
@@ -967,6 +1370,27 @@ export function useWorkspace() {
     }
   };
   return {
+    library,
+    libraryReady,
+    librarySaveState,
+    saveLibrary,
+    updateLibrary,
+    flushLibrary,
+    saveLibraryItem,
+    updateLibraryItem,
+    deleteLibraryItem,
+    importLibrary,
+    markLibraryUsed,
+    relevantItems,
+    resolvedStyle,
+    previewLibraryItem,
+    structure,
+    setStructure,
+    segmentThoughts,
+    assembleStructure,
+    previewStructure,
+    stageStructure,
+    runStructure,
     doc,
     catalog,
     refreshCatalog,

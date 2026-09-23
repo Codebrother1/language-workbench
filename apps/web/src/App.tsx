@@ -190,6 +190,14 @@ function Structure({
           <BookOpen size={15} />
           Sources <span className="count">{w.doc.sources.length}</span>
         </Button>
+        <Button onClick={() => w.setPanel("library")}>
+          <BookOpen size={15} />
+          Personal library
+        </Button>
+        <Button onClick={() => w.setPanel("guides")}>
+          <Settings2 size={15} />
+          Style guides
+        </Button>
         <Button onClick={() => w.setPanel("history")}>
           <History size={15} />
           History
@@ -396,6 +404,15 @@ export default function App() {
                 >
                   <Settings2 size={15} />
                   AI providers
+                </Button>
+                <Button
+                  onClick={() => {
+                    w.setPanel("library");
+                    setMenu(false);
+                  }}
+                >
+                  <BookOpen size={15} />
+                  Personal library
                 </Button>
                 <Button
                   disabled={!w.ready}

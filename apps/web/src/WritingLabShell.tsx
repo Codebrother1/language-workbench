@@ -1,3 +1,5 @@
+import { QuickSave, ContextLibrary, StyleContext } from "./LibraryTools";
+import { StructureTool } from "./StructureTool";
 import { ModelControls, modelLabel } from "./ModelControls";
 import { WordLensControls, CandidatePreview } from "./WordLens";
 import { WorkbenchHistory } from "./WorkbenchHistory";
@@ -194,6 +196,7 @@ export function WritingLabShell({ w }: { w: Workspace }) {
               )}
             </div>
           </div>
+          <QuickSave w={w} text={target.text} />
           {w.isLensTarget ? (
             <WordLensControls w={w} />
           ) : (
@@ -241,7 +244,8 @@ export function WritingLabShell({ w }: { w: Workspace }) {
                           (a) =>
                             !lab.actions.includes(a) &&
                             a !== "critique" &&
-                            a !== "break_template",
+                            a !== "break_template" &&
+                            a !== "structure",
                         )
                         .map((a) => (
                           <option key={a} value={a}>
@@ -290,6 +294,17 @@ export function WritingLabShell({ w }: { w: Workspace }) {
                 {w.busy ? "Thinking…" : `Diagnose this ${targetLabel}`}
                 <ArrowRight size={15} />
               </Button>
+            </>
+          )}
+        </>
+      )}
+      {!isWholeAnalysis && (
+        <>
+          <StructureTool w={w} />
+          {hasTarget && (
+            <>
+              <ContextLibrary w={w} />
+              <StyleContext w={w} />
             </>
           )}
         </>
@@ -397,35 +412,37 @@ export function WritingLabShell({ w }: { w: Workspace }) {
               {response.routeSource?.replace("_", " ")}
             </p>
           )}
-          {!isLexicalRun && responseTarget?.scope !== "document" && (
-            <>
-              <Field label={response.question || responseLab.question}>
-                <textarea
-                  rows={3}
-                  aria-label="Your material"
-                  value={w.answer}
-                  onChange={(e) => w.setAnswer(e.target.value)}
-                  placeholder="Add the detail only you know…"
-                />
-              </Field>
-              <Button
-                className="primary full"
-                disabled={
-                  w.busy ||
-                  (!w.answer.trim() &&
-                    ![
-                      "words",
-                      "spellcheck",
-                      "critique",
-                      "break_template",
-                    ].includes(w.action))
-                }
-                onClick={() => w.ask("propose")}
-              >
-                Propose options <ArrowRight size={14} />
-              </Button>
-            </>
-          )}
+          {!isLexicalRun &&
+            !w.activeRun?.structure &&
+            responseTarget?.scope !== "document" && (
+              <>
+                <Field label={response.question || responseLab.question}>
+                  <textarea
+                    rows={3}
+                    aria-label="Your material"
+                    value={w.answer}
+                    onChange={(e) => w.setAnswer(e.target.value)}
+                    placeholder="Add the detail only you know…"
+                  />
+                </Field>
+                <Button
+                  className="primary full"
+                  disabled={
+                    w.busy ||
+                    (!w.answer.trim() &&
+                      ![
+                        "words",
+                        "spellcheck",
+                        "critique",
+                        "break_template",
+                      ].includes(w.action))
+                  }
+                  onClick={() => w.ask("propose")}
+                >
+                  Propose options <ArrowRight size={14} />
+                </Button>
+              </>
+            )}
           {response.proposals.map((p, i) => (
             <article className="proposal" key={p.id} data-testid="proposal">
               <div className="row between">
@@ -451,6 +468,7 @@ export function WritingLabShell({ w }: { w: Workspace }) {
                 onChange={(e) => w.proposalText(p.id, e.target.value)}
               />
               <p>{p.explanation}</p>
+              <QuickSave w={w} text={p.text} origin="candidate" />
               {isLexicalRun && (
                 <CandidatePreview w={w} text={p.text} open={i === 0} />
               )}

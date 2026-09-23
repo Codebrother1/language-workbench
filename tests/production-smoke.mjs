@@ -174,6 +174,16 @@ try {
       },
     ],
   };
+  doc.sections[0].workbench.structure = {
+    raw: "Useful, but costly.",
+    thoughtA: "The software was useful",
+    thoughtB: "it was too expensive",
+    relationship: "contrast",
+    register: "technical",
+    scaffoldId: "contrast-separate",
+    connectorId: "contrast-however",
+    customTemplate: "[X]; however, [Y].",
+  };
   doc = await api("/documents/" + doc.id, "PUT", doc);
   const settings = await api("/settings");
   settings.styleDNA.rhythm = "Fragments. Then a long breath.";
@@ -208,11 +218,59 @@ try {
     id: "smoke-catalog-fixture",
   });
   const catalog = await api("/providers");
+  const initialLibrary = await api("/library");
+  const now = new Date().toISOString();
+  const kinds = [
+    "snippet",
+    "pattern",
+    "move",
+    "style_example",
+    "style_rule",
+    "connector",
+  ];
+  const items = kinds.map((kind, index) => ({
+    id: "library-" + index,
+    kind,
+    title: "Personal " + kind,
+    content:
+      kind === "pattern"
+        ? "[X], but [Y]."
+        : kind === "style_rule"
+          ? "One line; no summary."
+          : kind === "connector"
+            ? "however"
+            : "que sera sera",
+    notes: "Why I saved it",
+    tags: ["my-custom-tag", "Ominous"],
+    effects: ["resigned"],
+    sectionKinds: ["Closer"],
+    contentTypes: ["reply"],
+    register: kind === "connector" ? "technical" : "",
+    preference: kind === "connector" ? "avoid" : "reference",
+    ruleKey: kind === "style_rule" ? "endingStyles" : "",
+    myLanguage: kind === "snippet",
+    createdAt: now,
+    updatedAt: now,
+  }));
+  items.push({
+    ...items[4],
+    id: "content-rule",
+    title: "Reply style",
+    sectionKinds: [],
+    contentTypes: ["reply"],
+    ruleKey: "sentenceLengths",
+    content: "One sentence may be complete.",
+  });
+  const personalLibrary = await api("/library", "PUT", {
+    ...initialLibrary,
+    items,
+  });
   await stop();
   await start();
   assert.deepEqual(await api("/documents/" + doc.id), doc);
   assert.deepEqual(await api("/settings"), settings);
   assert.deepEqual(await api("/providers"), catalog);
+  assert.deepEqual(await api("/library"), personalLibrary);
   assert.equal(
     (await fetch(base + "/.env")).headers
       .get("content-type")
@@ -228,7 +286,13 @@ try {
     safe.providers.find((p) => p.id === "openai").credentialSuffix,
     "8765",
   );
-  for (const path of ["/providers", "/settings", "/documents", "/health"])
+  for (const path of [
+    "/providers",
+    "/settings",
+    "/documents",
+    "/health",
+    "/library",
+  ])
     assert.ok(!JSON.stringify(await api(path)).includes(secret));
   const html = await (await fetch(base)).text();
   assert.ok(!html.includes(secret));
@@ -244,6 +308,9 @@ try {
   }
   console.log(
     "PASS: section-local drafts/runs, independent model overrides, routing defaults and catalogs survive restart; provider endpoints and served frontend do not expose a configured synthetic credential.",
+  );
+  console.log(
+    "PASS: all personal-library object kinds, custom tags/effects, connector avoidance, scoped guides and Structure drafts survive a real server restart.",
   );
   console.log(
     "PASS: built production entrypoint starts from arbitrary cwd; frontend serves; mock provider; SQLite document/brief/source/metadata/variant/history and Style DNA/packs/radar/theme survive process restart.",

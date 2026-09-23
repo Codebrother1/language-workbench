@@ -95,6 +95,7 @@ export class OpenAIProvider implements LLMProvider {
             humanAnswer: request.answer,
             controls: request.controls,
             lens: request.lens,
+            STRUCTURE: request.structure,
             PROTECTED_SURROUNDING: request.lens
               ? protectedSurrounding(request)
               : undefined,

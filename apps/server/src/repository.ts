@@ -3,6 +3,9 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   defaultSettings,
+  emptyLibrary,
+  personalLibrarySchema,
+  type PersonalLibrary,
   documentSchema,
   newDocument,
   settingsSchema,
@@ -33,6 +36,7 @@ export class Repository {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK (id=1), body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS library (id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS provider_catalog (id TEXT PRIMARY KEY, body TEXT NOT NULL);`);
   }
   list(): Document[] {
@@ -173,6 +177,56 @@ export class Repository {
         runId: h.runId ? runIds.get(h.runId) : undefined,
       })),
     });
+  }
+  getLibrary(): PersonalLibrary {
+    const row = this.db.prepare("SELECT body FROM library WHERE id=1").get();
+    return row
+      ? personalLibrarySchema.parse(JSON.parse(String(row.body)))
+      : emptyLibrary();
+  }
+  /** Entire-library replacement. The submitted revision is the expected CAS revision. */
+  saveLibrary(input: PersonalLibrary): PersonalLibrary {
+    const library = personalLibrarySchema.parse(input);
+    if (
+      new Set(library.items.map((item) => item.id)).size !==
+      library.items.length
+    )
+      throw new APIError(400, "Library item IDs must be unique");
+    const saved = { ...library, revision: library.revision + 1 };
+    // Insert a revision-zero singleton if absent; INSERT OR IGNORE is safe across processes.
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO library (id,revision,body) VALUES (1,0,?)",
+      )
+      .run(JSON.stringify(emptyLibrary()));
+    const result = this.db
+      .prepare(
+        "UPDATE library SET revision=?, body=? WHERE id=1 AND revision=?",
+      )
+      .run(saved.revision, JSON.stringify(saved), library.revision);
+    if (result.changes !== 1)
+      throw new APIError(409, "Library changed. Reload before saving.");
+    return saved;
+  }
+  /** Import always appends fresh identities; it never overwrites a saved item. */
+  importLibrary(input: PersonalLibrary): PersonalLibrary {
+    const imported = personalLibrarySchema.parse(input);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.getLibrary();
+      const result = this.saveLibrary({
+        ...current,
+        items: [
+          ...current.items,
+          ...imported.items.map((item) => ({ ...item, id: uid() })),
+        ],
+      });
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   getSettings(): Settings {
     const row = this.db.prepare("SELECT body FROM settings WHERE id=1").get();

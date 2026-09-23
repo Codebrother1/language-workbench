@@ -1,3 +1,4 @@
+import { PersonalLibrary, ScopedStyleGuides } from "./PersonalLibrary";
 import { ProviderSettings } from "./ProviderSettings";
 import { useState } from "react";
 import { Plus, Trash2, ExternalLink, Copy, RefreshCw } from "lucide-react";
@@ -498,10 +499,16 @@ export function UtilityPanel({ w }: { w: Workspace }) {
     radar: "Language radar",
     history: "Operation history",
     providers: "AI providers & routing",
+    library: "Personal Writing Library",
+    guides: "Scoped Style Guides",
   }[w.panel];
   return (
     <Dialog title={title} close={() => w.setPanel(null)} wide>
-      {w.panel === "providers" ? (
+      {w.panel === "library" ? (
+        <PersonalLibrary w={w} />
+      ) : w.panel === "guides" ? (
+        <ScopedStyleGuides w={w} />
+      ) : w.panel === "providers" ? (
         <ProviderSettings w={w} />
       ) : w.panel === "brief" ? (
         <Brief w={w} />

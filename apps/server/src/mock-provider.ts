@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   labFor,
+  suggestRelationships,
   sectionText,
   type AIRequest,
   type AIResponse,
@@ -319,6 +320,56 @@ export class MockProvider implements LLMProvider {
       findings: [],
       lexical: [],
     };
+    if (request.structure) {
+      const { draft, mode, scaffold, preview } = request.structure;
+      const suggestions = suggestRelationships(draft.thoughtA, draft.thoughtB);
+      output.diagnosis = `OFFLINE descriptive heuristic — not an LLM. Selected relationship: ${draft.relationship}; mode: ${mode}; register: ${draft.register}. A contains ${draft.thoughtA.trim().split(/\\s+/).filter(Boolean).length} words; B contains ${draft.thoughtB.trim().split(/\\s+/).filter(Boolean).length} words. This does not establish the truth of the relationship.`;
+      output.mechanism = `The supplied scaffold ${JSON.stringify(scaffold)} arranges the human slots without supplying missing meaning. Optional slot purpose: ${draft.purpose}. ${suggestions.map((s) => `${s.id}: ${s.reason}`).join(" ")}`;
+      output.question = `Does ${draft.relationship} describe how your second thought relates to the first for ${request.readContext.document.brief.audience || "this audience"}? Which words must remain exact?`;
+      output.missingIngredients = [
+        !draft.thoughtA.trim() ? "Human thought A" : "",
+        !draft.thoughtB.trim() ? "Human thought B" : "",
+      ].filter(Boolean);
+      output.findings = [
+        {
+          sectionId: section?.id ?? null,
+          title: `Selected relationship: ${draft.relationship}`,
+          detail: `Register: ${draft.register}; connector: ${draft.connectorId || "none selected"}; scaffold: ${draft.scaffoldId || "custom"}; optional slot: ${draft.optionalSlot ? "supplied" : "empty"}. These are the writer's selections, not an inferred semantic verdict.`,
+          severity: "consider",
+        },
+      ];
+      if (mode === "tighten") {
+        const candidate = offlineEdit({
+          ...request,
+          action: "shorten",
+          editTarget: { ...request.editTarget, text: preview },
+        });
+        // Some offline substitutions add vocabulary; those are not safe structure tightening.
+        const text =
+          candidate && !proposalViolation(request, candidate.text)
+            ? candidate.text
+            : preview;
+        if (!proposalViolation(request, text))
+          output.proposals = [
+            {
+              id: `structure-${createHash("sha256")
+                .update(JSON.stringify([request.editTarget, text]))
+                .digest("hex")
+                .slice(0, 16)}`,
+              text,
+              label:
+                text === preview
+                  ? "Your human-assembled preview — unchanged"
+                  : "Conservative preview trim",
+              explanation:
+                text === preview
+                  ? "No safe offline trim was found. This is the supplied human-assembled preview, not an LLM rewrite; accepting it replaces only the selected target."
+                  : "Only the existing offline trim rules were applied to your supplied preview. No new wording or claims were added; check whether removed emphasis mattered.",
+            },
+          ];
+      }
+      return validateProviderResponse(request, output, "mock");
+    }
     if (["critique", "break_template", "coach"].includes(request.action))
       output.findings = findingsFor(request);
     if (

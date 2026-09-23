@@ -10,6 +10,7 @@ import {
   type ModelRef,
   type WritingAction,
   type LensOptions,
+  type StructureRequest,
 } from "./domain";
 
 export function getWorkbench(
@@ -72,11 +73,15 @@ export function inspectRun(wb: SectionWorkbench, id: string): SectionWorkbench {
         action: run.action,
         controls: { ...run.controls },
         lens: run.lens ?? wb.lens,
+        ...(run.structure
+          ? { structure: structuredClone(run.structure.draft) }
+          : {}),
       }
     : wb;
 }
 
 export type RunCapture = {
+  structure?: StructureRequest;
   lens?: LensOptions;
   target: EditTarget;
   action: WritingAction;
@@ -100,6 +105,9 @@ export function makeRun(
     controls: { ...capture.controls },
     model: response.model ?? capture.model,
     ...(capture.lens ? { lens: capture.lens } : {}),
+    ...(capture.structure
+      ? { structure: structuredClone(capture.structure) }
+      : {}),
     response: {
       ...response,
       proposals: response.proposals.map((p) => ({ ...p, id: uid() })),

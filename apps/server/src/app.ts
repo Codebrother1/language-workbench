@@ -10,6 +10,7 @@ import {
   documentSchema,
   documentText,
   settingsSchema,
+  personalLibrarySchema,
   modelRefSchema,
   modelKey,
   type AIRequest,
@@ -21,6 +22,7 @@ import {
 } from "./provider-policy.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { APIError } from "./errors.js";
+import { enrichWritingRequest } from "./writing-context.js";
 import type { Repository } from "./repository.js";
 
 const createSchema = z.object({
@@ -142,6 +144,16 @@ export function createApp({
     const input = z.object({ document: documentSchema }).parse(req.body);
     res.status(201).json(repository.import(input.document));
   });
+  app.get("/api/library", (_req, res) => res.json(repository.getLibrary()));
+  app.put("/api/library", (req, res) =>
+    res.json(repository.saveLibrary(personalLibrarySchema.parse(req.body))),
+  );
+  app.post("/api/library/import", (req, res) => {
+    const { library } = z
+      .object({ library: personalLibrarySchema })
+      .parse(req.body);
+    res.status(201).json(repository.importLibrary(library));
+  });
   app.get("/api/settings", (_req, res) => res.json(repository.getSettings()));
   app.put("/api/settings", (req, res) =>
     res.json(repository.saveSettings(settingsSchema.parse(req.body))),
@@ -204,6 +216,7 @@ export function createApp({
   };
   const run = async (input: AIRequest) => {
     if (registry) return registry.run(input);
+    input = enrichWritingRequest(input, repository);
     try {
       return validateProviderResponse(
         input,
@@ -233,27 +246,7 @@ export function createApp({
     if (new Set(input.models.map(modelKey)).size !== input.models.length)
       throw new APIError(400, "Choose 2–4 distinct models");
     validateInput(input.request);
-    const results = await Promise.all(
-      input.models.map(async (model) => {
-        try {
-          return {
-            model,
-            response: await catalogRegistry.run({
-              ...structuredClone(input.request),
-              modelOverride: model,
-            }),
-          };
-        } catch (error) {
-          return {
-            model,
-            error:
-              error instanceof APIError
-                ? error.message
-                : "Provider request failed; no document changes were made.",
-          };
-        }
-      }),
-    );
+    const results = await catalogRegistry.compare(input.request, input.models);
     res.json({ results });
   });
   app.post("/api/culture/refresh", async (req, res) => {

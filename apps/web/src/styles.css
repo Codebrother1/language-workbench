@@ -1742,3 +1742,131 @@ summary {
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* Original composition notes and personal references stay collapsed at the point of use. */
+.quick-save,
+.structure-tool,
+.context-library,
+.style-context {
+  border-top: 1px solid var(--line);
+  margin: 18px 0;
+  padding-top: 6px;
+}
+.quick-save > summary,
+.structure-tool > summary,
+.context-library > summary,
+.style-context > summary {
+  padding: 10px 0;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 40px;
+}
+.quick-save-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quick-save-options .button {
+  justify-content: flex-start;
+}
+.context-library article,
+.thought-unit,
+.connector-intelligence article,
+.guide-rule {
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.context-library article > b {
+  display: block;
+  margin-top: 8px;
+}
+.context-library article > p,
+.thought-unit > p {
+  white-space: pre-wrap;
+}
+.library-entry {
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+.library-entry h3 {
+  margin-bottom: 0;
+}
+.library-entry .preserve {
+  font-family: "Literata Variable", Georgia, serif;
+  font-size: 17px;
+  line-height: 1.7;
+}
+.library-entry .tag {
+  flex-shrink: 0;
+}
+.inline-confirm {
+  padding: 14px;
+  background: var(--accent-light);
+  margin-top: 12px;
+}
+.style-context > div {
+  margin: 12px 0;
+  font-size: 13px;
+}
+.style-context > div p {
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+.style-context details p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.style-context small {
+  color: var(--muted);
+}
+.structure-tool details {
+  margin: 14px 0;
+}
+.structure-tool details > summary {
+  font-size: 13px;
+  min-height: 40px;
+  padding: 10px 0;
+}
+.structure-tool .field {
+  margin: 17px 0;
+}
+.structure-tool textarea {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.structure-tool .button {
+  font-size: 12px;
+  min-height: 40px;
+}
+.structure-tool .row {
+  flex-wrap: wrap;
+}
+.structure-principle {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.relationship-hint p {
+  font-size: 12px;
+}
+.scaffold-preview {
+  background: var(--accent-light);
+  border-radius: 6px;
+  padding: 15px;
+  margin: 18px 0;
+}
+.scaffold-preview p {
+  font-family: "Literata Variable", Georgia, serif;
+  font-size: 17px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+.scaffold-preview .scaffold-template {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+.scaffold-preview small {
+  font-size: 12px;
+  color: var(--muted);
+}

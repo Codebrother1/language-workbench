@@ -1,3 +1,10 @@
+import {
+  personalLibrarySchema,
+  resolvedWritingStyleSchema,
+} from "./personal-library";
+import { structureDraftSchema, structureRequestSchema } from "./composition";
+export * from "./personal-library";
+export * from "./composition";
 import { z } from "zod";
 import {
   modelRefSchema,
@@ -110,6 +117,7 @@ export const editTargetSchema = z.object({
 export type EditTarget = z.infer<typeof editTargetSchema>;
 export type SelectionTarget = EditTarget;
 export const workbenchRunSchema = z.object({
+  structure: structureRequestSchema.optional(),
   lens: lensOptionsSchema.optional(),
   id: z.string(),
   createdAt: z.string(),
@@ -126,6 +134,7 @@ export const workbenchRunSchema = z.object({
 });
 export type WorkbenchRun = z.infer<typeof workbenchRunSchema>;
 export const sectionWorkbenchSchema = z.object({
+  structure: structureDraftSchema.optional(),
   instruction: z.string().default(""),
   answer: z.string().default(""),
   action: z.string().default("coach"),
@@ -310,9 +319,12 @@ export const writingActions = [
   "combine",
   "reference_flip",
   "break_template",
+  "structure",
 ] as const;
 export type WritingAction = (typeof writingActions)[number];
 export const aiContextSchema = z.object({
+  personalLibrary: personalLibrarySchema.optional(),
+  resolvedStyle: resolvedWritingStyleSchema.optional(),
   document: documentSchema,
   styleDNA: styleDNASchema,
   knowledgePacks: z.array(knowledgePackSchema),
@@ -320,6 +332,7 @@ export const aiContextSchema = z.object({
 });
 export type AIContext = z.infer<typeof aiContextSchema>;
 export const aiRequestSchema = z.object({
+  structure: structureRequestSchema.optional(),
   readContext: aiContextSchema,
   editTarget: editTargetSchema,
   action: z.enum(writingActions),
@@ -810,3 +823,5 @@ export function defaultSettings(): Settings {
     theme: "light",
   };
 }
+
+export * from "./composition-knowledge";
