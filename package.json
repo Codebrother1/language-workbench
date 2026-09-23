@@ -1,0 +1,14 @@
+{
+  "name": "language-workbench", "private": true, "version": "0.1.0", "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"pnpm --filter @workbench/server dev\" \"pnpm --filter @workbench/web dev\"",
+    "build": "pnpm --filter @workbench/web build && pnpm --filter @workbench/server build",
+    "start": "pnpm --filter @workbench/server start",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": { "@playwright/test": "^1.56.0", "@types/node": "^24.0.0", "concurrently": "^9.2.0", "typescript": "^5.9.0", "vitest": "^3.2.0", "tsx": "^4.20.0" }
+}
