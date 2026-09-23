@@ -9,8 +9,16 @@ import {
   uid,
   type Document,
   type Settings,
+  type ModelDescriptor,
+  type SectionWorkbench,
 } from "@workbench/domain";
 import { APIError } from "./errors.js";
+
+export type ProviderState = {
+  enabled: boolean;
+  models: ModelDescriptor[];
+  lastRefreshedAt: string | null;
+};
 
 export function createRepository(dataDir: string) {
   return new Repository(dataDir);
@@ -24,7 +32,8 @@ export class Repository {
     this.db = new DatabaseSync(resolve(dataDir, "workbench.sqlite"));
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK (id=1), body TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK (id=1), body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS provider_catalog (id TEXT PRIMARY KEY, body TEXT NOT NULL);`);
   }
   list(): Document[] {
     return this.db
@@ -92,8 +101,55 @@ export class Repository {
           ? null
           : (sectionIds.get(target.sectionId) ?? null),
     });
+    const runIds = new Map(
+      [
+        ...(doc.workbench?.runs ?? []),
+        ...doc.sections.flatMap((s) => s.workbench?.runs ?? []),
+      ].map((r) => [r.id, uid()]),
+    );
+    const proposalIds = new Map(
+      [
+        ...doc.history.map((h) => h.id),
+        ...[
+          ...(doc.workbench?.runs ?? []),
+          ...doc.sections.flatMap((s) => s.workbench?.runs ?? []),
+        ].flatMap((r) => r.response.proposals.map((p) => p.id)),
+      ].map((id) => [id, uid()]),
+    );
+    const remapWorkbench = (
+      w: SectionWorkbench | undefined,
+    ): SectionWorkbench | undefined =>
+      w && {
+        ...w,
+        proposalStates: Object.fromEntries(
+          Object.entries(w.proposalStates).map(([id, state]) => [
+            proposalIds.get(id) ?? id,
+            state,
+          ]),
+        ),
+        activeRunId: w.activeRunId ? (runIds.get(w.activeRunId) ?? null) : null,
+        runs: w.runs.map((r) => ({
+          ...r,
+          id: runIds.get(r.id)!,
+          target: remapTarget(r.target),
+          response: {
+            ...r.response,
+            proposals: r.response.proposals.map((p) => ({
+              ...p,
+              id: proposalIds.get(p.id)!,
+            })),
+            findings: r.response.findings.map((f) => ({
+              ...f,
+              sectionId: f.sectionId
+                ? (sectionIds.get(f.sectionId) ?? null)
+                : null,
+            })),
+          },
+        })),
+      };
     return this.insert({
       ...doc,
+      workbench: remapWorkbench(doc.workbench),
       id,
       revision: 0,
       createdAt: now,
@@ -102,16 +158,19 @@ export class Repository {
       sections: doc.sections.map((s) => ({
         ...s,
         id: sectionIds.get(s.id)!,
+        workbench: remapWorkbench(s.workbench),
         variants: s.variants.map((v) => ({
           ...v,
           id: uid(),
           target: remapTarget(v.target),
+          runId: v.runId ? runIds.get(v.runId) : undefined,
         })),
       })),
       history: doc.history.map((h) => ({
         ...h,
-        id: uid(),
+        id: proposalIds.get(h.id)!,
         target: remapTarget(h.target),
+        runId: h.runId ? runIds.get(h.runId) : undefined,
       })),
     });
   }
@@ -129,6 +188,19 @@ export class Repository {
       )
       .run(JSON.stringify(settings));
     return settings;
+  }
+  getProviderState(id: string): ProviderState | undefined {
+    const row = this.db
+      .prepare("SELECT body FROM provider_catalog WHERE id=?")
+      .get(id);
+    return row ? JSON.parse(String(row.body)) : undefined;
+  }
+  saveProviderState(id: string, state: ProviderState): void {
+    this.db
+      .prepare(
+        "INSERT INTO provider_catalog (id,body) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+      )
+      .run(id, JSON.stringify(state));
   }
   close(): void {
     this.db.close();

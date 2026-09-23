@@ -1,3 +1,4 @@
+import { ProviderSettings } from "./ProviderSettings";
 import { useState } from "react";
 import { Plus, Trash2, ExternalLink, Copy, RefreshCw } from "lucide-react";
 import {
@@ -496,10 +497,13 @@ export function UtilityPanel({ w }: { w: Workspace }) {
     style: "Style DNA & knowledge",
     radar: "Language radar",
     history: "Operation history",
+    providers: "AI providers & routing",
   }[w.panel];
   return (
     <Dialog title={title} close={() => w.setPanel(null)} wide>
-      {w.panel === "brief" ? (
+      {w.panel === "providers" ? (
+        <ProviderSettings w={w} />
+      ) : w.panel === "brief" ? (
         <Brief w={w} />
       ) : w.panel === "sources" ? (
         <Sources w={w} />

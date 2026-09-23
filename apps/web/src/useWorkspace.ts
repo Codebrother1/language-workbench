@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type SetStateAction,
+} from "react";
 import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorState } from "@tiptap/pm/state";
@@ -20,7 +26,13 @@ import {
   validateTarget,
   paragraphs,
   documentSchema,
-  structuralMechanisms,
+  type SectionWorkbench,
+  type ModelRef,
+  type ProviderCatalog,
+  type LensOptions,
+  type AIRequest,
+  resolveModel,
+  routingPreferencesSchema,
 } from "./domain";
 import {
   WritingDocument,
@@ -33,6 +45,17 @@ import {
   sectionLocation,
   targetRange,
 } from "./editor";
+import {
+  getWorkbench,
+  updateWorkbench,
+  isLensTarget as detectsLensTarget,
+  makeRun,
+  appendRun,
+  editRunProposal,
+  forkWorkbench,
+  inspectRun,
+  type RunCapture,
+} from "./workspace-helpers";
 export async function api<T>(
   path: string,
   method = "GET",
@@ -53,7 +76,8 @@ export async function api<T>(
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
-export type Panel = "brief" | "sources" | "style" | "radar" | "history" | null;
+export type Panel =
+  "brief" | "sources" | "style" | "radar" | "history" | "providers" | null;
 function forkDocument(doc: Document, title = doc.title): Document {
   const id = uid();
   return {
@@ -61,9 +85,11 @@ function forkDocument(doc: Document, title = doc.title): Document {
     id,
     title,
     revision: 0,
+    workbench: forkWorkbench(doc.workbench, id),
     createdAt: new Date().toISOString(),
     sections: doc.sections.map((s) => ({
       ...s,
+      workbench: forkWorkbench(s.workbench, id),
       variants: s.variants.map((v) => ({
         ...v,
         target: { ...v.target, documentId: id },
@@ -102,18 +128,16 @@ export function useWorkspace() {
   const [target, setTarget] = useState<EditTarget | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [nav, setNav] = useState(() => window.innerWidth > 900);
-  const [response, setResponse] = useState<AIResponse | null>(null);
-  const [responseTarget, setResponseTarget] = useState<EditTarget | null>(null);
   const [busy, setBusy] = useState(false);
-  const [answer, setAnswer] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [action, setAction] = useState<WritingAction>("coach");
-  const [controls, setControls] = useState<
-    Record<string, number | string | boolean>
-  >({ mechanism: structuralMechanisms[0].name });
-  const [proposalStates, setProposalStates] = useState<Record<string, string>>(
-    {},
-  );
+  const requestBusy = useRef(false);
+  const navigating = useRef(false);
+  const [documentWorkbench, setDocumentWorkbench] = useState(false);
+  const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
+  const refreshCatalog = useCallback(async () => {
+    const next = await api<ProviderCatalog>("/providers");
+    setCatalog(next);
+    return next;
+  }, []);
   const updateRef = useRef<(fn: (d: Document) => Document) => void>(() => {});
   const selectRef = useRef<() => void>(() => {});
   const editor = useEditor({
@@ -219,24 +243,24 @@ export function useWorkspace() {
     if (!editor || editor.view.composing) return;
     const t = cursorTarget(editor, current.current);
     setTarget(t);
-    setAction((a) =>
-      t?.scope === "word" ? "words" : a === "words" ? "coach" : a,
-    );
+    setDocumentWorkbench(false);
   };
   useEffect(() => {
     if (!editor || isReady.current) return;
     let alive = true;
     (async () => {
       try {
-        const [ds, s, h] = await Promise.all([
+        const [ds, s, h, c] = await Promise.all([
           api<Document[]>("/documents"),
           api<Settings>("/settings"),
           api<typeof health>("/health"),
+          api<ProviderCatalog>("/providers").catch(() => null),
         ]);
         if (!alive) return;
         setSettings(s);
         settingsRef.current = s;
         setHealth(h);
+        setCatalog(c);
         let active: Document;
         if (dirty.current === 0 && ds.length) active = ds[0];
         else {
@@ -286,7 +310,7 @@ export function useWorkspace() {
   }, [editor, flush]);
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
-      if (dirty.current > saved.current) {
+      if (dirty.current > saved.current || requestBusy.current) {
         e.preventDefault();
         e.returnValue = "";
       }
@@ -325,19 +349,33 @@ export function useWorkspace() {
       );
     }
     setTarget(editor ? cursorTarget(editor, next) : null);
-    setResponse(null);
-    setResponseTarget(null);
-    setAnswer("");
+    setDocumentWorkbench(false);
     setSaveState("Saved");
   };
   const navigate = async (id: string) => {
+    if (requestBusy.current || navigating.current)
+      return setError(
+        "Finish the current operation before switching documents. Section navigation is still available.",
+      );
+    navigating.current = true;
     try {
       await flush();
-      const next = documents.find((d) => d.id === id);
+      const next =
+        current.current.id === id
+          ? current.current
+          : documents.find((d) => d.id === id);
       if (next) load(next);
-    } catch {}
+    } catch {
+    } finally {
+      navigating.current = false;
+    }
   };
   const create = async (duplicate = false) => {
+    if (requestBusy.current || navigating.current)
+      return setError(
+        "Finish the current operation before switching documents. Section navigation is still available.",
+      );
+    navigating.current = true;
     try {
       await flush();
       const next = duplicate
@@ -354,9 +392,16 @@ export function useWorkspace() {
       editor?.commands.focus("start");
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      navigating.current = false;
     }
   };
   const remove = async () => {
+    if (requestBusy.current || navigating.current)
+      return setError(
+        "Finish the current operation before switching documents. Section navigation is still available.",
+      );
+    navigating.current = true;
     try {
       await flush();
       await api("/documents/" + current.current.id, "DELETE");
@@ -370,9 +415,16 @@ export function useWorkspace() {
       }
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      navigating.current = false;
     }
   };
   const importDoc = async (file: File) => {
+    if (requestBusy.current || navigating.current)
+      return setError(
+        "Finish the current operation before switching documents. Section navigation is still available.",
+      );
+    navigating.current = true;
     try {
       await flush();
       const parsed = documentSchema.parse(JSON.parse(await file.text()));
@@ -385,9 +437,12 @@ export function useWorkspace() {
       load(next);
     } catch (e) {
       setError("Import failed: " + (e as Error).message);
+    } finally {
+      navigating.current = false;
     }
   };
   const focusSection = (id: string) => {
+    setDocumentWorkbench(false);
     if (!editor) return;
     const loc = sectionLocation(editor, id);
     if (loc) {
@@ -464,6 +519,17 @@ export function useWorkspace() {
       content: [...a.content, ...b.content],
       notes: [a.notes, b.notes].filter(Boolean).join("\n"),
       variants: [...a.variants, ...b.variants],
+      ...(a.workbench || b.workbench
+        ? {
+            workbench: {
+              ...getWorkbench(current.current, a.id),
+              runs: [
+                ...getWorkbench(current.current, a.id).runs,
+                ...getWorkbench(current.current, b.id).runs,
+              ],
+            },
+          }
+        : {}),
     };
     sync({
       ...current.current,
@@ -471,16 +537,104 @@ export function useWorkspace() {
     });
     focusSection(id);
   };
-  const ask = async (
+  const sectionId = documentWorkbench
+    ? null
+    : (target?.sectionId ?? doc.sections[0]?.id ?? null);
+  const currentWorkbench = getWorkbench(doc, sectionId);
+  const localHistory = currentWorkbench.runs;
+  const activeRun =
+    localHistory.find((run) => run.id === currentWorkbench.activeRunId) ?? null;
+  const response = activeRun?.response ?? null;
+  const responseTarget = activeRun?.target ?? null;
+  const {
+    instruction,
+    answer,
+    controls,
+    lens,
+    oneOffModel,
+    compareModels,
+    proposalStates,
+  } = currentWorkbench;
+  const isLensTarget =
+    !documentWorkbench &&
+    detectsLensTarget(target, !!editor && !editor.state.selection.empty);
+  // Word targeting is a view of the saved action, not a destructive change to it.
+  const action = (
+    isLensTarget ? "words" : currentWorkbench.action
+  ) as WritingAction;
+  const patchWorkbench = (
+    fn: (wb: SectionWorkbench) => SectionWorkbench,
+    owner = sectionId,
+  ) => update((d) => updateWorkbench(d, owner, fn));
+  const setField = <K extends keyof SectionWorkbench>(
+    key: K,
+    value: SetStateAction<SectionWorkbench[K]>,
+  ) =>
+    patchWorkbench((wb) => ({
+      ...wb,
+      [key]:
+        typeof value === "function"
+          ? (value as (old: SectionWorkbench[K]) => SectionWorkbench[K])(
+              wb[key],
+            )
+          : value,
+    }));
+  const setInstruction = (v: SetStateAction<string>) =>
+    setField("instruction", v);
+  const setAnswer = (v: SetStateAction<string>) => setField("answer", v);
+  const setAction = (v: SetStateAction<WritingAction>) =>
+    patchWorkbench((wb) => ({
+      ...wb,
+      action: typeof v === "function" ? v(wb.action as WritingAction) : v,
+    }));
+  const setControls = (v: SetStateAction<SectionWorkbench["controls"]>) =>
+    setField("controls", v);
+  const setLens = (v: SetStateAction<LensOptions>) => setField("lens", v);
+  const setOneOffModel = (v: ModelRef | null) => setField("oneOffModel", v);
+  const setCompareModels = (v: SetStateAction<ModelRef[]>) =>
+    setField("compareModels", v);
+  const selectRun = (id: string) => patchWorkbench((wb) => inspectRun(wb, id));
+  const selectedSection = doc.sections.find((s) => s.id === sectionId);
+  const effectiveModel = resolveModel({
+    oneOff: oneOffModel,
+    sectionOverride: selectedSection?.modelOverride,
+    sectionType: selectedSection?.kind,
+    task: action,
+    documentDefault: doc.defaultModel,
+    preferences: settings.routing,
+    applicationDefault: catalog?.applicationDefault ?? {
+      providerId: "mock",
+      modelId: "conservative",
+    },
+  });
+  const setSectionModel = (model: ModelRef | null) => {
+    if (sectionId)
+      update((d) => ({
+        ...d,
+        sections: d.sections.map((s) =>
+          s.id === sectionId ? { ...s, modelOverride: model } : s,
+        ),
+      }));
+  };
+  const setDocumentModel = (model: ModelRef | null) =>
+    update((d) => ({ ...d, defaultModel: model }));
+
+  const operate = async (
     stage: "diagnose" | "propose",
     override?: WritingAction,
+    lensMode?: LensOptions["mode"],
+    comparing = false,
+    explicitTarget?: EditTarget,
   ) => {
-    const chosen = override ?? action;
-    const t = override
-      ? documentTarget(current.current)
-      : stage === "propose"
-        ? responseTarget
-        : target;
+    if (requestBusy.current || navigating.current) return;
+    const chosen = lensMode ? "words" : (override ?? action);
+    const t =
+      explicitTarget ??
+      (override
+        ? documentTarget(current.current)
+        : lensMode || comparing || stage === "diagnose"
+          ? target
+          : responseTarget);
     if (!t)
       return setError(
         "Select text within one section. Cross-section selections are read-only.",
@@ -489,73 +643,144 @@ export function useWorkspace() {
       return setError(
         "Whole-piece work is analysis-only. Select a passage for a local proposal.",
       );
+    const owner = t.scope === "document" ? null : t.sectionId;
+    const wb = getWorkbench(current.current, owner);
+    const selectedModels = [...wb.compareModels];
+    if (comparing && (selectedModels.length < 2 || selectedModels.length > 4))
+      return setError("Select between two and four models to compare.");
+    if (override) {
+      setDocumentWorkbench(true);
+      update((d) =>
+        updateWorkbench(d, null, (local) => ({ ...local, action: chosen })),
+      );
+    }
+    const section = current.current.sections.find((s) => s.id === owner);
+    const route = resolveModel({
+      oneOff: wb.oneOffModel,
+      sectionOverride: section?.modelOverride,
+      sectionType: section?.kind,
+      task: chosen,
+      documentDefault: current.current.defaultModel,
+      preferences: settingsRef.current.routing,
+      applicationDefault: catalog?.applicationDefault ?? {
+        providerId: "mock",
+        modelId: "conservative",
+      },
+    });
+    const capture: RunCapture = {
+      ...(chosen === "words"
+        ? {
+            lens: {
+              ...wb.lens,
+              mode:
+                lensMode ??
+                (stage === "diagnose"
+                  ? ("explore" as const)
+                  : ("replace" as const)),
+            },
+          }
+        : {}),
+      target: t,
+      action: chosen,
+      instruction: wb.instruction,
+      answer: wb.answer,
+      controls: { ...wb.controls },
+      model: catalog ? route.model : null,
+      question:
+        wb.runs.find((r) => r.id === wb.activeRunId)?.response.question ?? "",
+    };
+    requestBusy.current = true;
     setBusy(true);
     setError("");
     try {
+      await settingsQueue.current;
       validateTarget(current.current, t);
-      const result = await api<AIResponse>("/ai", "POST", {
+      const request: AIRequest = {
         readContext: {
           document: current.current,
-          styleDNA: settings.styleDNA,
-          knowledgePacks: settings.knowledgePacks,
-          approvedLanguage: settings.radar.filter((r) => r.status !== "maybe"),
+          styleDNA: settingsRef.current.styleDNA,
+          knowledgePacks: settingsRef.current.knowledgePacks,
+          approvedLanguage: settingsRef.current.radar.filter(
+            (r) => r.status !== "maybe",
+          ),
         },
         editTarget: t,
         action: chosen,
         stage,
-        instruction,
-        answer,
-        controls,
+        instruction: capture.instruction,
+        answer: capture.answer,
+        controls: capture.controls,
         variantCount: 2,
-      });
-      if (current.current.id !== t.documentId) return;
-      // Provider IDs identify a response, not a durable user iteration.
-      result.proposals = result.proposals.map((p) => ({ ...p, id: uid() }));
-      setResponse(result);
-      setResponseTarget(t);
-      setProposalStates({});
-      if (stage === "diagnose") setAnswer("");
-      if (result.proposals.length)
-        update((d) => ({
-          ...d,
-          history: [
-            ...d.history,
-            ...result.proposals.map((p) => ({
-              id: p.id,
-              createdAt: new Date().toISOString(),
-              target: t,
-              instruction,
-              coachQuestion: result.question || response?.question || "",
-              userAnswer: answer,
-              proposal: p.text,
-              state: "proposed" as const,
-              provider: result.provider,
-            })),
-          ],
-        }));
+        modelOverride: comparing ? null : wb.oneOffModel,
+        ...(chosen === "words"
+          ? {
+              lens: {
+                ...wb.lens,
+                mode:
+                  lensMode ?? (stage === "diagnose" ? "explore" : "replace"),
+              },
+            }
+          : {}),
+      };
+      // Consume only the captured single-operation override. Persistent routes are untouched.
+      if (!comparing && wb.oneOffModel)
+        update((d) =>
+          updateWorkbench(d, owner, (local) => ({
+            ...local,
+            oneOffModel: null,
+          })),
+        );
+      if (lensMode)
+        update((d) =>
+          updateWorkbench(d, owner, (local) => ({
+            ...local,
+            lens: { ...local.lens, mode: lensMode },
+          })),
+        );
+      if (comparing) {
+        const result = await api<{
+          results: { model: ModelRef; response?: AIResponse; error?: string }[];
+        }>("/ai/compare", "POST", { request, models: selectedModels });
+        const failures: string[] = [];
+        for (const item of result.results) {
+          if (!item.response) {
+            failures.push(item.error ?? "A comparison model failed.");
+            continue;
+          }
+          const run = makeRun(
+            { ...capture, model: item.model },
+            { ...item.response, model: item.response.model ?? item.model },
+          );
+          update((d) => appendRun(d, run, capture.question, true));
+        }
+        if (failures.length) setError(failures.join(" "));
+      } else {
+        const result = await api<AIResponse>("/ai", "POST", request);
+        const run = makeRun(capture, result);
+        update((d) => appendRun(d, run, capture.question));
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      requestBusy.current = false;
       setBusy(false);
     }
   };
-  const proposalText = (id: string, text: string) => {
-    setResponse((r) =>
-      r
-        ? {
-            ...r,
-            proposals: r.proposals.map((p) =>
-              p.id === id ? { ...p, text } : p,
-            ),
-          }
-        : r,
+  const ask = (stage: "diagnose" | "propose", override?: WritingAction) =>
+    operate(stage, override);
+  const askLens = (mode: LensOptions["mode"], explicitTarget?: EditTarget) =>
+    operate(
+      mode === "explore" ? "diagnose" : "propose",
+      undefined,
+      mode,
+      false,
+      explicitTarget,
     );
-    update((d) => ({
-      ...d,
-      history: d.history.map((h) =>
-        h.id === id ? { ...h, proposal: text } : h,
-      ),
-    }));
+  const compare = () =>
+    operate("propose", undefined, isLensTarget ? "replace" : undefined, true);
+  const proposalText = (id: string, text: string) => {
+    if (activeRun)
+      update((d) => editRunProposal(d, sectionId, activeRun.id, id, text));
   };
   const applyText = (t: EditTarget, text: string, label: string) => {
     if (!editor) throw new Error("Editor unavailable");
@@ -617,6 +842,8 @@ export function useWorkspace() {
           text: p.text,
           target: t,
           origin: "ai",
+          ...(activeRun?.model ? { model: activeRun.model } : {}),
+          ...(activeRun ? { runId: activeRun.id } : {}),
           createdAt: new Date().toISOString(),
         };
         update((d) => ({
@@ -632,7 +859,13 @@ export function useWorkspace() {
         ...d,
         history: d.history.map((h) => (h.id === id ? { ...h, state } : h)),
       }));
-      setProposalStates((ps) => ({ ...ps, [id]: state }));
+      patchWorkbench(
+        (wb) => ({
+          ...wb,
+          proposalStates: { ...wb.proposalStates, [id]: state },
+        }),
+        t.scope === "document" ? null : t.sectionId,
+      );
     } catch (e) {
       setError((e as Error).message);
     }
@@ -661,14 +894,35 @@ export function useWorkspace() {
       setError("Preferences not saved: " + (e as Error).message);
     }
   };
+  const setSectionTypeModel = (model: ModelRef | null) => {
+    if (!selectedSection) return;
+    const routing = routingPreferencesSchema.parse(
+      settingsRef.current.routing ?? {},
+    );
+    if (model) routing.sectionTypeDefaults[selectedSection.kind] = model;
+    else delete routing.sectionTypeDefaults[selectedSection.kind];
+    return saveSettings({ ...settingsRef.current, routing });
+  };
+  const setTaskModel = (task: string, model: ModelRef | null) => {
+    const routing = routingPreferencesSchema.parse(
+      settingsRef.current.routing ?? {},
+    );
+    if (model) routing.taskDefaults[task] = model;
+    else delete routing.taskDefaults[task];
+    return saveSettings({ ...settingsRef.current, routing });
+  };
   const refreshRadar = async (query: string) => {
-    if (!health.webResearch) return;
+    if (!health.webResearch || requestBusy.current || navigating.current)
+      return;
+    requestBusy.current = true;
     setBusy(true);
     try {
+      await flush();
+      await settingsQueue.current;
       const { items } = await api<{ items: Settings["radar"] }>(
         "/culture/refresh",
         "POST",
-        { query },
+        { query, documentId: current.current.id },
       );
       await saveSettings({
         ...settingsRef.current,
@@ -682,6 +936,7 @@ export function useWorkspace() {
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      requestBusy.current = false;
       setBusy(false);
     }
   };
@@ -713,6 +968,26 @@ export function useWorkspace() {
   };
   return {
     doc,
+    catalog,
+    refreshCatalog,
+    effectiveModel,
+    setSectionModel,
+    setDocumentModel,
+    setSectionTypeModel,
+    setTaskModel,
+    oneOffModel,
+    setOneOffModel,
+    compareModels,
+    setCompareModels,
+    compare,
+    currentWorkbench,
+    localHistory,
+    activeRun,
+    selectRun,
+    lens,
+    setLens,
+    isLensTarget,
+    askLens,
     documents,
     settings,
     health,

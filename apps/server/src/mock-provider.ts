@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   labFor,
   sectionText,
-  validateAIRequest,
   type AIRequest,
   type AIResponse,
   type LLMProvider,
@@ -14,6 +13,7 @@ import {
   protectedQuotePattern,
   proposalViolation,
   validateProviderResponse,
+  validateWritingRequest,
 } from "./provider-policy.js";
 
 const lexicon: AIResponse["lexical"] = [
@@ -54,6 +54,50 @@ const lexicon: AIResponse["lexical"] = [
     nuance: "Lower confidence; can carry doubt or a negative implication.",
     register: "neutral",
     example: "I suspected the battery was empty.",
+  },
+];
+const performanceLexicon: AIResponse["lexical"] = [
+  {
+    term: "posturing",
+    meaning: "Presenting an attitude or identity for effect.",
+    nuance:
+      "Emphasizes an affected stance, not literal role-play; more judgmental than pretending.",
+    register: "neutral / critical",
+    example: "The display looked like posturing.",
+  },
+  {
+    term: "pretending",
+    meaning: "Acting as though something were true when it is not.",
+    nuance:
+      "Broad, plainer than larping; loses the specific role-playing or performative-identity association.",
+    register: "plain",
+    example: "They were pretending to be experts.",
+  },
+  {
+    term: "masquerading",
+    meaning: "Presenting oneself as someone or something else.",
+    nuance:
+      "Suggests disguise or deceptive presentation; stronger accusation than playful role-play.",
+    register: "formal / figurative",
+    example: "The advertisement was masquerading as advice.",
+  },
+  {
+    term: "cosplaying",
+    meaning:
+      "Dressing or performing as a character; figuratively, adopting the trappings of an identity.",
+    nuance:
+      "Often playful, but figurative criticism can trivialize an identity. Not a claim about current popularity.",
+    register: "informal",
+    example: "They were cosplaying as detectives.",
+  },
+  {
+    term: "playing at being",
+    meaning:
+      "Taking on a role without fully inhabiting its responsibilities or reality.",
+    nuance:
+      "A longer, often dismissive phrase; not a literal historical idiom or exact synonym in every context.",
+    register: "conversational phrase",
+    example: "They were playing at being experts.",
   },
 ];
 const actionQuestions: Partial<Record<AIRequest["action"], string>> = {
@@ -254,10 +298,13 @@ function offlineEdit(
 }
 
 export class MockProvider implements LLMProvider {
+  constructor(
+    private readonly model: "conservative" | "plain" = "conservative",
+  ) {}
   readonly name = "mock";
   readonly capabilities = { webResearch: false, structuredGeneration: true };
   async run(request: AIRequest): Promise<AIResponse> {
-    validateAIRequest(request);
+    validateWritingRequest(request);
     const section = request.readContext.document.sections.find(
       (s) => s.id === request.editTarget.sectionId,
     );
@@ -280,12 +327,26 @@ export class MockProvider implements LLMProvider {
     )
       output.diagnosis +=
         " No configured pattern was detected. That is not a verdict on quality.";
-    if (request.action === "words") {
+    if (request.action === "words" || request.lens) {
       const word = request.editTarget.text
         .trim()
         .toLowerCase()
         .replace(/[.,!?;:]$/, "");
-      if (lexicon.some((entry) => entry.term === word)) {
+      if (word === "larping" && request.lens) {
+        const max = { word: 1, phrase: 8, expression: 24 }[request.lens.shape];
+        output.lexical = performanceLexicon
+          .filter((e) => e.term.split(/\s+/).length <= max)
+          .map((e) => ({ ...e }));
+        if (this.model === "plain")
+          output.lexical.sort(
+            (a, b) =>
+              Number(b.term === "pretending") - Number(a.term === "pretending"),
+          );
+        output.diagnosis +=
+          " Curated offline distinctions: literal live-action role-play differs from figurative performative identity. Surrounding context may change which meaning applies; these are not interchangeable synonyms.";
+        output.mechanism +=
+          " Historical or persona flavor is a modern approximation; no historical authenticity, live usage or trend verification is claimed.";
+      } else if (lexicon.some((entry) => entry.term === word)) {
         output.lexical = lexicon.map((entry) => ({ ...entry }));
         output.diagnosis +=
           " These curated entries distinguish assumption, inference and conviction; they are not interchangeable synonyms.";
@@ -297,6 +358,31 @@ export class MockProvider implements LLMProvider {
       }
       output.question =
         "Do you mean an untested premise, a reasoned inference, or personal conviction? If none fits, describe your intended meaning.";
+    }
+    if (request.lens) {
+      output.question = "";
+      if (request.lens.mode === "replace") {
+        if (request.lens.fidelity === "exact")
+          output.missingIngredients.push(
+            "The curated offline dictionary cannot guarantee an exact meaning-and-connotation match; no replacement is proposed.",
+          );
+        else {
+          output.proposals = output.lexical
+            .filter(
+              (e) =>
+                e.term !== request.editTarget.text.toLowerCase() &&
+                !proposalViolation(request, e.term),
+            )
+            .slice(0, request.variantCount)
+            .map((entry, i) => ({
+              id: `offline-lens-${this.model}-${i}`,
+              label: entry.register,
+              text: caseLike(request.editTarget.text, entry.term),
+              explanation: entry.nuance,
+            }));
+        }
+      }
+      return validateProviderResponse(request, output, "mock");
     }
     const allowed =
       request.editTarget.scope !== "document" &&

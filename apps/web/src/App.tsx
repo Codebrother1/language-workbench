@@ -389,6 +389,15 @@ export default function App() {
                 aria-label="Document commands"
               >
                 <Button
+                  onClick={() => {
+                    w.setPanel("providers");
+                    setMenu(false);
+                  }}
+                >
+                  <Settings2 size={15} />
+                  AI providers
+                </Button>
+                <Button
                   disabled={!w.ready}
                   onClick={() => {
                     w.create();

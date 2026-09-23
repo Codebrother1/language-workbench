@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import dotenv from "dotenv";
 
+export const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+
 // src/ and dist/ are siblings: this works under tsx, tsup, and any process cwd.
 export const repoRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -20,6 +22,6 @@ export function loadConfig() {
     dataDir: resolve(repoRoot, process.env.DATA_DIR || "data"),
     webDir: resolve(repoRoot, "apps/web/dist"),
     apiKey: process.env.OPENAI_API_KEY?.trim() || undefined,
-    model: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+    model: process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
   };
 }

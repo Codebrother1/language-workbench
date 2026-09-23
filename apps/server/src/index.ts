@@ -4,22 +4,27 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createRepository } from "./repository.js";
 import { MockProvider } from "./mock-provider.js";
-import { OpenAIProvider } from "./openai-provider.js";
+import { ProviderRegistry } from "./provider-registry.js";
 export { createApp } from "./app.js";
 export { createRepository, Repository } from "./repository.js";
 export { MockProvider } from "./mock-provider.js";
 export { OpenAIProvider } from "./openai-provider.js";
+export { ProviderRegistry } from "./provider-registry.js";
 
 export function startServer() {
   const config = loadConfig();
   const repository = createRepository(config.dataDir);
-  const provider = config.apiKey
-    ? new OpenAIProvider({ apiKey: config.apiKey, model: config.model })
-    : new MockProvider();
-  const app = createApp({ repository, provider, webDir: config.webDir });
+  const registry = new ProviderRegistry({ repository });
+  const provider = new MockProvider();
+  const app = createApp({
+    repository,
+    provider,
+    registry,
+    webDir: config.webDir,
+  });
   const server = app.listen(config.port, "127.0.0.1", () =>
     console.info(
-      `Language Workbench: http://127.0.0.1:${config.port} (${provider.name})`,
+      `Language Workbench: http://127.0.0.1:${config.port} (${registry.applicationDefault.providerId})`,
     ),
   );
   const shutdown = () =>

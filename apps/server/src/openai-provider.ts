@@ -1,3 +1,4 @@
+import { DEFAULT_OPENAI_MODEL } from "./config.js";
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
@@ -5,7 +6,6 @@ import {
   aiResponseSchema,
   radarItemSchema,
   uid,
-  validateAIRequest,
   type AIRequest,
   type AIResponse,
   type LanguageRadarItem,
@@ -14,7 +14,9 @@ import {
 import {
   developerInstructions,
   forbiddenPhrases,
+  protectedSurrounding,
   validateProviderResponse,
+  validateWritingRequest,
 } from "./provider-policy.js";
 
 // Keep generation's URL fields as strings: not all Responses models accept JSON-Schema format:uri.
@@ -30,6 +32,9 @@ const cultureSchema = z.object({
 });
 export type OpenAIClient = {
   responses: Pick<OpenAI["responses"], "parse" | "create">;
+  models?: {
+    list(): Promise<{ data: { id: string }[] } | AsyncIterable<{ id: string }>>;
+  };
 };
 export type OpenAIProviderOptions = {
   apiKey: string;
@@ -44,15 +49,24 @@ export class OpenAIProvider implements LLMProvider {
   private readonly model: string;
   constructor({
     apiKey,
-    model = "gpt-4.1-mini",
+    model = DEFAULT_OPENAI_MODEL,
     client,
   }: OpenAIProviderOptions) {
     this.client =
-      client ?? new OpenAI({ apiKey, timeout: 60_000, maxRetries: 1 });
+      client ??
+      new OpenAI({ apiKey, timeout: 60_000, maxRetries: 1, logLevel: "off" });
     this.model = model;
   }
+  async testConnection(): Promise<void> {
+    await this.client.responses.create({
+      model: this.model,
+      store: false,
+      max_output_tokens: 16,
+      input: "Reply OK.",
+    });
+  }
   async run(request: AIRequest): Promise<AIResponse> {
-    validateAIRequest(request);
+    validateWritingRequest(request);
     // The server filters in addition to telling the model what is authoritative.
     const context = {
       ...request.readContext,
@@ -74,11 +88,16 @@ export class OpenAIProvider implements LLMProvider {
           content: JSON.stringify({
             READ_CONTEXT: context,
             EDIT_TARGET: request.editTarget,
+            LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,
             action: request.action,
             stage: request.stage,
             instruction: request.instruction,
             humanAnswer: request.answer,
             controls: request.controls,
+            lens: request.lens,
+            PROTECTED_SURROUNDING: request.lens
+              ? protectedSurrounding(request)
+              : undefined,
             variantCount: request.variantCount,
             forbiddenPhrases: forbiddenPhrases(request),
           }),

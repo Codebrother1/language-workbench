@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { ModelControls, modelLabel } from "./ModelControls";
+import { WordLensControls, CandidatePreview } from "./WordLens";
+import { WorkbenchHistory } from "./WorkbenchHistory";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowRight,
   Check,
@@ -44,7 +47,27 @@ export function WritingLabShell({ w }: { w: Workspace }) {
     responseSection?.kind ?? "Freeform",
     responseTarget?.scope ?? "selection",
   );
+  const isLexicalRun =
+    w.activeRun?.action === "words" && Boolean(w.activeRun?.lens);
   const [compare, setCompare] = useState<string | null>(null);
+  const responseRef = useRef<HTMLElement>(null);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    // Scroll only the Inspector on completion; never focus or scroll the document.
+    if (wasBusy.current && !w.busy && responseRef.current) {
+      const panel = responseRef.current.closest(".inspector");
+      if (panel)
+        panel.scrollTo({
+          top:
+            panel.scrollTop +
+            responseRef.current.getBoundingClientRect().top -
+            panel.getBoundingClientRect().top -
+            16,
+          behavior: "smooth",
+        });
+    }
+    wasBusy.current = w.busy;
+  }, [w.busy]);
   const fullCopy = response
     ? [
         responseTarget?.scope !== "document" && responseTarget?.text
@@ -67,10 +90,12 @@ export function WritingLabShell({ w }: { w: Workspace }) {
     <aside className="inspector" aria-label="Contextual writing inspector">
       <div className="inspector-top">
         <span className="eyebrow">WRITING LAB</span>
-        <span className="provider" title="The configured AI provider">
-          {w.health.provider.toLowerCase().includes("mock")
+        <span className="provider" title="Provider for the current model route">
+          {w.effectiveModel.model.providerId === "mock"
             ? "Mock · local"
-            : w.health.provider}
+            : (w.catalog?.providers.find(
+                (p) => p.id === w.effectiveModel.model.providerId,
+              )?.displayName ?? w.effectiveModel.model.providerId)}
         </span>
       </div>
       <div className="lab-head">
@@ -78,7 +103,11 @@ export function WritingLabShell({ w }: { w: Workspace }) {
           {isWholeAnalysis
             ? "Whole-piece analysis"
             : hasTarget
-              ? lab.title
+              ? w.isLensTarget
+                ? target?.scope === "word"
+                  ? "Word intelligence · Lens"
+                  : "Phrase Lens"
+                : lab.title
               : "Your words, first"}
         </h2>
         <p>
@@ -89,7 +118,37 @@ export function WritingLabShell({ w }: { w: Workspace }) {
               : "Start writing. When you want a second look, place the cursor in a sentence or select a word or passage."}
         </p>
       </div>
-      {hasTarget && target && (
+      {(hasTarget || isWholeAnalysis) && (
+        <ModelControls
+          key={
+            isWholeAnalysis
+              ? "document"
+              : `${target?.sectionId}:${target?.scope}`
+          }
+          w={w}
+        />
+      )}
+      {isWholeAnalysis && (
+        <section className="document-analysis-controls">
+          <Field label="Whole-piece direction">
+            <textarea
+              rows={2}
+              value={w.instruction}
+              onChange={(e) => w.setInstruction(e.target.value)}
+              placeholder="What should the critique examine?"
+            />
+          </Field>
+          {target?.sectionId && (
+            <Button
+              className="full"
+              onClick={() => w.focusSection(target.sectionId!)}
+            >
+              Return to selected section
+            </Button>
+          )}
+        </section>
+      )}
+      {hasTarget && target && !isWholeAnalysis && (
         <>
           {isWholeAnalysis && (
             <h3 className="local-lab-title">{lab.title} · local target</h3>
@@ -135,98 +194,108 @@ export function WritingLabShell({ w }: { w: Workspace }) {
               )}
             </div>
           </div>
-          <Field label={`What should this ${targetLabel} do?`}>
-            <Select
-              aria-label="Writing action"
-              value={w.action}
-              onChange={(e) => w.setAction(e.target.value as WritingAction)}
-            >
-              {relevantActions.map((a) => (
-                <option key={a} value={a}>
-                  {a.replaceAll("_", " ")}
-                </option>
-              ))}
-              {!relevantActions.includes(w.action) && (
-                <option value={w.action}>
-                  {w.action.replaceAll("_", " ")}
-                </option>
-              )}
-            </Select>
-          </Field>
-          <details className="control-details all-actions">
-            <summary>
-              All actions <ChevronDown size={14} />
-            </summary>
-            <Field label="Explore another approach">
-              <Select
-                aria-label="All writing actions"
-                value={w.action}
-                onChange={(e) => w.setAction(e.target.value as WritingAction)}
-              >
-                <optgroup label={`For this ${targetLabel}`}>
-                  {lab.actions.map((a) => (
+          {w.isLensTarget ? (
+            <WordLensControls w={w} />
+          ) : (
+            <>
+              <Field label={`What should this ${targetLabel} do?`}>
+                <Select
+                  aria-label="Writing action"
+                  value={w.action}
+                  onChange={(e) => w.setAction(e.target.value as WritingAction)}
+                >
+                  {relevantActions.map((a) => (
                     <option key={a} value={a}>
                       {a.replaceAll("_", " ")}
                     </option>
                   ))}
-                </optgroup>
-                <optgroup label="Other local approaches">
-                  {writingActions
-                    .filter(
-                      (a) =>
-                        !lab.actions.includes(a) &&
-                        a !== "critique" &&
-                        a !== "break_template",
-                    )
-                    .map((a) => (
-                      <option key={a} value={a}>
-                        {a.replaceAll("_", " ")}
-                      </option>
-                    ))}
-                </optgroup>
-              </Select>
-            </Field>
-          </details>
-          <Field
-            label="Your direction"
-            hint="Your experience and intent lead. AI should ask, not invent."
-          >
-            <textarea
-              rows={2}
-              placeholder="What feels off? What must stay?"
-              value={w.instruction}
-              onChange={(e) => w.setInstruction(e.target.value)}
-            />
-          </Field>
-          <details className="control-details">
-            <summary>
-              Fine-tune the approach <ChevronDown size={14} />
-            </summary>
-            <div>
-              {lab.controls.map((c) => (
-                <Range
-                  key={c.key}
-                  label={c.label}
-                  low={c.low}
-                  high={c.high}
-                  value={Number(w.controls[c.key] ?? 50)}
-                  onChange={(v) => w.setControls({ ...w.controls, [c.key]: v })}
+                  {!relevantActions.includes(w.action) && (
+                    <option value={w.action}>
+                      {w.action.replaceAll("_", " ")}
+                    </option>
+                  )}
+                </Select>
+              </Field>
+              <details className="control-details all-actions">
+                <summary>
+                  All actions <ChevronDown size={14} />
+                </summary>
+                <Field label="Explore another approach">
+                  <Select
+                    aria-label="All writing actions"
+                    value={w.action}
+                    onChange={(e) =>
+                      w.setAction(e.target.value as WritingAction)
+                    }
+                  >
+                    <optgroup label={`For this ${targetLabel}`}>
+                      {lab.actions.map((a) => (
+                        <option key={a} value={a}>
+                          {a.replaceAll("_", " ")}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Other local approaches">
+                      {writingActions
+                        .filter(
+                          (a) =>
+                            !lab.actions.includes(a) &&
+                            a !== "critique" &&
+                            a !== "break_template",
+                        )
+                        .map((a) => (
+                          <option key={a} value={a}>
+                            {a.replaceAll("_", " ")}
+                          </option>
+                        ))}
+                    </optgroup>
+                  </Select>
+                </Field>
+              </details>
+              <Field
+                label="Your direction"
+                hint="Your experience and intent lead. AI should ask, not invent."
+              >
+                <textarea
+                  rows={2}
+                  placeholder="What feels off? What must stay?"
+                  value={w.instruction}
+                  onChange={(e) => w.setInstruction(e.target.value)}
                 />
-              ))}
-            </div>
-          </details>
-          <Button
-            className="primary full"
-            disabled={w.busy || !target || !target.text.trim() || !w.ready}
-            onClick={() => w.ask("diagnose")}
-          >
-            {w.busy ? "Thinking…" : `Diagnose this ${targetLabel}`}
-            <ArrowRight size={15} />
-          </Button>
+              </Field>
+              <details className="control-details">
+                <summary>
+                  Fine-tune the approach <ChevronDown size={14} />
+                </summary>
+                <div>
+                  {lab.controls.map((c) => (
+                    <Range
+                      key={c.key}
+                      label={c.label}
+                      low={c.low}
+                      high={c.high}
+                      value={Number(w.controls[c.key] ?? 50)}
+                      onChange={(v) =>
+                        w.setControls({ ...w.controls, [c.key]: v })
+                      }
+                    />
+                  ))}
+                </div>
+              </details>
+              <Button
+                className="primary full"
+                disabled={w.busy || !target || !target.text.trim() || !w.ready}
+                onClick={() => w.ask("diagnose")}
+              >
+                {w.busy ? "Thinking…" : `Diagnose this ${targetLabel}`}
+                <ArrowRight size={15} />
+              </Button>
+            </>
+          )}
         </>
       )}
       {response && (
-        <section className="response" aria-live="polite">
+        <section className="response" ref={responseRef} aria-live="polite">
           <div className="row between">
             <span className="eyebrow">
               {responseTarget?.scope === "document"
@@ -301,27 +370,34 @@ export function WritingLabShell({ w }: { w: Workspace }) {
               )}
             </article>
           ))}
-          {response.lexical.map((word, i) => (
-            <article className="finding" key={i}>
-              <div className="row between">
-                <h3>{word.term}</h3>
-                <Button
-                  className="icon"
-                  aria-label={"Copy " + word.term}
-                  onClick={() => w.copy(Object.values(word).join("\n"))}
-                >
-                  <Copy size={13} />
-                </Button>
-              </div>
-              <p>{word.meaning}</p>
-              <p>{word.nuance}</p>
-              <span className="tag">{word.register}</span>
-              <p>
-                <em>{word.example}</em>
-              </p>
-            </article>
-          ))}
-          {responseTarget?.scope !== "document" && (
+          {(!isLexicalRun || w.activeRun?.lens?.mode === "explore") &&
+            response.lexical.map((word, i) => (
+              <article className="finding" key={i}>
+                <div className="row between">
+                  <h3>{word.term}</h3>
+                  <Button
+                    className="icon"
+                    aria-label={"Copy " + word.term}
+                    onClick={() => w.copy(Object.values(word).join("\n"))}
+                  >
+                    <Copy size={13} />
+                  </Button>
+                </div>
+                <p>{word.meaning}</p>
+                <p>{word.nuance}</p>
+                <span className="tag">{word.register}</span>
+                <p>
+                  <em>{word.example}</em>
+                </p>
+              </article>
+            ))}
+          {response.model && (
+            <p className="small muted" data-testid="run-model">
+              {modelLabel(w.catalog, response.model)} ·{" "}
+              {response.routeSource?.replace("_", " ")}
+            </p>
+          )}
+          {!isLexicalRun && responseTarget?.scope !== "document" && (
             <>
               <Field label={response.question || responseLab.question}>
                 <textarea
@@ -358,7 +434,10 @@ export function WritingLabShell({ w }: { w: Workspace }) {
                 </span>
                 <Button
                   className="icon"
-                  aria-label={"Copy proposal " + (i + 1)}
+                  aria-label={
+                    (isLexicalRun ? "Copy candidate " : "Copy proposal ") +
+                    (i + 1)
+                  }
                   onClick={() => w.copy(p.text)}
                 >
                   <Copy size={14} />
@@ -372,6 +451,9 @@ export function WritingLabShell({ w }: { w: Workspace }) {
                 onChange={(e) => w.proposalText(p.id, e.target.value)}
               />
               <p>{p.explanation}</p>
+              {isLexicalRun && (
+                <CandidatePreview w={w} text={p.text} open={i === 0} />
+              )}
               {w.proposalStates[p.id] ? (
                 <div className="success">{w.proposalStates[p.id]}</div>
               ) : (
@@ -383,7 +465,7 @@ export function WritingLabShell({ w }: { w: Workspace }) {
                     onClick={() => w.decide(p.id, "accepted")}
                   >
                     <Check size={13} />
-                    Accept
+                    {isLexicalRun ? "Replace" : "Accept"}
                   </Button>
                   <Button
                     data-testid="save-variant"
@@ -406,7 +488,8 @@ export function WritingLabShell({ w }: { w: Workspace }) {
           ))}
         </section>
       )}
-      {hasTarget && section && (
+      {(hasTarget || isWholeAnalysis) && <WorkbenchHistory w={w} />}
+      {hasTarget && section && !isWholeAnalysis && (
         <details className="variants">
           <summary>
             Variants <span className="count">{section.variants.length}</span>
@@ -418,6 +501,11 @@ export function WritingLabShell({ w }: { w: Workspace }) {
           ) : (
             section.variants.map((v) => (
               <article key={v.id} className="variant">
+                {v.model && (
+                  <p className="small muted">
+                    {modelLabel(w.catalog, v.model)}
+                  </p>
+                )}
                 <Field label={v.origin + " variant"}>
                   <input
                     aria-label="Variant label"

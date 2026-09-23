@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  modelRefSchema,
+  routingPreferencesSchema,
+  lensOptionsSchema,
+} from "./routing";
+import { aiResponseSchema, type AIResponse } from "./ai-output";
+export * from "./routing";
+export * from "./ai-output";
 
 export const contentTypes = [
   "narration",
@@ -101,6 +109,40 @@ export const editTargetSchema = z.object({
 });
 export type EditTarget = z.infer<typeof editTargetSchema>;
 export type SelectionTarget = EditTarget;
+export const workbenchRunSchema = z.object({
+  lens: lensOptionsSchema.optional(),
+  id: z.string(),
+  createdAt: z.string(),
+  target: editTargetSchema,
+  action: z.string(),
+  instruction: z.string(),
+  answer: z.string(),
+  controls: z.record(z.union([z.string(), z.number(), z.boolean()])),
+  model: modelRefSchema.nullable(),
+  response: aiResponseSchema.extend({
+    model: modelRefSchema.optional(),
+    routeSource: z.string().optional(),
+  }),
+});
+export type WorkbenchRun = z.infer<typeof workbenchRunSchema>;
+export const sectionWorkbenchSchema = z.object({
+  instruction: z.string().default(""),
+  answer: z.string().default(""),
+  action: z.string().default("coach"),
+  controls: z
+    .record(z.union([z.string(), z.number(), z.boolean()]))
+    .default({}),
+  lens: lensOptionsSchema.default({}),
+  oneOffModel: modelRefSchema.nullable().default(null),
+  compareModels: z.array(modelRefSchema).max(4).default([]),
+  runs: z.array(workbenchRunSchema).default([]),
+  activeRunId: z.string().nullable().default(null),
+  proposalStates: z.record(z.string()).default({}),
+});
+export type SectionWorkbench = z.infer<typeof sectionWorkbenchSchema>;
+export function emptyWorkbench(): SectionWorkbench {
+  return sectionWorkbenchSchema.parse({});
+}
 export const variantSchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -108,6 +150,8 @@ export const variantSchema = z.object({
   target: editTargetSchema,
   createdAt: z.string(),
   origin: z.enum(["human", "ai", "original"]),
+  model: modelRefSchema.optional(),
+  runId: z.string().optional(),
 });
 export type Variant = z.infer<typeof variantSchema>;
 export const iterationSchema = z.object({
@@ -120,6 +164,8 @@ export const iterationSchema = z.object({
   proposal: z.string(),
   state: z.enum(["proposed", "accepted", "rejected", "saved"]),
   provider: z.string(),
+  model: modelRefSchema.optional(),
+  runId: z.string().optional(),
 });
 export type Iteration = z.infer<typeof iterationSchema>;
 export const writingSectionSchema = z.object({
@@ -129,6 +175,8 @@ export const writingSectionSchema = z.object({
   content: z.array(richNodeSchema),
   notes: z.string().default(""),
   variants: z.array(variantSchema).default([]),
+  modelOverride: modelRefSchema.nullable().optional(),
+  workbench: sectionWorkbenchSchema.optional(),
 });
 export type WritingSection = z.infer<typeof writingSectionSchema>;
 export const sourceMaterialSchema = z.object({
@@ -159,6 +207,8 @@ export const documentSchema = z.object({
   sections: z.array(writingSectionSchema).min(1),
   sources: z.array(sourceMaterialSchema).default([]),
   history: z.array(iterationSchema).default([]),
+  defaultModel: modelRefSchema.nullable().optional(),
+  workbench: sectionWorkbenchSchema.optional(),
 });
 export type Document = z.infer<typeof documentSchema>;
 export const styleDNASchema = z.object({
@@ -232,6 +282,7 @@ export const settingsSchema = z.object({
   knowledgePacks: z.array(knowledgePackSchema),
   radar: z.array(radarItemSchema),
   theme: z.enum(["light", "dark"]).default("light"),
+  routing: routingPreferencesSchema.optional(),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const writingActions = [
@@ -279,43 +330,10 @@ export const aiRequestSchema = z.object({
     .record(z.union([z.string(), z.number(), z.boolean()]))
     .default({}),
   variantCount: z.number().int().min(1).max(5).default(2),
+  modelOverride: modelRefSchema.nullable().optional(),
+  lens: lensOptionsSchema.optional(),
 });
 export type AIRequest = z.infer<typeof aiRequestSchema>;
-export const aiResponseSchema = z.object({
-  provider: z.string(),
-  diagnosis: z.string(),
-  mechanism: z.string(),
-  question: z.string(),
-  missingIngredients: z.array(z.string()),
-  proposals: z
-    .array(
-      z.object({
-        id: z.string(),
-        label: z.string(),
-        text: z.string(),
-        explanation: z.string(),
-      }),
-    )
-    .max(5),
-  findings: z.array(
-    z.object({
-      sectionId: z.string().nullable(),
-      title: z.string(),
-      detail: z.string(),
-      severity: z.enum(["note", "consider", "check"]),
-    }),
-  ),
-  lexical: z.array(
-    z.object({
-      term: z.string(),
-      meaning: z.string(),
-      nuance: z.string(),
-      register: z.string(),
-      example: z.string(),
-    }),
-  ),
-});
-export type AIResponse = z.infer<typeof aiResponseSchema>;
 export type AIState =
   | "idle"
   | "target_identified"

@@ -10,10 +10,16 @@ import {
   documentSchema,
   documentText,
   settingsSchema,
-  validateAIRequest,
+  modelRefSchema,
+  modelKey,
+  type AIRequest,
   type LLMProvider,
 } from "@workbench/domain";
-import { validateProviderResponse } from "./provider-policy.js";
+import {
+  validateProviderResponse,
+  validateWritingRequest,
+} from "./provider-policy.js";
+import { ProviderRegistry } from "./provider-registry.js";
 import { APIError } from "./errors.js";
 import type { Repository } from "./repository.js";
 
@@ -57,7 +63,7 @@ const localOnly: RequestHandler = (req, res, next) => {
     res.setHeader("Vary", "Origin");
     res.setHeader(
       "Access-Control-Allow-Methods",
-      "GET, POST, PUT, DELETE, OPTIONS",
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     );
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   }
@@ -83,9 +89,17 @@ export type AppOptions = {
   repository: Repository;
   provider: LLMProvider;
   webDir?: string;
+  registry?: ProviderRegistry;
 };
 /** Importing this module never listens, reads credentials, or creates a database. */
-export function createApp({ repository, provider, webDir }: AppOptions) {
+export function createApp({
+  repository,
+  provider,
+  webDir,
+  registry,
+}: AppOptions) {
+  const catalogRegistry =
+    registry ?? new ProviderRegistry({ repository, env: {} });
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", false);
@@ -98,8 +112,15 @@ export function createApp({ repository, provider, webDir }: AppOptions) {
   app.get("/api/health", (_req, res) =>
     res.json({
       ok: true,
-      provider: provider.name === "openai" ? "openai" : "mock",
-      webResearch: provider.capabilities.webResearch,
+      provider:
+        registry?.applicationDefault.providerId ??
+        (provider.name === "openai" ? "openai" : "mock"),
+      webResearch: registry
+        ? registry
+            .get(registry.applicationDefault.providerId)
+            .models.find((m) => m.id === registry.applicationDefault.modelId)
+            ?.capabilities.webSearch === true
+        : provider.capabilities.webResearch,
     }),
   );
   app.get("/api/documents", (_req, res) => res.json(repository.list()));
@@ -125,12 +146,48 @@ export function createApp({ repository, provider, webDir }: AppOptions) {
   app.put("/api/settings", (req, res) =>
     res.json(repository.saveSettings(settingsSchema.parse(req.body))),
   );
-  app.post("/api/ai", async (req, res) => {
-    const input = aiRequestSchema.parse(req.body);
+  app.get("/api/providers", (_req, res) => res.json(catalogRegistry.catalog()));
+  app.patch("/api/providers/:id", (req, res) => {
+    const { enabled } = z
+      .object({ enabled: z.boolean() })
+      .strict()
+      .parse(req.body);
+    res.json({ provider: catalogRegistry.setEnabled(req.params.id, enabled) });
+  });
+  app.post("/api/providers/:id/models", (req, res) => {
+    const input = z
+      .object({
+        id: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]*$/),
+        displayName: z.string().trim().min(1).max(200).optional(),
+      })
+      .strict()
+      .parse(req.body);
+    res.json({
+      provider: catalogRegistry.addModel(
+        req.params.id,
+        input.id,
+        input.displayName,
+      ),
+    });
+  });
+  app.post("/api/providers/:id/models/refresh", async (req, res) =>
+    res.json({ provider: await catalogRegistry.refresh(req.params.id) }),
+  );
+  app.post("/api/providers/:id/test", async (req, res) => {
+    const { modelId } = z
+      .object({ modelId: z.string().min(1).max(200).optional() })
+      .strict()
+      .parse(req.body);
+    res.json(await catalogRegistry.test(req.params.id, modelId));
+  });
+  const validateInput = (input: AIRequest) => {
     try {
-      validateAIRequest(input);
-      // validateAIRequest checks the section snapshot (or whole-document text).
-      // Autosaves and unrelated section edits can advance revision without invalidating this target.
+      validateWritingRequest(input);
       if (
         input.editTarget.scope === "document" &&
         (input.editTarget.start !== 0 ||
@@ -144,14 +201,15 @@ export function createApp({ repository, provider, webDir }: AppOptions) {
         error instanceof Error ? error.message : "Invalid edit target",
       );
     }
+  };
+  const run = async (input: AIRequest) => {
+    if (registry) return registry.run(input);
     try {
-      // Enforce policy at the API boundary even for injected or future provider adapters.
-      const output = validateProviderResponse(
+      return validateProviderResponse(
         input,
         await provider.run(input),
         provider.name === "openai" ? "openai" : "mock",
       );
-      res.json(output);
     } catch (error) {
       if (error instanceof APIError) throw error;
       throw new APIError(
@@ -159,13 +217,63 @@ export function createApp({ repository, provider, webDir }: AppOptions) {
         "The provider could not produce a valid response. Your document has not been changed.",
       );
     }
+  };
+  app.post("/api/ai", async (req, res) => {
+    const input = aiRequestSchema.parse(req.body);
+    validateInput(input);
+    res.json(await run(input));
+  });
+  app.post("/api/ai/compare", async (req, res) => {
+    const input = z
+      .object({
+        request: aiRequestSchema,
+        models: z.array(modelRefSchema).min(2).max(4),
+      })
+      .parse(req.body);
+    if (new Set(input.models.map(modelKey)).size !== input.models.length)
+      throw new APIError(400, "Choose 2–4 distinct models");
+    validateInput(input.request);
+    const results = await Promise.all(
+      input.models.map(async (model) => {
+        try {
+          return {
+            model,
+            response: await catalogRegistry.run({
+              ...structuredClone(input.request),
+              modelOverride: model,
+            }),
+          };
+        } catch (error) {
+          return {
+            model,
+            error:
+              error instanceof APIError
+                ? error.message
+                : "Provider request failed; no document changes were made.",
+          };
+        }
+      }),
+    );
+    res.json({ results });
   });
   app.post("/api/culture/refresh", async (req, res) => {
-    const { query } = z
-      .object({ query: z.string().trim().min(1).max(500) })
+    const { query, documentId, modelOverride } = z
+      .object({
+        query: z.string().trim().min(1).max(500),
+        documentId: z.string().optional(),
+        modelOverride: modelRefSchema.nullable().optional(),
+      })
       .parse(req.body);
     try {
-      res.json({ items: await provider.researchCulture(query) });
+      if (registry)
+        res.json(
+          await registry.research(
+            query,
+            documentId ? repository.get(documentId) : undefined,
+            modelOverride,
+          ),
+        );
+      else res.json({ items: await provider.researchCulture(query) });
     } catch (error) {
       if (error instanceof APIError) throw error;
       throw new APIError(

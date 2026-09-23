@@ -16,7 +16,7 @@ const port = reservation.address().port;
 await new Promise((r) => reservation.close(r));
 const base = `http://127.0.0.1:${port}`;
 let child;
-async function start() {
+async function start(apiKey = "") {
   child = spawn(
     process.execPath,
     [resolve(root, "apps/server/dist/index.js")],
@@ -26,7 +26,7 @@ async function start() {
         ...process.env,
         PORT: String(port),
         DATA_DIR: dir,
-        OPENAI_API_KEY: "",
+        OPENAI_API_KEY: apiKey,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -120,6 +120,60 @@ try {
       provider: "mock",
     },
   ];
+  const conservative = { providerId: "mock", modelId: "conservative" },
+    plain = { providerId: "mock", modelId: "plain" };
+  doc.defaultModel = conservative;
+  doc.sections[0].modelOverride = plain;
+  doc.sections.push({
+    id: "segue-restart",
+    kind: "Segue",
+    label: "Segue",
+    content: [
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: "The next idea stays unchanged." }],
+      },
+    ],
+    notes: "",
+    variants: [],
+    modelOverride: conservative,
+    workbench: { instruction: "Only this Segue", answer: "My connection" },
+  });
+  const prefs = await api("/settings");
+  const response = await api("/ai", "POST", {
+    readContext: {
+      document: doc,
+      styleDNA: prefs.styleDNA,
+      knowledgePacks: prefs.knowledgePacks,
+      approvedLanguage: [],
+    },
+    editTarget: target,
+    action: "coach",
+    stage: "diagnose",
+    instruction: "Only this Hook",
+    answer: "My observation",
+    controls: {},
+    variantCount: 2,
+  });
+  assert.deepEqual(response.model, plain);
+  doc.sections[0].workbench = {
+    instruction: "Only this Hook",
+    answer: "My observation",
+    activeRunId: "run-restart",
+    runs: [
+      {
+        id: "run-restart",
+        createdAt: new Date().toISOString(),
+        target,
+        action: "coach",
+        instruction: "Only this Hook",
+        answer: "My observation",
+        controls: {},
+        model: response.model,
+        response,
+      },
+    ],
+  };
   doc = await api("/documents/" + doc.id, "PUT", doc);
   const settings = await api("/settings");
   settings.styleDNA.rhythm = "Fragments. Then a long breath.";
@@ -144,16 +198,52 @@ try {
       status: "maybe",
     },
   ];
+  settings.routing = {
+    applicationDefault: null,
+    sectionTypeDefaults: { Hook: plain },
+    taskDefaults: { words: conservative },
+  };
   await api("/settings", "PUT", settings);
+  await api("/providers/openai/models", "POST", {
+    id: "smoke-catalog-fixture",
+  });
+  const catalog = await api("/providers");
   await stop();
   await start();
   assert.deepEqual(await api("/documents/" + doc.id), doc);
   assert.deepEqual(await api("/settings"), settings);
+  assert.deepEqual(await api("/providers"), catalog);
   assert.equal(
     (await fetch(base + "/.env")).headers
       .get("content-type")
       ?.includes("text/html"),
     true,
+  );
+  await stop();
+  // A synthetic credential configures the adapter without sending any provider call.
+  const secret = "sk-security-fixture-never-a-real-key-8765";
+  await start(secret);
+  const safe = await api("/providers");
+  assert.equal(
+    safe.providers.find((p) => p.id === "openai").credentialSuffix,
+    "8765",
+  );
+  for (const path of ["/providers", "/settings", "/documents", "/health"])
+    assert.ok(!JSON.stringify(await api(path)).includes(secret));
+  const html = await (await fetch(base)).text();
+  assert.ok(!html.includes(secret));
+  const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(
+    (m) => m[1],
+  );
+  assert.ok(scripts.length > 0);
+  for (const url of scripts) {
+    const js = await (await fetch(new URL(url, base))).text();
+    assert.ok(
+      !js.includes(secret),
+    ); /* Environment variable names in settings instructions are public, not credentials. */
+  }
+  console.log(
+    "PASS: section-local drafts/runs, independent model overrides, routing defaults and catalogs survive restart; provider endpoints and served frontend do not expose a configured synthetic credential.",
   );
   console.log(
     "PASS: built production entrypoint starts from arbitrary cwd; frontend serves; mock provider; SQLite document/brief/source/metadata/variant/history and Style DNA/packs/radar/theme survive process restart.",
