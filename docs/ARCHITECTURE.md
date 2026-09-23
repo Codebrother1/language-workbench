@@ -242,3 +242,12 @@ Verification is layered: domain/editor tests, repository/API tests, provider tra
 `Document.sections` remains the sole ordered composition model. Types configure behavior, not unique slots or counts. New pure operations in `packages/domain/src/section-operations.ts` provide stable-anchor insertion, deep independent duplication with remapped lineage, and removal. New instances use existing model/style resolution, editor/history, variants, scope validation and SQLite persistence. The editor retains one empty Freeform caret container after the last removal; no semantic type is required.
 
 `SectionInsertion.tsx` provides one shared type picker and input-safe sibling gutter overlay. Controls never live in contenteditable or clipboard output. Anchors use document and neighboring section IDs and fail if stale. Structural transactions get their own undo boundaries. See `SECTION-INSTANCES.md` for tested cases and limitations; future templates may seed an initial array but must not enforce it.
+
+
+## Wayfinding is a routing layer, not a parallel application
+
+The first-use pass adds no domain schema or backend endpoint. `commands.ts` defines a searchable metadata catalog. `useWayfinding` owns only ephemeral palette, library-filter and tool-disclosure intents; it delegates to existing workspace actions. `CommandPalette` closes its native dialog before dispatching, so typing cannot fall into a closing search field. `FirstMove` overlays guidance outside contenteditable; `NextSteps` and contextual help route the same actions. The native canvas remains immediately usable without setup.
+
+Existing insertion and source-add implementations are shared by old buttons and new entry points. Library routes pass initial query/view into the existing library. Tool routes expand/scroll existing Inspector sections after render; they do not create parallel editors, AI clients, features, or persistent writing state. Cmd/Ctrl+K is the only reserved new shortcut and is ignored during composition; slash remains ordinary writing.
+
+A small `clipboardPlainText` serializer removes wrapper-generated leading breaks from native copy while preserving authored whitespace and block boundaries. It does not intercept copy/paste/cut keys or replace rich HTML serialization. See `WAYFINDING.md` for the verified first-use path and remaining friction.

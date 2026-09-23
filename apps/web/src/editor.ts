@@ -1,7 +1,12 @@
 import { Node, Extension, type Editor, type JSONContent } from "@tiptap/core";
-import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
+import {
+  Plugin,
+  PluginKey,
+  Selection,
+  type EditorState,
+} from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Node as PMNode, Slice } from "@tiptap/pm/model";
 import {
   type Document,
   type EditTarget,
@@ -14,6 +19,47 @@ export const WritingDocument = Node.create({
   name: "doc",
   topNode: true,
   content: "writingSection+",
+  addKeyboardShortcuts() {
+    // Commit native start/end navigation before a following input event can race
+    // the browser's asynchronous selectionchange and React Inspector render.
+    const edge = (end: boolean, extend = false) => {
+      if (this.editor.view.composing) return false;
+      const state = this.editor.state;
+      const pos = (
+        end ? Selection.atEnd(state.doc) : Selection.atStart(state.doc)
+      ).from;
+      const changed = this.editor
+        .chain()
+        .setTextSelection(
+          extend ? { from: state.selection.anchor, to: pos } : pos,
+        )
+        .scrollIntoView()
+        .run();
+      if (changed) {
+        const view = this.editor.view;
+        view.focus();
+        // Keep the native selection in step even when a recent mouse selection
+        // has queued selectionchange; the next paste must use the same anchor.
+        const anchor = view.domAtPos(extend ? state.selection.anchor : pos);
+        const head = view.domAtPos(pos);
+        view.dom.ownerDocument
+          .getSelection()
+          ?.setBaseAndExtent(
+            anchor.node,
+            anchor.offset,
+            head.node,
+            head.offset,
+          );
+      }
+      return changed;
+    };
+    return {
+      "Mod-Home": () => edge(false),
+      "Mod-End": () => edge(true),
+      "Mod-Shift-Home": () => edge(false, true),
+      "Mod-Shift-End": () => edge(true, true),
+    };
+  },
 });
 
 export const WritingSectionNode = Node.create({
@@ -252,4 +298,24 @@ export function cursorTarget(editor: Editor, doc: Document): EditTarget | null {
   const info = selectionInfo(editor.state);
   if (!info || !doc.sections.some((s) => s.id === info.id)) return null;
   return targetFor(doc, info.id, info.scope, info.start, info.end);
+}
+
+/** Native ProseMirror clipboard serialization without wrapper-generated leading breaks.
+ * Preserve authored whitespace and newlines; never trim the selected text. */
+export function clipboardPlainText(slice: Slice): string {
+  const render = (node: PMNode): string => {
+    if (node.isText) return node.text ?? "";
+    if (node.type.name === "hardBreak") return "\n";
+    const children: string[] = [];
+    node.forEach((child) => children.push(render(child)));
+    return children.join(node.isTextblock ? "" : "\n");
+  };
+  const nodes: PMNode[] = [];
+  slice.content.forEach((node) => nodes.push(node));
+  const separator = nodes.every((node) => node.isInline)
+    ? ""
+    : nodes.some((node) => node.type.name === "writingSection")
+      ? "\n\n"
+      : "\n";
+  return nodes.map(render).join(separator);
 }

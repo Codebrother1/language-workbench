@@ -1,3 +1,4 @@
+import type { LibraryNavigation } from "./wayfinding";
 import { PersonalLibrary, ScopedStyleGuides } from "./PersonalLibrary";
 import { ProviderSettings } from "./ProviderSettings";
 import { useState } from "react";
@@ -25,9 +26,11 @@ function Brief({ w }: { w: Workspace }) {
     w.update((d) => ({ ...d, brief: { ...d.brief, [key]: value } }));
   return (
     <>
+      <h3>What are you making?</h3>
       <p className="panel-intro">
-        Give the writing a job, not a formula. These notes inform every
-        diagnosis; they never generate a template.
+        This brief is optional. Add what you know now, leave the rest blank, and
+        come back anytime. Your notes give the tools context; they never
+        automatically create a template or change your writing.
       </p>
       <div className="form-grid">
         <Field label="Content type">
@@ -129,11 +132,13 @@ function Sources({ w }: { w: Workspace }) {
   return (
     <>
       <p className="panel-intro">
-        Reference, not instructions. Sources are read-only context for the AI
-        and never part of the editable writing target.
+        Paste material you want to refer to here: an article, a quote, a
+        transcript, or background notes. It stays separate from your writing. If
+        this is your own draft to work on, paste it into the page instead.
+        Sources give the tools context, not instructions to follow.
       </p>
       {w.doc.sources.map((source, i) => (
-        <section key={source.id} className="source">
+        <section key={source.id} className="source" data-source-id={source.id}>
           <div className="row between">
             <span className="eyebrow">
               REFERENCE {String(i + 1).padStart(2, "0")}
@@ -179,6 +184,7 @@ function Sources({ w }: { w: Workspace }) {
           </div>
           <Field label="Source text">
             <textarea
+              data-source-text="true"
               rows={7}
               value={source.text}
               onChange={(e) => patch(source.id, "text", e.target.value)}
@@ -204,23 +210,7 @@ function Sources({ w }: { w: Workspace }) {
           )}
         </section>
       ))}
-      <Button
-        onClick={() =>
-          w.update((d) => ({
-            ...d,
-            sources: [
-              ...d.sources,
-              {
-                id: uid(),
-                title: "Reference " + (d.sources.length + 1),
-                kind: "text",
-                text: "",
-                url: "",
-              },
-            ],
-          }))
-        }
-      >
+      <Button onClick={w.addSource}>
         <Plus size={15} />
         Add reference
       </Button>
@@ -490,7 +480,13 @@ function History({ w }: { w: Workspace }) {
     </>
   );
 }
-export function UtilityPanel({ w }: { w: Workspace }) {
+export function UtilityPanel({
+  w,
+  libraryNavigation,
+}: {
+  w: Workspace;
+  libraryNavigation?: LibraryNavigation;
+}) {
   if (!w.panel) return null;
   const title = {
     brief: "Writing brief",
@@ -505,7 +501,12 @@ export function UtilityPanel({ w }: { w: Workspace }) {
   return (
     <Dialog title={title} close={() => w.setPanel(null)} wide>
       {w.panel === "library" ? (
-        <PersonalLibrary w={w} />
+        <PersonalLibrary
+          key={libraryNavigation?.token ?? 0}
+          w={w}
+          initialQuery={libraryNavigation?.query}
+          initialKind={libraryNavigation?.kind}
+        />
       ) : w.panel === "guides" ? (
         <ScopedStyleGuides w={w} />
       ) : w.panel === "providers" ? (

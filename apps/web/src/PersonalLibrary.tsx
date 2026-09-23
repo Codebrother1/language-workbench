@@ -196,9 +196,17 @@ function ItemEditor({
     </section>
   );
 }
-export function PersonalLibrary({ w }: { w: Workspace }) {
-  const [query, setQuery] = useState(""),
-    [kind, setKind] = useState("all"),
+export function PersonalLibrary({
+  w,
+  initialQuery = "",
+  initialKind = "all",
+}: {
+  w: Workspace;
+  initialQuery?: string;
+  initialKind?: string;
+}) {
+  const [query, setQuery] = useState(initialQuery),
+    [kind, setKind] = useState(initialKind),
     [editing, setEditing] = useState<string | null | undefined>(undefined),
     [deleting, setDeleting] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);

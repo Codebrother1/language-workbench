@@ -1,3 +1,5 @@
+import { NextSteps, ContextHelp, EmptyInspectorIntro } from "./FirstMove";
+import type { Wayfinding } from "./wayfinding";
 import { QuickSave, ContextLibrary, StyleContext } from "./LibraryTools";
 import { StructureTool } from "./StructureTool";
 import { ModelControls, modelLabel } from "./ModelControls";
@@ -23,7 +25,13 @@ import {
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Field, Select, Range } from "./ui";
-export function WritingLabShell({ w }: { w: Workspace }) {
+export function WritingLabShell({
+  w,
+  navigation,
+}: {
+  w: Workspace;
+  navigation: Wayfinding;
+}) {
   const { target, response, responseTarget } = w;
   const section = w.doc.sections.find((s) => s.id === target?.sectionId);
   const lab = labFor(section?.kind ?? "Freeform", target?.scope ?? "selection");
@@ -88,6 +96,55 @@ export function WritingLabShell({ w }: { w: Workspace }) {
         .filter(Boolean)
         .join("\n\n")
     : "";
+  const requestedTool = navigation.toolNavigation?.tool;
+  const explicitVariants = requestedTool === "variants";
+  const explicitStructure =
+    requestedTool === "structure" || requestedTool === "thoughts";
+  const firstThought =
+    hasWriting &&
+    w.doc.sections.length === 1 &&
+    section?.kind === "Freeform" &&
+    !section.workbench &&
+    !response &&
+    !w.isLensTarget &&
+    Boolean(w.editor?.state.selection.empty) &&
+    w.target?.scope !== "section" &&
+    !requestedTool;
+  if (!hasWriting && !explicitStructure && !explicitVariants)
+    return (
+      <aside className="inspector" aria-label="Contextual writing inspector">
+        <EmptyInspectorIntro w={w} onCommand={navigation.runCommand} />
+        {requestedTool === "help" && (
+          <ContextHelp w={w} onCommand={navigation.runCommand} />
+        )}
+        <button
+          className="wayfinding-link"
+          onClick={() => navigation.openCommands()}
+        >
+          Find a tool · ⌘ / Ctrl K
+        </button>
+      </aside>
+    );
+  if (firstThought)
+    return (
+      <aside className="inspector" aria-label="Contextual writing inspector">
+        <div className="lab-head">
+          <h2>Your thought is here.</h2>
+          <p>
+            Keep going, or choose one small next move. Your words won’t change
+            unless you choose a change.
+          </p>
+        </div>
+        <NextSteps w={w} onCommand={navigation.runCommand} />
+        <ContextHelp w={w} onCommand={navigation.runCommand} />
+        <button
+          className="wayfinding-link"
+          onClick={() => navigation.openCommands()}
+        >
+          Find a tool · ⌘ / Ctrl K
+        </button>
+      </aside>
+    );
   return (
     <aside className="inspector" aria-label="Contextual writing inspector">
       <div className="inspector-top">
@@ -120,6 +177,12 @@ export function WritingLabShell({ w }: { w: Workspace }) {
               : "Start writing. When you want a second look, place the cursor in a sentence or select a word or passage."}
         </p>
       </div>
+      {hasWriting && !isWholeAnalysis && (
+        <>
+          <NextSteps w={w} onCommand={navigation.runCommand} />
+          <ContextHelp w={w} onCommand={navigation.runCommand} />
+        </>
+      )}
       {(hasTarget || isWholeAnalysis) && (
         <ModelControls
           key={
@@ -507,7 +570,7 @@ export function WritingLabShell({ w }: { w: Workspace }) {
         </section>
       )}
       {(hasTarget || isWholeAnalysis) && <WorkbenchHistory w={w} />}
-      {hasTarget && section && !isWholeAnalysis && (
+      {(hasTarget || explicitVariants) && section && !isWholeAnalysis && (
         <details className="variants">
           <summary>
             Variants <span className="count">{section.variants.length}</span>

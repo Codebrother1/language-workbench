@@ -1,0 +1,229 @@
+/* Local wayfinding only. The native editor remains the full-size click target. */
+.first-move {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--muted);
+}
+.first-move-heading {
+  margin: 0;
+  height: 39px;
+  font-family: "Literata Variable", Georgia, serif;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 39px;
+  letter-spacing: normal;
+}
+.first-move-actions {
+  position: absolute;
+  top: 58px;
+  left: 0;
+  width: 220px;
+  max-width: 100%;
+}
+.first-move-primary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  max-width: 220px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+}
+.first-move-hint {
+  margin: 10px 0 13px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.first-move-support {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.first-move button {
+  pointer-events: auto;
+}
+.wayfinding-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 7px 4px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-align: left;
+}
+.wayfinding-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.first-move-primary:hover {
+  border-color: var(--accent);
+}
+.wayfinding-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 13px;
+}
+.next-steps {
+  padding: 10px 0;
+  color: var(--muted);
+}
+.next-steps-label {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.context-help {
+  margin: 14px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.context-help > summary {
+  min-height: 36px;
+  padding: 8px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+.context-help > p {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.empty-inspector-intro > h2 {
+  margin: 0 0 10px;
+}
+.empty-inspector-intro > p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.insertion-purpose {
+  display: block;
+  text-align: left;
+}
+.insertion-purpose > small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* The command surface reuses the existing dialog/field palette; no new writing UI. */
+.command-trigger kbd {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.command-palette {
+  width: min(610px, calc(100vw - 32px));
+  max-height: min(680px, 85vh);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: 0 25px 90px #0003;
+}
+.command-palette::backdrop {
+  background: #232c2850;
+  backdrop-filter: blur(3px);
+}
+.command-palette > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.command-palette header input {
+  font-size: 16px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 6px 0;
+}
+.command-palette header .button {
+  border: 0;
+  background: transparent;
+}
+.command-hint {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 20px;
+  margin: 12px 0;
+}
+.command-results {
+  max-height: 440px;
+  overflow: auto;
+  padding: 4px 10px;
+}
+.command-results > button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  text-align: left;
+  width: 100%;
+  padding: 12px;
+  border-radius: 6px;
+  min-height: 66px;
+}
+.command-results > button.selected,
+.command-results > button:hover {
+  background: var(--accent-light);
+}
+.command-results span {
+  font-size: 14px;
+  font-weight: 500;
+}
+.command-results small {
+  grid-column: 1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.command-results em {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--muted);
+}
+.command-empty {
+  padding: 25px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.command-palette > footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 20px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.context-help-object {
+  font-weight: 500;
+  color: var(--text);
+}
+@media (max-width: 1150px) {
+  .command-trigger kbd {
+    display: none;
+  }
+}

@@ -2,6 +2,8 @@ import type { Editor } from "@tiptap/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sectionKinds, type WritingSection } from "./domain";
 import { Button, Field, Select } from "./ui";
+import { sectionPurposes } from "./section-purpose";
+import "./wayfinding.css";
 export type InsertionAnchor = {
   documentId: string;
   beforeSectionId: string | null;
@@ -35,9 +37,10 @@ export function SectionInsertionPicker({
       : prior?.kind === "Hook" || prior?.kind === "Cold Open"
         ? ["Setup", "Point", "Segue", "Freeform"]
         : ["Point", "Example", "Segue", "Freeform"];
-  const available = sectionKinds.filter((k) =>
-    k.toLowerCase().includes(query.toLowerCase()),
-  );
+  const matchesQuery = (k: WritingSection["kind"], value: string) =>
+    k.toLowerCase().includes(value.toLowerCase()) ||
+    sectionPurposes[k].purpose.toLowerCase().includes(value.toLowerCase());
+  const available = sectionKinds.filter((k) => matchesQuery(k, query));
   useEffect(() => {
     root.current?.querySelector<HTMLInputElement>("input")?.focus();
     const outside = (event: PointerEvent) => {
@@ -73,7 +76,9 @@ export function SectionInsertionPicker({
           ×
         </Button>
       </div>
-      <p className="small muted">Position {index + 1} of {sections.length + 1}</p>
+      <p className="small muted">
+        Position {index + 1} of {sections.length + 1}
+      </p>
       <p className="small muted">
         {prior ? `After ${prior.label}` : "At the beginning"}
         {next ? ` · before ${next.label}` : " · at the end"}
@@ -83,8 +88,16 @@ export function SectionInsertionPicker({
       </p>
       <div className="insertion-suggestions">
         {suggested.map((k) => (
-          <Button key={k} onClick={() => onInsert(k)}>
-            Insert {k}
+          <Button
+            key={k}
+            aria-label={`Insert ${k}`}
+            title={sectionPurposes[k].description}
+            onClick={() => onInsert(k)}
+          >
+            <span className="insertion-purpose">
+              {sectionPurposes[k].purpose}
+              <small>{k}</small>
+            </span>
           </Button>
         ))}
       </div>
@@ -95,7 +108,7 @@ export function SectionInsertionPicker({
           onChange={(e) => {
             setQuery(e.target.value);
             const match = sectionKinds.find((k) =>
-              k.toLowerCase().includes(e.target.value.toLowerCase()),
+              matchesQuery(k, e.target.value),
             );
             if (match) setKind(match);
           }}
@@ -108,7 +121,9 @@ export function SectionInsertionPicker({
           onChange={(e) => setKind(e.target.value as typeof kind)}
         >
           {available.map((k) => (
-            <option key={k}>{k}</option>
+            <option key={k} value={k}>
+              {k} — {sectionPurposes[k].purpose}
+            </option>
           ))}
         </Select>
       </Field>

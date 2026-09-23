@@ -34,6 +34,12 @@ Open **http://127.0.0.1:4318**. The Node server serves both the built frontend a
 
 No proprietary hosting service is needed: clone/copy the Git repository, install its locked dependencies, and run it locally. The private database and `.env` are not a substitute for a backup and should not be committed to Git.
 
+## Start without setup
+
+Open a new document and use **Talk or type a thought**, or simply click the page and write. Wispr uses your normal desktop hotkey. The Writing Brief is optional and presented as **What are you making?**—before, during, or after writing.
+
+After a rough thought, small next-step choices help you work a sentence, organize thoughts, make a Hook, or add the next part without automatic rewriting. Use **Cmd/Ctrl+K** or **Find a tool** when you do not know where something lives: try “synonyms”, “my hooks”, “structure”, “change model”, or “source”. The palette opens existing features; it is not another AI chat or editor. See [docs/WAYFINDING.md](docs/WAYFINDING.md) for behavior and verification.
+
 ## Provider configuration
 
 **No API key is required to try the app.** With no key, it uses an explicitly identified, deterministic **mock provider**. Its limited transformations and coaching fixtures exercise the workflow; they are not live model intelligence, current cultural research, or evidence of trending language. Mock mode does not provide live Language Radar research.
@@ -157,7 +163,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/absolute/path/to/chromium pnpm test:e2e
 
 The repository also includes an npm-packaged Chromium dependency for sandbox use. This workaround is optional, not the recommended desktop installation path.
 
-The current unrestricted-composition checkpoint passed **267 unit/integration tests, 45 browser tests, TypeScript, the production build, and the extended real-process restart/security smoke check**. See [docs/SECTION-INSTANCES.md](docs/SECTION-INSTANCES.md). The prior library/Structure checkpoint passed 223 unit/integration and 38 browser tests. Evidence and limitations are in [docs/LIBRARY-VERIFICATION.md](docs/LIBRARY-VERIFICATION.md). All tests from protected baseline `266c0d0` remain unchanged and passing; historical records remain separate.
+The current first-use/wayfinding checkpoint passed **291 unit/integration tests, 58 browser tests, TypeScript, the production build, and the real-process restart/security smoke check**. See [docs/WAYFINDING.md](docs/WAYFINDING.md). Earlier milestone records remain separate; the previous 267/45 unrestricted-composition suite is retained unchanged.
 
 The extended production smoke covers model choices, local histories, routing, and catalog state across an actual server-process restart. Its credential-leak checks use a **synthetic fake key**, inspecting served static JavaScript and HTTP responses for raw-key exposure without real provider network calls. Neither this check nor SDK fake-transport tests establish live third-party verification. Actual Wispr OS-overlay testing must be performed on a supported desktop: see [docs/WISPR-QA.md](docs/WISPR-QA.md).
 

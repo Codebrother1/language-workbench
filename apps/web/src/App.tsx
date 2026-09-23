@@ -1,3 +1,6 @@
+import { FirstMove } from "./FirstMove";
+import { useWayfinding } from "./wayfinding";
+import { CommandPalette } from "./CommandPalette";
 import {
   SectionInsertionPicker,
   SectionInsertionGaps,
@@ -59,7 +62,9 @@ function Structure({
         <span className="eyebrow">STRUCTURE</span>
         <span className="count">{w.doc.sections.length}</span>
       </div>
-      <p className="small muted structure-hint">A shape of your choosing.</p>
+      <p className="small muted structure-hint">
+        Drag parts to change their order.
+      </p>
       <div className="section-list">
         {w.doc.sections.map((s, i) => (
           <div
@@ -210,9 +215,13 @@ function Structure({
       </Button>
       <div className="structure-bottom">
         <span className="eyebrow">CONTEXT</span>
-        <Button onClick={() => w.setPanel("brief")}>
+        <Button
+          aria-label="Writing brief"
+          title="What are you making? Optional Writing Brief"
+          onClick={() => w.setPanel("brief")}
+        >
           <FileText size={15} />
-          Writing brief
+          What are you making?
         </Button>
         <Button onClick={() => w.setPanel("sources")}>
           <BookOpen size={15} />
@@ -301,6 +310,7 @@ function Toolbar({ w }: { w: Workspace }) {
 }
 export default function App() {
   const w = useWorkspace();
+  const navigation = useWayfinding(w);
   const fileRef = useRef<HTMLInputElement>(null);
   const [confirmation, setConfirmation] = useState<{
     kind: "document" | "section";
@@ -378,6 +388,14 @@ export default function App() {
           </button>
         </div>
         <div className="topbar-actions">
+          <Button
+            className="top-action command-trigger"
+            aria-label="Find a tool"
+            title="Find a tool (Cmd/Ctrl+K)"
+            onClick={() => navigation.openCommands()}
+          >
+            Find a tool <kbd>⌘ / Ctrl K</kbd>
+          </Button>
           <Button
             className="top-action"
             onClick={() => w.setPanel("style")}
@@ -582,8 +600,12 @@ export default function App() {
           <div className="page">
             <div className="page-caption">
               <span className="eyebrow">YOUR WORDS, FIRST</span>
-              <button onClick={() => w.setPanel("brief")}>
-                Writing brief <ArrowUp size={11} className="rotate" />
+              <button
+                aria-label="Writing brief"
+                title="Optional: audience, purpose and format"
+                onClick={() => w.setPanel("brief")}
+              >
+                What are you making? <ArrowUp size={11} className="rotate" />
               </button>
             </div>
             <div className={"editor-wrap " + (!text ? "empty" : "")}>
@@ -593,10 +615,8 @@ export default function App() {
                 sections={w.doc.sections}
                 onInsert={w.requestSectionInsertion}
               />
-              {!text && (
-                <div className="editor-placeholder" aria-hidden="true">
-                  Start with what you mean.
-                </div>
+              {!text.trim() && (
+                <FirstMove w={w} onCommand={navigation.runCommand} />
               )}
             </div>
             <div className="page-end">
@@ -618,9 +638,16 @@ export default function App() {
             </span>
           </footer>
         </main>
-        <WritingLabShell w={w} />
+        <WritingLabShell w={w} navigation={navigation} />
       </div>
-      <UtilityPanel w={w} />
+      <UtilityPanel w={w} libraryNavigation={navigation.libraryNavigation} />
+      {navigation.paletteOpen && (
+        <CommandPalette
+          initialQuery={navigation.initialQuery}
+          close={navigation.closeCommands}
+          run={navigation.runCommand}
+        />
+      )}
       {w.insertion && (
         <SectionInsertionPicker
           key={`${w.insertion.documentId}:${w.insertion.beforeSectionId}`}

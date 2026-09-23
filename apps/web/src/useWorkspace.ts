@@ -64,6 +64,7 @@ import {
   highlight,
   sectionLocation,
   targetRange,
+  clipboardPlainText,
 } from "./editor";
 import {
   getWorkbench,
@@ -196,6 +197,7 @@ export function useWorkspace() {
     ],
     content: toEditor(initial.current),
     editorProps: {
+      clipboardTextSerializer: clipboardPlainText,
       attributes: {
         "data-testid": "writing-editor",
         "aria-label": "Writing editor",
@@ -650,7 +652,7 @@ export function useWorkspace() {
     const loc = sectionLocation(editor, id);
     if (loc) {
       editor.commands.setTextSelection(loc.pos + 2);
-      editor.commands.focus();
+      editor.view.focus();
       const t = targetFor(current.current, id);
       setTarget(t);
       highlight(editor, t);
@@ -701,28 +703,64 @@ export function useWorkspace() {
       returnFocus: button,
     });
   };
+  const commitSectionInsertion = (
+    kind: WritingSection["kind"],
+    beforeId: string | null,
+  ) => {
+    const section = newSection(kind);
+    sync(insertSectionAt(current.current, section, beforeId));
+    setInsertion(null);
+    focusSection(section.id);
+  };
   const insertSection = (kind: WritingSection["kind"]) => {
     try {
       if (!insertion || insertion.documentId !== current.current.id)
         throw new Error("Choose an insertion position in this document.");
-      const section = newSection(kind);
-      const next = insertSectionAt(
-        current.current,
-        section,
-        insertion.beforeSectionId,
-      );
-      sync(next);
-      setInsertion(null);
-      focusSection(section.id);
+      commitSectionInsertion(kind, insertion.beforeSectionId);
     } catch (error) {
       setError((error as Error).message);
     }
   };
-  // The existing Add section shortcut remains a one-click blank append.
-  const addSection = () => {
-    const next = newSection();
-    sync(insertSectionAt(current.current, next, null));
-    focusSection(next.id);
+  // All entry points share this insertion operation and its undo/scope semantics.
+  const addSection = () => commitSectionInsertion("Freeform", null);
+  const addSectionAfter = (
+    id: string,
+    kind: WritingSection["kind"] = "Freeform",
+  ) => {
+    try {
+      const index = current.current.sections.findIndex((s) => s.id === id);
+      if (index < 0) throw new Error("Choose an existing section first.");
+      commitSectionInsertion(
+        kind,
+        current.current.sections[index + 1]?.id ?? null,
+      );
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  };
+  const addSource = () => {
+    const id = uid();
+    update((d) => ({
+      ...d,
+      sources: [
+        ...d.sources,
+        {
+          id,
+          title: "Reference " + (d.sources.length + 1),
+          kind: "text",
+          text: "",
+          url: "",
+        },
+      ],
+    }));
+    return id;
+  };
+  const focusSentence = () => {
+    if (!editor) return;
+    editor.commands.setTextSelection(editor.state.selection.from);
+    setTarget(cursorTarget(editor, current.current));
+    setDocumentWorkbench(false);
+    editor.commands.focus();
   };
   const duplicateSection = (id: string) => {
     try {
@@ -1442,6 +1480,10 @@ export function useWorkspace() {
     }
   };
   return {
+    showLocalWorkbench: () => setDocumentWorkbench(false),
+    addSectionAfter,
+    addSource,
+    focusSentence,
     insertion,
     closeInsertion: () => setInsertion(null),
     requestSectionInsertion,

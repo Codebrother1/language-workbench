@@ -132,6 +132,7 @@ export function StructureTool({ w }: { w: Workspace }) {
       </details>
       <Field label="Thought A · main thought">
         <textarea
+          data-structure-slot="a"
           rows={2}
           value={d.thoughtA}
           onChange={(e) => set("thoughtA", e.target.value)}
