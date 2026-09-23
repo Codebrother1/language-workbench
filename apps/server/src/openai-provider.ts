@@ -1,4 +1,5 @@
 import { DEFAULT_OPENAI_MODEL } from "./config.js";
+import { relationalContext } from "./writing-context.js";
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
@@ -70,6 +71,7 @@ export class OpenAIProvider implements LLMProvider {
     // The server filters in addition to telling the model what is authoritative.
     const context = {
       ...request.readContext,
+      RELATIONAL_CONTEXT: relationalContext(request),
       knowledgePacks: request.readContext.knowledgePacks.filter(
         (p) => p.enabled,
       ),

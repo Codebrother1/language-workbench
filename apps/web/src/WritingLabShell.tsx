@@ -24,19 +24,25 @@ import {
   type WritingAction,
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
-import { Button, Field, Select, Range } from "./ui";
+import { Button, Field, Select, Range, GrowingTextarea } from "./ui";
 export function WritingLabShell({
   w,
   navigation,
+  onCompare,
 }: {
   w: Workspace;
   navigation: Wayfinding;
+  onCompare?: () => void;
 }) {
   const { target, response, responseTarget } = w;
   const section = w.doc.sections.find((s) => s.id === target?.sectionId);
   const lab = labFor(section?.kind ?? "Freeform", target?.scope ?? "selection");
+  const sectionIntent =
+    target?.scope === "section" &&
+    Boolean(section && (section.kind !== "Freeform" || section.notes.trim()));
   const hasTarget =
-    Boolean(target?.text.trim()) && target?.scope !== "document";
+    (Boolean(target?.text.trim()) || w.canCoachTarget || sectionIntent) &&
+    target?.scope !== "document";
   const hasWriting = w.doc.sections.some((s) => sectionText(s).trim());
   const isWholeAnalysis = Boolean(
     response && responseTarget?.scope === "document",
@@ -110,7 +116,7 @@ export function WritingLabShell({
     Boolean(w.editor?.state.selection.empty) &&
     w.target?.scope !== "section" &&
     !requestedTool;
-  if (!hasWriting && !explicitStructure && !explicitVariants)
+  if (!hasWriting && !hasTarget && !explicitStructure && !explicitVariants)
     return (
       <aside className="inspector" aria-label="Contextual writing inspector">
         <EmptyInspectorIntro w={w} onCommand={navigation.runCommand} />
@@ -221,7 +227,7 @@ export function WritingLabShell({
           <div className="target-box">
             <div className="row between wrap">
               <span className="eyebrow">
-                <Focus size={14} />
+                <Focus size={14} /> Working on ·
                 {targetLabel === "sentence"
                   ? "CURRENT SENTENCE"
                   : targetLabel === "section"
@@ -236,7 +242,12 @@ export function WritingLabShell({
                 </span>
               )}
             </div>
-            <p>{target.text}</p>
+            <p>
+              {target.text ||
+                (section?.notes
+                  ? "No prose yet — working from your storyboard note."
+                  : "No prose yet. Describe what this part should do.")}
+            </p>
             <small>
               Reads the whole piece. Changes only this {targetLabel}.
             </small>
@@ -323,8 +334,8 @@ export function WritingLabShell({
                 label="Your direction"
                 hint="Your experience and intent lead. AI should ask, not invent."
               >
-                <textarea
-                  rows={2}
+                <GrowingTextarea
+                  rows={4}
                   placeholder="What feels off? What must stay?"
                   value={w.instruction}
                   onChange={(e) => w.setInstruction(e.target.value)}
@@ -351,7 +362,7 @@ export function WritingLabShell({
               </details>
               <Button
                 className="primary full"
-                disabled={w.busy || !target || !target.text.trim() || !w.ready}
+                disabled={w.busy || !w.canCoachTarget || !w.ready}
                 onClick={() => w.ask("diagnose")}
               >
                 {w.busy ? "Thinking…" : `Diagnose this ${targetLabel}`}
@@ -483,8 +494,8 @@ export function WritingLabShell({
                   <textarea
                     rows={3}
                     aria-label="Your material"
-                    value={w.answer}
-                    onChange={(e) => w.setAnswer(e.target.value)}
+                    value={w.responseAnswer}
+                    onChange={(e) => w.setResponseAnswer(e.target.value)}
                     placeholder="Add the detail only you know…"
                   />
                 </Field>
@@ -492,7 +503,7 @@ export function WritingLabShell({
                   className="primary full"
                   disabled={
                     w.busy ||
-                    (!w.answer.trim() &&
+                    (!w.responseAnswer.trim() &&
                       ![
                         "words",
                         "spellcheck",
@@ -641,7 +652,15 @@ export function WritingLabShell({
                     <Copy size={13} />
                   </Button>
                   <Button
-                    onClick={() => setCompare(compare === v.id ? null : v.id)}
+                    onClick={() => {
+                      if (
+                        section &&
+                        ["Segue", "Transition"].includes(section.kind) &&
+                        onCompare
+                      )
+                        onCompare();
+                      else setCompare(compare === v.id ? null : v.id);
+                    }}
                   >
                     Compare
                   </Button>

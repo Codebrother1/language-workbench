@@ -13,8 +13,13 @@ import {
   type WritingSection,
   sectionText,
   targetFor,
-  uid,
 } from "./domain";
+export {
+  SectionBoundaryGuard,
+  allowSectionTopologyChange,
+  authorizedSetContent,
+  type SectionBoundaryReason,
+} from "./section-boundary";
 export const WritingDocument = Node.create({
   name: "doc",
   topNode: true,
@@ -67,27 +72,8 @@ export const WritingSectionNode = Node.create({
   content: "block+",
   defining: true,
   isolating: true,
-  addProseMirrorPlugins() {
-    return [
-      new Plugin({
-        appendTransaction(_transactions, _old, state) {
-          let changed = false;
-          const tr = state.tr;
-          const seen = new Set<string>();
-          state.doc.forEach((node, pos) => {
-            if (node.type.name !== "writingSection") return;
-            const id = node.attrs.id;
-            if (!id || seen.has(id)) {
-              tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: uid() });
-              changed = true;
-            }
-            seen.add(id);
-          });
-          return changed ? tr : null;
-        },
-      }),
-    ];
-  },
+  // Identity is assigned by explicit document/section commands, never repaired
+  // after native input. A repair could turn unsafe paste into new section instances.
   addAttributes() {
     return {
       id: { default: null },
@@ -319,3 +305,5 @@ export function clipboardPlainText(slice: Slice): string {
       : "\n";
   return nodes.map(render).join(separator);
 }
+
+export { allowSectionLocalEdit } from "./section-boundary";

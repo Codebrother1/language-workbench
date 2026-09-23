@@ -78,29 +78,84 @@ export function searchLibrary(
   query: string,
   kind?: string,
 ): LibraryItem[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return items.filter(
-    (i) =>
-      (!kind ||
+  const normalize = (value: string) =>
+    value
+      .normalize("NFKD")
+      .toLowerCase()
+      .replace(/\p{M}+/gu, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  const normalized = normalize(query);
+  const terms = normalized.split(/\s+/).filter(Boolean);
+  // Bounded Levenshtein distance <= 1, not semantic matching or fuzzy prefixes.
+  // Short query terms stay literal so "que" never turns into arbitrary near-words.
+  const oneEdit = (a: string, b: string) => {
+    const left = Array.from(a),
+      right = Array.from(b);
+    if (Math.abs(left.length - right.length) > 1) return false;
+    let i = 0,
+      j = 0,
+      edits = 0;
+    while (i < left.length && j < right.length) {
+      if (left[i] === right[j]) {
+        i++;
+        j++;
+        continue;
+      }
+      if (++edits > 1) return false;
+      if (left.length >= right.length) i++;
+      if (right.length >= left.length) j++;
+    }
+    return edits + (left.length - i) + (right.length - j) <= 1;
+  };
+  return items
+    .filter(
+      (item) =>
+        !kind ||
         kind === "all" ||
-        (kind === "my_language" ? i.myLanguage : i.kind === kind)) &&
-      terms.every((t) =>
+        (kind === "my_language" ? item.myLanguage : item.kind === kind),
+    )
+    .map((item, index) => {
+      const content = normalize(item.content);
+      const metadata = normalize(
         [
-          i.title,
-          i.content,
-          i.notes,
-          i.register,
-          ...i.tags,
-          ...i.effects,
-          ...i.sectionKinds,
-          ...i.contentTypes,
-          ...i.audiences,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(t),
-      ),
-  );
+          item.title,
+          item.notes,
+          item.register,
+          ...item.tags,
+          ...item.effects,
+          ...item.sectionKinds,
+          ...item.contentTypes,
+          ...item.audiences,
+        ].join(" "),
+      );
+      const words = `${content} ${metadata}`.split(/\s+/).filter(Boolean);
+      const matches = terms.map((term) =>
+        content.includes(term)
+          ? 3
+          : metadata.includes(term)
+            ? 2
+            : Array.from(term).length >= 4 &&
+                words.some((word) => oneEdit(term, word))
+              ? 1
+              : 0,
+      );
+      // All-literal content first, then literal mixed/metadata, then typo fallback.
+      // Input order is retained within equal ranks (and for an empty query).
+      const rank = !terms.length
+        ? 0
+        : matches.every((match) => match === 3)
+          ? content.includes(normalized)
+            ? 5
+            : 4
+          : matches.every((match) => match >= 2)
+            ? 3
+            : 1;
+      return { item, index, rank, matched: matches.every(Boolean) };
+    })
+    .filter((result) => result.matched)
+    .sort((a, b) => b.rank - a.rank || a.index - b.index)
+    .map((result) => result.item);
 }
 /** Likes are references, never insertion commands. Repeated use lowers suggestion rank. */
 export function relevantLibraryItems(

@@ -97,7 +97,7 @@ export function useWayfinding(w: Workspace) {
           .querySelector<HTMLDetailsElement>(".model-controls-body details")
           ?.setAttribute("open", "");
       const panel = element.closest<HTMLElement>(".inspector");
-      if (panel)
+      if (panel && panel.scrollHeight > panel.clientHeight)
         panel.scrollTo({
           top:
             panel.scrollTop +
@@ -106,6 +106,8 @@ export function useWayfinding(w: Workspace) {
             16,
           behavior: "smooth",
         });
+      else if (panel)
+        element.scrollIntoView({ block: "start", behavior: "smooth" });
       const field = toolNavigation.focus
         ? element.querySelector<HTMLElement>(toolNavigation.focus)
         : null;
@@ -115,6 +117,7 @@ export function useWayfinding(w: Workspace) {
   }, [toolNavigation]);
   const showTool = (tool: ToolDestination, focus?: string) => {
     w.setPanel(null);
+    if (tool !== "sections") void w.setInspectorVisible(true);
     if (
       [
         "word",
@@ -157,6 +160,7 @@ export function useWayfinding(w: Workspace) {
     switch (id) {
       case "write":
         w.setPanel(null);
+        void w.setPreviewVisible(true);
         setToolNavigation(null);
         w.editor?.commands.focus();
         return;

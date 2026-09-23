@@ -2,10 +2,40 @@ import {
   matchesLibraryScope,
   relevantLibraryItems,
   resolveWritingStyle,
+  sectionText,
   type AIRequest,
   type PersonalLibrary,
 } from "@workbench/domain";
 import type { Repository } from "./repository.js";
+
+/** Derived read-only context; duplicate labels/kinds never determine adjacency. */
+export function relationalContext(request: AIRequest) {
+  const sections = request.readContext.document.sections;
+  const index = sections.findIndex(
+    (s) => s.id === request.editTarget.sectionId,
+  );
+  const describe = (position: number) => {
+    const section = sections[position];
+    return section
+      ? {
+          sectionId: section.id,
+          index: position,
+          kind: section.kind,
+          role: section.kind,
+          label: section.label,
+          notes: section.notes,
+          text: sectionText(section),
+        }
+      : null;
+  };
+  return index < 0
+    ? { previous: null, current: null, next: null }
+    : {
+        previous: describe(index - 1),
+        current: describe(index),
+        next: describe(index + 1),
+      };
+}
 
 /** The sole server enrichment path, shared by the registry, comparisons and legacy injection.
  * Scope lists are OR within a dimension, AND across dimensions; audiences are exact labels

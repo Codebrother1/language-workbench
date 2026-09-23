@@ -13,6 +13,8 @@ import {
   type StructureRequest,
 } from "./domain";
 
+import { patchTargetDraft } from "./target-drafts";
+
 export function getWorkbench(
   doc: Document,
   sectionId: string | null,
@@ -66,10 +68,11 @@ export function inspectRun(wb: SectionWorkbench, id: string): SectionWorkbench {
   const run = wb.runs.find((r) => r.id === id);
   return run
     ? {
-        ...wb,
+        ...patchTargetDraft(wb, run.target, {
+          instruction: run.instruction,
+          answer: run.answer,
+        }),
         activeRunId: id,
-        instruction: run.instruction,
-        answer: run.answer,
         action: run.action,
         controls: { ...run.controls },
         lens: run.lens ?? wb.lens,
@@ -227,6 +230,16 @@ export function forkWorkbench(
   return (
     wb && {
       ...wb,
+      ...(wb.targetDrafts
+        ? {
+            targetDrafts: Object.fromEntries(
+              Object.entries(wb.targetDrafts).map(([key, draft]) => [
+                key,
+                { ...draft, target: { ...draft.target, documentId } },
+              ]),
+            ),
+          }
+        : {}),
       runs: wb.runs.map((run) => ({
         ...run,
         target: { ...run.target, documentId },

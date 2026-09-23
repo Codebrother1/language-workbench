@@ -134,6 +134,15 @@ export const workbenchRunSchema = z.object({
 });
 export type WorkbenchRun = z.infer<typeof workbenchRunSchema>;
 export const sectionWorkbenchSchema = z.object({
+  targetDrafts: z
+    .record(
+      z.object({
+        target: editTargetSchema,
+        instruction: z.string(),
+        answer: z.string(),
+      }),
+    )
+    .optional(),
   structure: structureDraftSchema.optional(),
   instruction: z.string().default(""),
   answer: z.string().default(""),
@@ -205,20 +214,28 @@ export const sourceMaterialSchema = z.object({
   url: z.string().default(""),
 });
 export type SourceMaterial = z.infer<typeof sourceMaterialSchema>;
-export const documentSchema = z.object({
-  schemaVersion: z.literal(1),
-  id: z.string(),
-  title: z.string().min(1).max(240),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  revision: z.number().int().min(0),
-  brief: writingBriefSchema,
-  sections: z.array(writingSectionSchema).min(1),
-  sources: z.array(sourceMaterialSchema).default([]),
-  history: z.array(iterationSchema).default([]),
-  defaultModel: modelRefSchema.nullable().optional(),
-  workbench: sectionWorkbenchSchema.optional(),
-});
+export const documentSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    id: z.string(),
+    title: z.string().min(1).max(240),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    revision: z.number().int().min(0),
+    brief: writingBriefSchema,
+    sections: z.array(writingSectionSchema).min(1),
+    sources: z.array(sourceMaterialSchema).default([]),
+    history: z.array(iterationSchema).default([]),
+    focusTarget: editTargetSchema.nullable().optional(),
+    defaultModel: modelRefSchema.nullable().optional(),
+    workbench: sectionWorkbenchSchema.optional(),
+  })
+  .refine(
+    (doc) =>
+      doc.sections.every((s) => s.id.trim().length > 0) &&
+      new Set(doc.sections.map((s) => s.id)).size === doc.sections.length,
+    { message: "Section identities must be nonempty and unique." },
+  );
 export type Document = z.infer<typeof documentSchema>;
 export const styleDNASchema = z.object({
   sentenceLengths: z
@@ -287,6 +304,14 @@ export const radarItemSchema = z.object({
 });
 export type LanguageRadarItem = z.infer<typeof radarItemSchema>;
 export const settingsSchema = z.object({
+  layout: z
+    .object({
+      primaryView: z.enum(["workbench", "document"]).default("workbench"),
+      density: z.enum(["comfortable", "overview"]).default("comfortable"),
+      previewVisible: z.boolean().default(true),
+      inspectorVisible: z.boolean().default(true),
+    })
+    .optional(),
   styleDNA: styleDNASchema,
   knowledgePacks: z.array(knowledgePackSchema),
   radar: z.array(radarItemSchema),

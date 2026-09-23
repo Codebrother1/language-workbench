@@ -9,6 +9,7 @@ import {
   type LanguageRadarItem,
 } from "@workbench/domain";
 import { APIError } from "./errors.js";
+import { relationalContext } from "./writing-context.js";
 import {
   forbiddenPhrases,
   protectedQuotePattern,
@@ -367,6 +368,96 @@ export class MockProvider implements LLMProvider {
                   : "Only the existing offline trim rules were applied to your supplied preview. No new wording or claims were added; check whether removed emphasis mattered.",
             },
           ];
+      }
+      return validateProviderResponse(request, output, "mock");
+    }
+    const relation = relationalContext(request);
+    if (
+      relation.current?.kind === "Segue" &&
+      relation.current.text === "" &&
+      request.editTarget.scope === "section" &&
+      !request.lens
+    ) {
+      const from = relation.previous
+        ? `${relation.previous.label} (${relation.previous.role})`
+        : "the document opening";
+      const to = relation.next
+        ? `${relation.next.label} (${relation.next.role})`
+        : "the document ending";
+      output.diagnosis += ` This Segue is canonically empty, with a structural job between ${from} and ${to}; empty is not missing source material.`;
+      output.mechanism = `A bridge should name the relationship rather than merely announce the next section. ${relation.current.notes ? `Your section note: ${JSON.stringify(relation.current.notes)}. ` : ""}Read the preceding ending and following opening as context only. Advice scaffold: [what carries forward] → [how the next thought relates]. Those slots are questions, not candidate text or inferred facts.`;
+      if (relation.previous)
+        output.mechanism += ` Preceding ending (read-only): ${JSON.stringify(relation.previous.text.slice(-240))}.`;
+      if (relation.next)
+        output.mechanism += ` Following opening (read-only): ${JSON.stringify(relation.next.text.slice(0, 240))}.`;
+      output.question = `What actual connection should carry the reader from ${from} to ${to}${relation.current.notes ? `, following your note ${JSON.stringify(relation.current.notes)}` : ""}? Supply one or two bridge lines in your own words; which idea must carry forward?`;
+      if (
+        request.stage === "propose" &&
+        !["critique", "break_template", "words", "spellcheck"].includes(
+          request.action,
+        )
+      ) {
+        const material = request.answer.replace(/^material:\s*/i, "").trim();
+        const trimmed = offlineEdit({
+          ...request,
+          action: "shorten",
+          editTarget: { ...request.editTarget, text: material },
+        })!;
+        const lines = material
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        // Two human-supplied lines are alternatives; otherwise offer a real conservative
+        // trim when possible. Never fabricate a second variant merely to meet a count.
+        const candidates =
+          lines.length === 2
+            ? lines.map((text, i) => ({
+                text,
+                label: `Your supplied line ${i + 1} — verbatim`,
+                explanation:
+                  "A human-furnished alternative, not an invented bridge. Accept replaces only the empty Segue.",
+              }))
+            : [
+                {
+                  text: material,
+                  label: "Your supplied wording — verbatim",
+                  explanation:
+                    "Your answer with an optional Material: label removed. If this is a direction rather than actual draft wording, do not accept it; supply the passage instead.",
+                },
+                {
+                  ...trimmed,
+                  explanation: `${trimmed.explanation} Applied only to your supplied answer, not neighboring text.`,
+                },
+              ];
+        const seen = new Set<string>();
+        output.proposals = candidates
+          .filter((candidate) => {
+            if (
+              !candidate.text ||
+              seen.has(candidate.text) ||
+              proposalViolation(request, candidate.text)
+            )
+              return false;
+            seen.add(candidate.text);
+            return true;
+          })
+          .slice(0, request.variantCount)
+          .map((candidate) => ({
+            ...candidate,
+            id: `offline-${createHash("sha256")
+              .update(
+                JSON.stringify([
+                  request.editTarget,
+                  request.action,
+                  candidate.text,
+                ]),
+              )
+              .digest("hex")
+              .slice(0, 16)}`,
+          }));
+        if (output.proposals.length < Math.min(2, request.variantCount))
+          output.mechanism +=
+            " No distinct safe second wording was found; supply two alternative bridge lines if you want two verbatim choices.";
       }
       return validateProviderResponse(request, output, "mock");
     }

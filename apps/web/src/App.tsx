@@ -1,3 +1,5 @@
+import { RelationalContext, RelationalCompare } from "./RelationalWorkspace";
+import { modelLabel } from "./ModelControls";
 import { FirstMove } from "./FirstMove";
 import { useWayfinding } from "./wayfinding";
 import { CommandPalette } from "./CommandPalette";
@@ -45,7 +47,7 @@ import {
   sectionText,
   contentTypeConfig,
 } from "./domain";
-import { Button, Select, Field, Dialog, download } from "./ui";
+import { Button, Select, Field, Dialog, GrowingTextarea, download } from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
 function Structure({
@@ -57,14 +59,44 @@ function Structure({
 }) {
   const drag = useRef<string | null>(null);
   return (
-    <nav className="structure" aria-label="Document structure">
+    <nav
+      className={
+        "structure " +
+        (w.layout.primaryView === "workbench" ? "timeline" : "") +
+        " density-" +
+        w.layout.density
+      }
+      aria-label="Document structure"
+    >
       <div className="row between">
-        <span className="eyebrow">STRUCTURE</span>
+        <span className="eyebrow">
+          {w.layout.primaryView === "workbench" ? "WORKBENCH" : "STRUCTURE"}
+        </span>
         <span className="count">{w.doc.sections.length}</span>
       </div>
       <p className="small muted structure-hint">
         Drag parts to change their order.
       </p>
+      {w.layout.primaryView === "workbench" && (
+        <div
+          className="row density-controls"
+          role="group"
+          aria-label="Card density"
+        >
+          <Button
+            aria-pressed={w.layout.density === "comfortable"}
+            onClick={() => w.setDensity("comfortable")}
+          >
+            Comfortable
+          </Button>
+          <Button
+            aria-pressed={w.layout.density === "overview"}
+            onClick={() => w.setDensity("overview")}
+          >
+            Overview
+          </Button>
+        </div>
+      )}
       <div className="section-list">
         {w.doc.sections.map((s, i) => (
           <div
@@ -74,10 +106,30 @@ function Structure({
             }
             data-testid="structure-item"
             data-section-id={s.id}
+            onClick={(event) => {
+              if (
+                (event.target as HTMLElement).closest(
+                  "button,input,textarea,select,details,a",
+                ) ||
+                window.getSelection()?.toString()
+              )
+                return;
+              w.focusSection(s.id);
+            }}
             draggable
-            onDragStart={(e) => {
+            onPointerDownCapture={() => {
               drag.current = s.id;
-              e.dataTransfer.setData("text/plain", s.id);
+            }}
+            onPointerUpCapture={() => {
+              drag.current = null;
+            }}
+            onDragEnd={() => {
+              drag.current = null;
+            }}
+            onDragStart={(e) => {
+              const sourceId = drag.current ?? s.id;
+              drag.current = sourceId;
+              e.dataTransfer.setData("text/plain", sourceId);
               e.dataTransfer.effectAllowed = "move";
             }}
             onDragOver={(e) => {
@@ -107,8 +159,72 @@ function Structure({
               </button>
             </div>
             <div className="section-excerpt">
-              {sectionText(s).slice(0, 64) || "Start writing…"}
+              {w.layout.primaryView === "workbench"
+                ? sectionText(s) ||
+                  "No prose yet. Give this beat a purpose in its note."
+                : sectionText(s).slice(0, 64) || "Start writing…"}
             </div>
+            {w.layout.primaryView === "workbench" && (
+              <>
+                <span className="section-role">{s.kind}</span>
+                {s.modelOverride && (
+                  <small className="card-model">
+                    {modelLabel(w.catalog, s.modelOverride)}
+                  </small>
+                )}
+                {w.layout.density === "comfortable" &&
+                w.target?.sectionId === s.id ? (
+                  <Field label="Storyboard note">
+                    <GrowingTextarea
+                      aria-label="Section notes · AI context"
+                      rows={3}
+                      value={s.notes}
+                      onFocus={() => w.prepareSectionTarget(s.id)}
+                      onChange={(e) =>
+                        w.update((d) => ({
+                          ...d,
+                          sections: d.sections.map((x) =>
+                            x.id === s.id ? { ...x, notes: e.target.value } : x,
+                          ),
+                        }))
+                      }
+                      placeholder="What should this beat do? What should it hold back?"
+                    />
+                  </Field>
+                ) : (
+                  s.notes && <p className="card-note">{s.notes}</p>
+                )}
+                {w.target?.sectionId === s.id && (
+                  <div className="card-essential row wrap">
+                    <Button
+                      onClick={(e) =>
+                        w.requestSectionInsertion(s.id, e.currentTarget)
+                      }
+                    >
+                      + Add before
+                    </Button>
+                    <Button
+                      onClick={(e) =>
+                        w.requestSectionInsertion(
+                          w.doc.sections[i + 1]?.id ?? null,
+                          e.currentTarget,
+                        )
+                      }
+                    >
+                      + Add after
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        w.setPreviewVisible(true);
+                        w.focusSection(s.id, true);
+                      }}
+                    >
+                      Edit full prose
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
             {w.target?.sectionId === s.id && (
               <details className="section-options">
                 <summary>
@@ -139,20 +255,27 @@ function Structure({
                     ))}
                   </Select>
                 </Field>
-                <Field label="Section notes · AI context">
-                  <textarea
-                    rows={2}
-                    value={s.notes}
-                    onChange={(e) =>
-                      w.update((d) => ({
-                        ...d,
-                        sections: d.sections.map((x) =>
-                          x.id === s.id ? { ...x, notes: e.target.value } : x,
-                        ),
-                      }))
-                    }
-                  />
-                </Field>
+                {(w.layout.primaryView !== "workbench" ||
+                  w.layout.density === "overview") && (
+                  <>
+                    <Field label="Section notes · AI context">
+                      <textarea
+                        rows={2}
+                        value={s.notes}
+                        onChange={(e) =>
+                          w.update((d) => ({
+                            ...d,
+                            sections: d.sections.map((x) =>
+                              x.id === s.id
+                                ? { ...x, notes: e.target.value }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                    </Field>
+                  </>
+                )}
                 <div className="instance-actions">
                   <Button
                     onClick={(e) =>
@@ -317,19 +440,40 @@ export default function App() {
     id?: string;
   } | null>(null);
   const [menu, setMenu] = useState(false);
+  const [compareSection, setCompareSection] = useState<string | null>(null);
   const text = documentText(w.doc);
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
   return (
-    <div className={"app " + (!w.nav ? "nav-hidden" : "")}>
+    <div
+      className={
+        "app " +
+        (w.layout.primaryView === "workbench"
+          ? "workbench-mode"
+          : "document-mode") +
+        " " +
+        (w.layout.density === "overview" ? "overview-mode" : "") +
+        " " +
+        (!w.nav && w.layout.primaryView === "document" ? "nav-hidden" : "") +
+        " " +
+        (!w.layout.previewVisible ? "preview-hidden" : "") +
+        " " +
+        (!w.layout.inspectorVisible ? "inspector-hidden" : "")
+      }
+    >
       <header className="topbar">
         <div className="topbar-main">
           <Button
             className="icon nav-toggle"
             aria-label="Toggle structure"
-            aria-pressed={w.nav}
-            onClick={() => w.setNav(!w.nav)}
+            aria-pressed={w.layout.primaryView === "workbench" || w.nav}
+            onClick={() => {
+              if (w.layout.primaryView === "workbench") {
+                w.setPrimaryView("document");
+                w.setNav(false);
+              } else w.setNav(!w.nav);
+            }}
           >
             <PanelLeft size={19} />
           </Button>
@@ -388,6 +532,14 @@ export default function App() {
           </button>
         </div>
         <div className="topbar-actions">
+          <Button
+            className="top-action document-sources"
+            aria-label="Document sources"
+            title="Sources belong to the whole document"
+            onClick={() => w.setPanel("sources")}
+          >
+            Sources · {w.doc.sources.length}
+          </Button>
           <Button
             className="top-action command-trigger"
             aria-label="Find a tool"
@@ -588,8 +740,38 @@ export default function App() {
           </Button>
         </div>
       )}
+      <div className="viewbar">
+        <div className="row" role="group" aria-label="Primary view">
+          <Button
+            aria-pressed={w.layout.primaryView === "workbench"}
+            onClick={() => w.setPrimaryView("workbench")}
+          >
+            Workbench
+          </Button>
+          <Button
+            aria-pressed={w.layout.primaryView === "document"}
+            onClick={() => w.setPrimaryView("document")}
+          >
+            Document View
+          </Button>
+        </div>
+        <div className="row">
+          {w.layout.primaryView === "workbench" && (
+            <Button
+              onClick={() => w.setPreviewVisible(!w.layout.previewVisible)}
+            >
+              {w.layout.previewVisible ? "Hide preview" : "Show preview"}
+            </Button>
+          )}
+          <Button
+            onClick={() => w.setInspectorVisible(!w.layout.inspectorVisible)}
+          >
+            {w.layout.inspectorVisible ? "Hide Inspector" : "Show Inspector"}
+          </Button>
+        </div>
+      </div>
       <div className="workspace">
-        {w.nav && (
+        {(w.nav || w.layout.primaryView === "workbench") && (
           <Structure
             w={w}
             onRemove={(id) => setConfirmation({ kind: "section", id })}
@@ -597,6 +779,23 @@ export default function App() {
         )}
         <main className="writing">
           <Toolbar w={w} />
+          <div className="selected-preview-heading">
+            <span className="eyebrow">
+              {w.layout.primaryView === "workbench"
+                ? "Assembled preview · same writing"
+                : "Document View"}
+            </span>
+            <b>
+              {w.doc.sections.find((s) => s.id === w.selectedSectionId)
+                ?.label ?? "Your document"}
+            </b>
+          </div>
+          {w.layout.primaryView === "workbench" && (
+            <RelationalContext
+              w={w}
+              onCompare={() => setCompareSection(w.selectedSectionId)}
+            />
+          )}
           <div className="page">
             <div className="page-caption">
               <span className="eyebrow">YOUR WORDS, FIRST</span>
@@ -638,9 +837,16 @@ export default function App() {
             </span>
           </footer>
         </main>
-        <WritingLabShell w={w} navigation={navigation} />
+        <WritingLabShell
+          w={w}
+          navigation={navigation}
+          onCompare={() => setCompareSection(w.selectedSectionId)}
+        />
       </div>
       <UtilityPanel w={w} libraryNavigation={navigation.libraryNavigation} />
+      {compareSection && compareSection === w.selectedSectionId && (
+        <RelationalCompare w={w} close={() => setCompareSection(null)} />
+      )}
       {navigation.paletteOpen && (
         <CommandPalette
           initialQuery={navigation.initialQuery}

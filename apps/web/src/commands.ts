@@ -221,7 +221,17 @@ export const commands: CommandDefinition[] = [
     id: "sources",
     label: "Sources — what they actually said",
     description: "Keep reference material separate from your writing.",
-    keywords: ["source", "reference", "transcript", "quote", "clip", "comment"],
+    keywords: [
+      "source",
+      "sources",
+      "reference",
+      "reference material",
+      "transcript",
+      "paste source",
+      "quote",
+      "clip",
+      "comment",
+    ],
     group: "Find your tools",
   },
   {

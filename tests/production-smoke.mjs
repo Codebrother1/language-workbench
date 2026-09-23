@@ -184,11 +184,31 @@ try {
     connectorId: "contrast-however",
     customTemplate: "[X]; however, [Y].",
   };
+  doc.focusTarget = {
+    ...target,
+    scope: "selection",
+    start: 0,
+    end: 5,
+    text: target.text.slice(0, 5),
+  };
+  doc.sections[0].workbench.targetDrafts = {
+    [JSON.stringify(["selection", 0, 5, doc.focusTarget.text])]: {
+      target: doc.focusTarget,
+      instruction: "Only this selected language.",
+      answer: "A target-local answer.",
+    },
+  };
   doc = await api("/documents/" + doc.id, "PUT", doc);
   const settings = await api("/settings");
   settings.styleDNA.rhythm = "Fragments. Then a long breath.";
   settings.styleDNA.neverSuggest = ["synergy"];
   settings.theme = "dark";
+  settings.layout = {
+    primaryView: "workbench",
+    density: "overview",
+    previewVisible: false,
+    inspectorVisible: true,
+  };
   settings.knowledgePacks[0].principles = "My lawful technical notes.";
   settings.radar = [
     {
@@ -306,6 +326,9 @@ try {
       !js.includes(secret),
     ); /* Environment variable names in settings instructions are public, not credentials. */
   }
+  console.log(
+    "PASS: primary Workbench/density/layout, exact focus target and target-specific directions survive a compiled-server restart.",
+  );
   console.log(
     "PASS: section-local drafts/runs, independent model overrides, routing defaults and catalogs survive restart; provider endpoints and served frontend do not expose a configured synthetic credential.",
   );

@@ -125,6 +125,16 @@ export class Repository {
     ): SectionWorkbench | undefined =>
       w && {
         ...w,
+        // Draft keys identify coordinates (scope/start/end/text), not document identities.
+        // Preserve those keys and all draft material while remapping captured targets.
+        targetDrafts:
+          w.targetDrafts &&
+          Object.fromEntries(
+            Object.entries(w.targetDrafts).map(([key, draft]) => [
+              key,
+              { ...draft, target: remapTarget(draft.target) },
+            ]),
+          ),
         proposalStates: Object.fromEntries(
           Object.entries(w.proposalStates).map(([id, state]) => [
             proposalIds.get(id) ?? id,
@@ -154,6 +164,9 @@ export class Repository {
     return this.insert({
       ...doc,
       workbench: remapWorkbench(doc.workbench),
+      focusTarget: doc.focusTarget
+        ? remapTarget(doc.focusTarget)
+        : doc.focusTarget,
       id,
       revision: 0,
       createdAt: now,

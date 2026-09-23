@@ -103,6 +103,8 @@ export function duplicateSection(doc: Document, sectionId: string): Document {
   }
   const wb = copy.workbench;
   if (wb) {
+    for (const draft of Object.values(wb.targetDrafts ?? {}))
+      draft.target = remapTarget(draft.target);
     for (const run of wb.runs ?? []) {
       run.id = mappedId(runIds, run.id);
       run.target = remapTarget(run.target);

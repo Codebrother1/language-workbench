@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { EditorState } from "@tiptap/pm/state";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import {
   type Document,
   type WritingSection,
@@ -58,11 +58,15 @@ import {
   WritingDocument,
   WritingSectionNode,
   TargetHighlight,
+  SectionBoundaryGuard,
+  authorizedSetContent,
+  allowSectionLocalEdit,
   toEditor,
   fromEditor,
   cursorTarget,
   highlight,
   sectionLocation,
+  positionMap,
   targetRange,
   clipboardPlainText,
 } from "./editor";
@@ -84,6 +88,15 @@ import {
   type SaveLibraryItemInput,
   type LibraryItemPatch,
 } from "./library-helpers";
+import {
+  getTargetDraft,
+  patchTargetDraft,
+  restoreFocusTarget,
+  withFocusTarget,
+  sameFocusTarget,
+  canCoachTarget as hasCoachContext,
+} from "./target-drafts";
+
 export async function api<T>(
   path: string,
   method = "GET",
@@ -122,6 +135,9 @@ function forkDocument(doc: Document, title = doc.title): Document {
     title,
     revision: 0,
     workbench: forkWorkbench(doc.workbench, id),
+    focusTarget: doc.focusTarget
+      ? { ...doc.focusTarget, documentId: id }
+      : null,
     createdAt: new Date().toISOString(),
     sections: doc.sections.map((s) => ({
       ...s,
@@ -171,7 +187,9 @@ export function useWorkspace() {
   const [saveState, setSaveState] = useState("Connecting");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [target, setTarget] = useState<EditTarget | null>(null);
+  const [target, setTargetState] = useState<EditTarget | null>(null);
+  const targetRef = useRef<EditTarget | null>(null);
+  const selectingExplicitTarget = useRef(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [nav, setNav] = useState(() => window.innerWidth > 900);
   const [busy, setBusy] = useState(false);
@@ -194,6 +212,12 @@ export function useWorkspace() {
       WritingDocument,
       WritingSectionNode,
       TargetHighlight,
+      SectionBoundaryGuard.configure({
+        onBlocked: () =>
+          setNotice(
+            "Section boundaries are protected. Edit within one section, or use section controls to change structure.",
+          ),
+      }),
     ],
     content: toEditor(initial.current),
     editorProps: {
@@ -227,7 +251,7 @@ export function useWorkspace() {
       while (dirty.current > saved.current) {
         const version = dirty.current,
           snapshot = {
-            ...current.current,
+            ...withFocusTarget(current.current, targetRef.current),
             title: current.current.title.trim() || "Untitled",
           };
         setSaveState("Saving");
@@ -239,7 +263,7 @@ export function useWorkspace() {
           );
           if (current.current.id === snapshot.id) {
             const merged = {
-              ...current.current,
+              ...withFocusTarget(current.current, targetRef.current),
               revision: result.revision,
               updatedAt: result.updatedAt,
             };
@@ -268,6 +292,67 @@ export function useWorkspace() {
       inflight.current = null;
     }
   }, []);
+  const setTarget = useCallback(
+    (value: SetStateAction<EditTarget | null>) => {
+      const next =
+        typeof value === "function" ? value(targetRef.current) : value;
+      const changed = !sameFocusTarget(targetRef.current, next);
+      targetRef.current = next;
+      setTargetState(next);
+      // Selection metadata shares the document save queue, without a document
+      // state update or nested editor dispatch in selectionUpdate.
+      if (changed && isReady.current) {
+        dirty.current++;
+        setSaveState("Unsaved");
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => {
+          void flush().catch(() => {});
+        }, 700);
+      }
+    },
+    [flush],
+  );
+  const explicitAnchor = useRef<{
+    from: number;
+    to: number;
+    sectionId: string;
+    sectionSnapshot: string;
+  } | null>(null);
+  const selectExactTarget = (next: EditTarget | null, selectRange = true) => {
+    selectingExplicitTarget.current = true;
+    try {
+      if (editor && next?.sectionId) {
+        const range = targetRange(editor, next);
+        if (range)
+          editor.view.dispatch(
+            editor.state.tr
+              .setSelection(
+                TextSelection.create(
+                  editor.state.doc,
+                  range.from,
+                  selectRange && next.scope !== "section"
+                    ? range.to
+                    : range.from,
+                ),
+              )
+              .setMeta("addToHistory", false),
+          );
+      }
+      if (editor && next?.sectionId)
+        explicitAnchor.current = {
+          from: editor.state.selection.from,
+          to: editor.state.selection.to,
+          sectionId: next.sectionId,
+          sectionSnapshot: next.sectionSnapshot,
+        };
+      else explicitAnchor.current = null;
+      setTarget(next);
+      setDocumentWorkbench(next?.scope === "document");
+      if (editor) highlight(editor, next);
+    } finally {
+      selectingExplicitTarget.current = false;
+    }
+  };
   const update = useCallback(
     (fn: (d: Document) => Document) => {
       const next = {
@@ -288,9 +373,27 @@ export function useWorkspace() {
   );
   updateRef.current = update;
   selectRef.current = () => {
-    if (!editor || editor.view.composing) return;
+    if (!editor || editor.view.composing || selectingExplicitTarget.current)
+      return;
+    const anchor = explicitAnchor.current;
+    if (
+      anchor &&
+      editor.state.selection.from === anchor.from &&
+      editor.state.selection.to === anchor.to &&
+      current.current.sections.some(
+        (s) =>
+          s.id === anchor.sectionId &&
+          sectionText(s) === anchor.sectionSnapshot,
+      )
+    )
+      return;
+    explicitAnchor.current = null;
     const t = cursorTarget(editor, current.current);
-    setTarget(t);
+    setTarget(
+      t?.sectionId && !t.sectionSnapshot
+        ? targetFor(current.current, t.sectionId)
+        : t,
+    );
     setDocumentWorkbench(false);
   };
   useEffect(() => {
@@ -339,7 +442,7 @@ export function useWorkspace() {
         setDoc(active);
         setDocuments(ds);
         if (editor) {
-          editor.commands.setContent(toEditor(active), { emitUpdate: false });
+          authorizedSetContent(editor, toEditor(active), { emitUpdate: false });
           editor.view.updateState(
             EditorState.create({
               schema: editor.schema,
@@ -348,7 +451,7 @@ export function useWorkspace() {
             }),
           );
         }
-        setTarget(cursorTarget(editor, active));
+        selectExactTarget(restoreFocusTarget(active));
         if (document.activeElement === document.body || editor.view.hasFocus())
           editor.view.focus();
         isReady.current = true;
@@ -531,7 +634,8 @@ export function useWorkspace() {
   const sync = (next: Document) => {
     update(() => next);
     if (editor) editor.view.dispatch(closeHistory(editor.state.tr));
-    editor?.commands.setContent(toEditor(next), { emitUpdate: false });
+    if (editor)
+      authorizedSetContent(editor, toEditor(next), { emitUpdate: false });
     if (editor) editor.view.dispatch(closeHistory(editor.state.tr));
     setTarget(null);
     if (editor) highlight(editor, null);
@@ -544,7 +648,7 @@ export function useWorkspace() {
     dirty.current = 0;
     saved.current = 0;
     if (editor) {
-      editor.commands.setContent(toEditor(next), { emitUpdate: false });
+      authorizedSetContent(editor, toEditor(next), { emitUpdate: false });
       editor.view.updateState(
         EditorState.create({
           schema: editor.schema,
@@ -553,8 +657,9 @@ export function useWorkspace() {
         }),
       );
     }
-    setTarget(editor ? cursorTarget(editor, next) : null);
-    setDocumentWorkbench(false);
+    selectExactTarget(restoreFocusTarget(next));
+    // Restoring saved metadata is not a user edit.
+    saved.current = dirty.current;
     setSaveState("Saved");
   };
   const navigate = async (id: string) => {
@@ -594,7 +699,7 @@ export function useWorkspace() {
       await flush();
       setDocuments((ds) => [...ds, next]);
       load(next);
-      editor?.commands.focus("start");
+      if (!duplicate) editor?.view.focus();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -646,16 +751,46 @@ export function useWorkspace() {
       navigating.current = false;
     }
   };
-  const focusSection = (id: string) => {
-    setDocumentWorkbench(false);
-    if (!editor) return;
-    const loc = sectionLocation(editor, id);
-    if (loc) {
-      editor.commands.setTextSelection(loc.pos + 2);
-      editor.view.focus();
-      const t = targetFor(current.current, id);
-      setTarget(t);
-      highlight(editor, t);
+  const prepareSectionTarget = (id: string): EditTarget | null => {
+    if (!current.current.sections.some((s) => s.id === id)) return null;
+    const next = targetFor(current.current, id);
+    selectExactTarget(next, false);
+    return next;
+  };
+  const focusSection = (id: string, forceText = false) => {
+    const next = prepareSectionTarget(id);
+    if (next && editor) {
+      selectingExplicitTarget.current = true;
+      try {
+        editor.view.focus();
+        const pos = editor.state.selection.from;
+        const dom = editor.view.domAtPos(pos);
+        editor.view.dom.ownerDocument
+          .getSelection()
+          ?.setBaseAndExtent(dom.node, dom.offset, dom.node, dom.offset);
+        setTarget(next);
+        highlight(editor, next);
+        const preview = editor.view.dom.closest<HTMLElement>(".writing");
+        const node = Array.from(editor.view.dom.children).find(
+          (node) => (node as HTMLElement).id === id,
+        ) as HTMLElement | undefined;
+        if (preview && node && preview.scrollHeight > preview.clientHeight) {
+          const section = current.current.sections.find((s) => s.id === id);
+          if (
+            !forceText &&
+            section &&
+            ["Segue", "Transition"].includes(section.kind)
+          )
+            preview.scrollTop = 0;
+          else
+            preview.scrollTop +=
+              node.getBoundingClientRect().top -
+              preview.getBoundingClientRect().top -
+              150;
+        }
+      } finally {
+        selectingExplicitTarget.current = false;
+      }
     }
   };
   const patchSection = (
@@ -777,7 +912,17 @@ export function useWorkspace() {
   };
   const deleteSection = (id: string) => {
     try {
-      sync(removeSectionInstance(current.current, id, newSection("Freeform")));
+      const oldIndex = current.current.sections.findIndex((s) => s.id === id);
+      const next = removeSectionInstance(
+        current.current,
+        id,
+        newSection("Freeform"),
+      );
+      sync(next);
+      prepareSectionTarget(
+        next.sections[Math.min(Math.max(oldIndex, 0), next.sections.length - 1)]
+          .id,
+      );
       setNotice(
         "Section removed. Undo restores it during this editing session.",
       );
@@ -849,15 +994,11 @@ export function useWorkspace() {
     localHistory.find((run) => run.id === currentWorkbench.activeRunId) ?? null;
   const response = activeRun?.response ?? null;
   const responseTarget = activeRun?.target ?? null;
-  const {
-    instruction,
-    answer,
-    controls,
-    lens,
-    oneOffModel,
-    compareModels,
-    proposalStates,
-  } = currentWorkbench;
+  const { controls, lens, oneOffModel, compareModels, proposalStates } =
+    currentWorkbench;
+  const draftTarget = documentWorkbench ? null : target;
+  const { instruction, answer } = getTargetDraft(currentWorkbench, draftTarget);
+  const canCoachTarget = hasCoachContext(doc, target, instruction);
   const isLensTarget =
     !documentWorkbench &&
     detectsLensTarget(target, !!editor && !editor.state.selection.empty);
@@ -882,9 +1023,38 @@ export function useWorkspace() {
             )
           : value,
     }));
+  const setDraftField = (
+    key: "instruction" | "answer",
+    value: SetStateAction<string>,
+  ) => {
+    const activeTarget = documentWorkbench ? null : targetRef.current;
+    const owner = documentWorkbench
+      ? null
+      : (activeTarget?.sectionId ?? sectionId);
+    patchWorkbench(
+      (wb) =>
+        patchTargetDraft(wb, activeTarget, {
+          [key]:
+            typeof value === "function"
+              ? value(getTargetDraft(wb, activeTarget)[key])
+              : value,
+        }),
+      owner,
+    );
+  };
   const setInstruction = (v: SetStateAction<string>) =>
-    setField("instruction", v);
-  const setAnswer = (v: SetStateAction<string>) => setField("answer", v);
+    setDraftField("instruction", v);
+  const setAnswer = (v: SetStateAction<string>) => setDraftField("answer", v);
+  const responseAnswer = responseTarget
+    ? getTargetDraft(currentWorkbench, responseTarget).answer
+    : answer;
+  const setResponseAnswer = (value: string) => {
+    if (!responseTarget) return setAnswer(value);
+    patchWorkbench(
+      (wb) => patchTargetDraft(wb, responseTarget, { answer: value }),
+      responseTarget.scope === "document" ? null : responseTarget.sectionId,
+    );
+  };
   const setAction = (v: SetStateAction<WritingAction>) =>
     patchWorkbench((wb) => ({
       ...wb,
@@ -896,7 +1066,15 @@ export function useWorkspace() {
   const setOneOffModel = (v: ModelRef | null) => setField("oneOffModel", v);
   const setCompareModels = (v: SetStateAction<ModelRef[]>) =>
     setField("compareModels", v);
-  const selectRun = (id: string) => patchWorkbench((wb) => inspectRun(wb, id));
+  const selectRun = (id: string) => {
+    const run = getWorkbench(current.current, sectionId).runs.find(
+      (r) => r.id === id,
+    );
+    if (!run) return;
+    patchWorkbench((wb) => inspectRun(wb, id));
+    // Historical targets remain inspectable even when stale. Apply still validates.
+    selectExactTarget(run.target);
+  };
   const structure = currentWorkbench.structure ?? emptyStructure();
   const setStructure = (value: SetStateAction<StructureDraft>) =>
     patchWorkbench((wb) => ({
@@ -984,6 +1162,10 @@ export function useWorkspace() {
         target,
         workbench: {
           ...getWorkbench(current.current, target.sectionId),
+          ...getTargetDraft(
+            getWorkbench(current.current, target.sectionId),
+            target,
+          ),
           controls: {
             ...getWorkbench(current.current, target.sectionId).controls,
             libraryItemId: savedItem.id,
@@ -1009,7 +1191,13 @@ export function useWorkspace() {
       const input = structureInput("tighten", template);
       const run = makeHumanRun({
         target,
-        workbench: getWorkbench(current.current, target.sectionId),
+        workbench: {
+          ...getWorkbench(current.current, target.sectionId),
+          ...getTargetDraft(
+            getWorkbench(current.current, target.sectionId),
+            target,
+          ),
+        },
         text: input.preview,
         title: "User-assembled structure",
         provider: "human-structure",
@@ -1080,11 +1268,11 @@ export function useWorkspace() {
     const t =
       explicitTarget ??
       (structureInput
-        ? target
+        ? targetRef.current
         : override
           ? documentTarget(current.current)
           : lensMode || comparing || stage === "diagnose"
-            ? target
+            ? targetRef.current
             : responseTarget);
     if (!t)
       return setError(
@@ -1096,6 +1284,7 @@ export function useWorkspace() {
       );
     const owner = t.scope === "document" ? null : t.sectionId;
     const wb = getWorkbench(current.current, owner);
+    const draft = getTargetDraft(wb, t);
     const selectedModels = [...wb.compareModels];
     if (comparing && (selectedModels.length < 2 || selectedModels.length > 4))
       return setError("Select between two and four models to compare.");
@@ -1133,11 +1322,11 @@ export function useWorkspace() {
         : {}),
       target: t,
       action: chosen,
-      instruction: wb.instruction,
+      instruction: draft.instruction,
       answer:
-        structureInput && !wb.answer.trim()
+        structureInput && !draft.answer.trim()
           ? structureInput.preview
-          : wb.answer,
+          : draft.answer,
       ...(structureInput ? { structure: structureInput } : {}),
       controls: { ...wb.controls },
       model: catalog ? route.model : null,
@@ -1281,6 +1470,22 @@ export function useWorkspace() {
       false,
       explicitTarget,
     );
+  const askAboutCandidate = (t: EditTarget, text: string) => {
+    try {
+      validateTarget(current.current, t);
+      const instruction = `Explain the difference between “${t.text}” and “${text}” in this exact context. Do not rewrite the sentence.`;
+      update((d) =>
+        updateWorkbench(d, t.sectionId, (wb) =>
+          patchTargetDraft(wb, t, { instruction }),
+        ),
+      );
+      selectExactTarget(t);
+      return operate("diagnose", undefined, "explore", false, t);
+    } catch (error) {
+      setError((error as Error).message);
+      return Promise.resolve();
+    }
+  };
   const compare = () =>
     operate("propose", undefined, isLensTarget ? "replace" : undefined, true);
   const proposalText = (id: string, text: string) => {
@@ -1294,44 +1499,112 @@ export function useWorkspace() {
     validateTarget(current.current, t);
     const range = targetRange(editor, t);
     if (!range) throw new Error("This target changed. Make a fresh selection.");
-    const original: Variant = {
-      id: uid(),
-      label: "Original · " + label,
-      text: t.text,
-      target: t,
-      origin: "original",
-      createdAt: new Date().toISOString(),
-    };
-    if (t.scope === "section") {
-      const loc = sectionLocation(editor, t.sectionId!)!;
-      const nodes = paragraphs(text).map((n) => editor.schema.nodeFromJSON(n));
-      editor.view.dispatch(
-        editor.state.tr.replaceWith(
-          loc.pos + 1,
-          loc.pos + loc.node.nodeSize - 1,
+    const before = sectionLocation(editor, t.sectionId!)!;
+    const expected =
+      t.scope === "section"
+        ? text
+        : t.sectionSnapshot.slice(0, t.start) +
+          text +
+          t.sectionSnapshot.slice(t.end);
+    if (expected === t.sectionSnapshot)
+      throw new Error(
+        "No text changed. The proposal was not recorded as accepted.",
+      );
+    const scrollPositions = Array.from(
+      document.querySelectorAll<HTMLElement>(".inspector, .inspector *"),
+    )
+      .filter(
+        (node) =>
+          node.matches(".inspector") || node.scrollHeight > node.clientHeight,
+      )
+      .map((node) => ({ node, top: node.scrollTop }));
+    const restoreScroll = () =>
+      scrollPositions.forEach(({ node, top }) => {
+        node.scrollTop = top;
+      });
+    selectingExplicitTarget.current = true;
+    try {
+      const tr = editor.state.tr;
+      if (t.scope === "section") {
+        const nodes = paragraphs(text).map((n) =>
+          editor.schema.nodeFromJSON(n),
+        );
+        tr.replaceWith(
+          before.pos + 1,
+          before.pos + before.node.nodeSize - 1,
           nodes,
-        ),
-      );
-    } else
+        );
+      } else tr.insertText(text, range.from, range.to);
+      // Select the accepted range in this same transaction. ProseMirror's default
+      // replacement selection may otherwise land in the next section.
+      let selected = false;
+      tr.doc.forEach((node, pos) => {
+        if (node.attrs.id !== t.sectionId) return;
+        const map = positionMap(node, pos);
+        if (map.text !== expected)
+          throw new Error(
+            "The replacement did not match the requested target text.",
+          );
+        const start = t.scope === "section" ? 0 : t.start;
+        const end =
+          t.scope === "section" ? map.text.length : start + text.length;
+        const from = map.starts[start] ?? map.ends.at(-1) ?? map.empty;
+        const to = end > start ? (map.ends[end - 1] ?? from) : from;
+        tr.setSelection(TextSelection.create(tr.doc, from, to));
+        selected = true;
+      });
+      if (!selected) throw new Error("The target section no longer exists.");
+      const priorDoc = editor.state.doc;
       editor.view.dispatch(
-        editor.state.tr.insertText(text, range.from, range.to),
+        allowSectionLocalEdit(closeHistory(tr), t.sectionId!),
       );
-    original.target = targetFor(
-      current.current,
-      t.sectionId!,
-      t.scope,
-      t.start,
-      t.scope === "section" ? undefined : t.start + text.length,
-    );
-    update((d) => ({
-      ...d,
-      sections: d.sections.map((s) =>
-        s.id === t.sectionId
-          ? { ...s, variants: [...s.variants, original] }
-          : s,
-      ),
-    }));
-    editor.commands.focus();
+      const applied = sectionLocation(editor, t.sectionId!);
+      if (
+        editor.state.doc.eq(priorDoc) ||
+        !applied ||
+        positionMap(applied.node, applied.pos).text !== expected
+      )
+        throw new Error(
+          "The editor blocked this replacement. Nothing was recorded as accepted.",
+        );
+      const acceptedTarget = targetFor(
+        current.current,
+        t.sectionId!,
+        t.scope === "word" && /\s/.test(text.trim()) ? "selection" : t.scope,
+        t.scope === "section" ? 0 : t.start,
+        t.scope === "section" ? undefined : t.start + text.length,
+      );
+      const original: Variant = {
+        id: uid(),
+        label: "Original · " + label,
+        text: t.text,
+        target: acceptedTarget,
+        origin: "original",
+        createdAt: new Date().toISOString(),
+      };
+      update((d) => ({
+        ...d,
+        sections: d.sections.map((s) =>
+          s.id === t.sectionId
+            ? { ...s, variants: [...s.variants, original] }
+            : s,
+        ),
+      }));
+      explicitAnchor.current = {
+        from: editor.state.selection.from,
+        to: editor.state.selection.to,
+        sectionId: t.sectionId!,
+        sectionSnapshot: acceptedTarget.sectionSnapshot,
+      };
+      setTarget(acceptedTarget);
+      setDocumentWorkbench(false);
+      highlight(editor, acceptedTarget);
+      editor.view.dispatch(closeHistory(editor.state.tr));
+    } finally {
+      selectingExplicitTarget.current = false;
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
+    }
     setNotice("Applied only to the target. Original saved as a variant.");
   };
   const decide = (id: string, state: "accepted" | "rejected" | "saved") => {
@@ -1407,6 +1680,37 @@ export function useWorkspace() {
       setError("Preferences not saved: " + (e as Error).message);
     }
   };
+  const defaultLayout = {
+    primaryView: "workbench" as const,
+    density: "comfortable" as const,
+    previewVisible: true,
+    inspectorVisible: true,
+  };
+  const layout = { ...defaultLayout, ...settings.layout };
+  const patchLayout = (patch: Partial<NonNullable<Settings["layout"]>>) => {
+    const prior = { ...defaultLayout, ...settingsRef.current.layout };
+    if (
+      Object.entries(patch).every(
+        ([key, value]) => prior[key as keyof typeof prior] === value,
+      )
+    )
+      return Promise.resolve();
+    return saveSettings({
+      ...settingsRef.current,
+      layout: { ...prior, ...patch },
+    });
+  };
+  const setPrimaryView = (primaryView: "workbench" | "document") =>
+    patchLayout({
+      primaryView,
+      ...(primaryView === "document" ? { previewVisible: true } : {}),
+    });
+  const setDensity = (density: "comfortable" | "overview") =>
+    patchLayout({ density });
+  const setPreviewVisible = (previewVisible: boolean) =>
+    patchLayout({ previewVisible });
+  const setInspectorVisible = (inspectorVisible: boolean) =>
+    patchLayout({ inspectorVisible });
   const setSectionTypeModel = (model: ModelRef | null) => {
     if (!selectedSection) return;
     const routing = routingPreferencesSchema.parse(
@@ -1480,6 +1784,14 @@ export function useWorkspace() {
     }
   };
   return {
+    layout,
+    setPrimaryView,
+    setDensity,
+    setPreviewVisible,
+    setInspectorVisible,
+    selectedSectionId: target?.sectionId ?? null,
+    prepareSectionTarget,
+    canCoachTarget,
     showLocalWorkbench: () => setDocumentWorkbench(false),
     addSectionAfter,
     addSource,
@@ -1532,6 +1844,7 @@ export function useWorkspace() {
     setLens,
     isLensTarget,
     askLens,
+    askAboutCandidate,
     documents,
     settings,
     health,
@@ -1552,6 +1865,8 @@ export function useWorkspace() {
     busy,
     answer,
     setAnswer,
+    responseAnswer,
+    setResponseAnswer,
     instruction,
     setInstruction,
     action,

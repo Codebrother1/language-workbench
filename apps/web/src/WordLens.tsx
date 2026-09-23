@@ -1,6 +1,6 @@
 import { type EditTarget, quickWordIntents } from "./domain";
 import type { Workspace } from "./useWorkspace";
-import { Button, Field, Select } from "./ui";
+import { Button, Field, Select, GrowingTextarea } from "./ui";
 /** Pure preview. It never touches the editor, canonical document, or persistence. */
 export function lexicalPreview(target: EditTarget, candidate: string) {
   const text = target.sectionSnapshot;
@@ -61,8 +61,8 @@ export function WordLensControls({ w }: { w: Workspace }) {
         label="Lexical direction"
         hint="Describe the meaning, audience, attitude, or era you need. Type or dictate naturally."
       >
-        <textarea
-          rows={3}
+        <GrowingTextarea
+          rows={4}
           value={w.instruction}
           onChange={(e) => w.setInstruction(e.target.value)}
           placeholder="Keep the disrespect, lose the internet slang…"
@@ -185,10 +185,7 @@ export function CandidatePreview({
         </Button>
         <Button
           onClick={() => {
-            w.setInstruction(
-              `Explain the difference between “${target.text}” and “${text}” in this exact context. Do not rewrite the sentence.`,
-            );
-            void w.askLens("explore", target);
+            void w.askAboutCandidate(target, text);
           }}
         >
           Ask about candidate

@@ -1,5 +1,7 @@
 import {
   useEffect,
+  useLayoutEffect,
+  type TextareaHTMLAttributes,
   useId,
   cloneElement,
   isValidElement,
@@ -87,11 +89,13 @@ export function Dialog({
   close,
   children,
   wide = false,
+  className = "",
 }: {
   title: string;
   close: () => void;
   children: ReactNode;
   wide?: boolean;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -100,7 +104,7 @@ export function Dialog({
   }, []);
   return (
     <dialog
-      className={wide ? "dialog wide" : "dialog"}
+      className={(wide ? "dialog wide" : "dialog") + " " + className}
       ref={ref}
       onCancel={(e) => {
         e.preventDefault();
@@ -137,4 +141,26 @@ export function safeURL(url: string) {
   } catch {
     return undefined;
   }
+}
+
+/** A real textarea that grows without disrupting system dictation or native selection. */
+export function GrowingTextarea(
+  props: TextareaHTMLAttributes<HTMLTextAreaElement>,
+) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(300, Math.max(100, el.scrollHeight)) + "px";
+    el.style.overflowY = el.scrollHeight > 300 ? "auto" : "hidden";
+  }, [props.value]);
+  return (
+    <textarea
+      {...props}
+      ref={ref}
+      rows={props.rows ?? 4}
+      className={"growing-textarea " + (props.className ?? "")}
+    />
+  );
 }

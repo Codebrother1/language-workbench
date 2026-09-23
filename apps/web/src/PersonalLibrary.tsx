@@ -211,6 +211,10 @@ export function PersonalLibrary({
     [deleting, setDeleting] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const found = searchLibrary(w.library.items, query, kind);
+  const outsideMatches =
+    query.trim() && kind !== "all"
+      ? searchLibrary(w.library.items, query, "all").length - found.length
+      : 0;
   if (editing !== undefined)
     return (
       <ItemEditor
@@ -253,6 +257,12 @@ export function PersonalLibrary({
           ))}
         </Select>
       </Field>
+      {outsideMatches > 0 && (
+        <p className="guidance">
+          {outsideMatches} matching items are outside this category.{" "}
+          <Button onClick={() => setKind("all")}>Search all types</Button>
+        </p>
+      )}
       {!found.length && (
         <p className="empty-note">
           No matching items. Select a passage or candidate to save it, or add
