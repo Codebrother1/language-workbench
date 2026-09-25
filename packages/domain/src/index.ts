@@ -191,6 +191,8 @@ export const writingSectionSchema = z.object({
   kind: z.enum(sectionKinds),
   label: z.string(),
   placement: z.enum(["draft", "parked"]).default("draft"),
+  parkedGroupId: z.string().nullable().default(null),
+  lastParkedGroupId: z.string().nullable().default(null),
   content: z.array(richNodeSchema),
   notes: z.string().default(""),
   variants: z.array(variantSchema).default([]),
@@ -198,6 +200,12 @@ export const writingSectionSchema = z.object({
   workbench: sectionWorkbenchSchema.optional(),
 });
 export type WritingSection = z.infer<typeof writingSectionSchema>;
+export const parkedGroupSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+  collapsed: z.boolean().default(false),
+});
+export type ParkedGroup = z.infer<typeof parkedGroupSchema>;
 export const sourceMaterialSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -225,6 +233,7 @@ export const documentSchema = z
     revision: z.number().int().min(0),
     brief: writingBriefSchema,
     sections: z.array(writingSectionSchema).min(1),
+    parkedGroups: z.array(parkedGroupSchema).default([]),
     sources: z.array(sourceMaterialSchema).default([]),
     history: z.array(iterationSchema).default([]),
     focusTarget: editTargetSchema.nullable().optional(),
@@ -234,8 +243,16 @@ export const documentSchema = z
   .refine(
     (doc) =>
       doc.sections.every((s) => s.id.trim().length > 0) &&
-      new Set(doc.sections.map((s) => s.id)).size === doc.sections.length,
-    { message: "Section identities must be nonempty and unique." },
+      new Set(doc.sections.map((s) => s.id)).size === doc.sections.length &&
+      new Set(doc.parkedGroups.map((g) => g.id)).size ===
+        doc.parkedGroups.length &&
+      doc.sections.every(
+        (s) =>
+          s.placement !== "parked" ||
+          !s.parkedGroupId ||
+          doc.parkedGroups.some((g) => g.id === s.parkedGroupId),
+      ),
+    { message: "Section and parked-group references must be valid." },
   );
 export type Document = z.infer<typeof documentSchema>;
 export const styleDNASchema = z.object({
@@ -448,6 +465,8 @@ export function newSection(
     kind,
     label: kind,
     placement: "draft",
+    parkedGroupId: null,
+    lastParkedGroupId: null,
     content: paragraphs(text),
     notes: "",
     variants: [],
@@ -464,6 +483,7 @@ export function newDocument(title = "Untitled", text = ""): Document {
     revision: 0,
     brief: writingBriefSchema.parse({}),
     sections: [newSection("Freeform", text)],
+    parkedGroups: [],
     sources: [],
     history: [],
   };

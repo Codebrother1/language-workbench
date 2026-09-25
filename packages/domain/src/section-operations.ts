@@ -36,18 +36,73 @@ function sectionIndex(doc: Document, sectionId: string): number {
   return index;
 }
 
+/** Parked sections stay after the draft: ungrouped first, then named groups in group order. */
+function orderParked(
+  doc: Document,
+  sections: WritingSection[],
+): WritingSection[] {
+  const draft = sections.filter((section) => section.placement !== "parked");
+  const parked = sections.filter((section) => section.placement === "parked");
+  return [
+    ...draft,
+    ...parked.filter((section) => !section.parkedGroupId),
+    ...doc.parkedGroups.flatMap((group) =>
+      parked.filter((section) => section.parkedGroupId === group.id),
+    ),
+  ];
+}
+
+export function insertParkedSection(
+  doc: Document,
+  section: WritingSection,
+): Document {
+  if (doc.sections.some((item) => item.id === section.id))
+    throw new Error("Section ID already exists");
+  const parked = {
+    ...section,
+    placement: "parked" as const,
+    parkedGroupId: null,
+  };
+  return { ...doc, sections: orderParked(doc, [...doc.sections, parked]) };
+}
+
+export function moveParkedSectionToGroup(
+  doc: Document,
+  sectionId: string,
+  groupId: string | null,
+): Document {
+  const index = sectionIndex(doc, sectionId);
+  const section = doc.sections[index];
+  if (section.placement !== "parked")
+    throw new Error("Only parked thoughts can be grouped.");
+  if (groupId && !doc.parkedGroups.some((group) => group.id === groupId))
+    throw new Error("Parked group not found.");
+  if (section.parkedGroupId === groupId) return doc;
+  const moved = {
+    ...section,
+    parkedGroupId: groupId,
+    lastParkedGroupId: groupId,
+  };
+  const remaining = doc.sections.filter((item) => item.id !== sectionId);
+  return { ...doc, sections: orderParked(doc, [...remaining, moved]) };
+}
+
 /** Move an existing instance out of reader order without changing its identity or metadata. */
 export function parkSection(doc: Document, sectionId: string): Document {
   const index = sectionIndex(doc, sectionId);
   const section = doc.sections[index];
   if (section.placement === "parked") return doc;
+  const groupId = doc.parkedGroups.some(
+    (group) => group.id === section.lastParkedGroupId,
+  )
+    ? section.lastParkedGroupId
+    : null;
   return {
     ...doc,
-    sections: [
-      ...doc.sections.slice(0, index),
-      ...doc.sections.slice(index + 1),
-      { ...section, placement: "parked" },
-    ],
+    sections: orderParked(doc, [
+      ...doc.sections.filter((item) => item.id !== sectionId),
+      { ...section, placement: "parked", parkedGroupId: groupId },
+    ]),
   };
 }
 
@@ -68,7 +123,12 @@ export function includeSectionAt(
       ? draft.length
       : draft.findIndex((item) => item.id === beforeSectionId);
   if (position < 0) throw new Error("Choose a position in the current draft.");
-  draft.splice(position, 0, { ...section, placement: "draft" });
+  draft.splice(position, 0, {
+    ...section,
+    placement: "draft",
+    parkedGroupId: null,
+    lastParkedGroupId: section.parkedGroupId,
+  });
   return { ...doc, sections: [...draft, ...parked] };
 }
 

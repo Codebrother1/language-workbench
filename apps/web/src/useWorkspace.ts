@@ -14,8 +14,10 @@ import {
   type Document,
   type WritingSection,
   insertSectionAt,
+  insertParkedSection,
   parkSection,
   includeSectionAt,
+  moveParkedSectionToGroup,
   draftSections,
   parkedSections,
   duplicateSection as duplicateSectionInstance,
@@ -885,8 +887,17 @@ export function useWorkspace() {
     }
   };
   // All entry points share this insertion operation and its undo/scope semantics.
-  const captureThought = (text: string) => {
+  const captureThought = (
+    text: string,
+    destination: "draft" | "parked" = "draft",
+  ) => {
     if (!text.trim()) return false;
+    if (destination === "parked") {
+      const section = newSection("Freeform", text.trim());
+      sync(insertParkedSection(current.current, section));
+      prepareSectionTarget(section.id);
+      return true;
+    }
     const [first] = current.current.sections;
     if (
       current.current.sections.length === 1 &&
@@ -993,6 +1004,11 @@ export function useWorkspace() {
     const index = next.findIndex((s) => s.id === id);
     if (to < 0 || to >= next.length || index < 0) return;
     if (next[index].placement !== next[to].placement) return;
+    if (
+      next[index].placement === "parked" &&
+      next[index].parkedGroupId !== next[to].parkedGroupId
+    )
+      return;
     next.splice(to, 0, next.splice(index, 1)[0]);
     sync({ ...current.current, sections: next });
     focusSection(id);
@@ -1011,6 +1027,8 @@ export function useWorkspace() {
     const fresh = {
       ...newSection(old.kind),
       placement: old.placement,
+      parkedGroupId: old.parkedGroupId,
+      lastParkedGroupId: old.lastParkedGroupId,
       content: second.toJSON(),
     };
     const sections = current.current.sections.flatMap((s) =>
@@ -1025,7 +1043,11 @@ export function useWorkspace() {
     if (i < 0 || i >= list.length - 1) return;
     const a = list[i],
       b = list[i + 1];
-    if (a.placement !== b.placement) return;
+    if (
+      a.placement !== b.placement ||
+      (a.placement === "parked" && a.parkedGroupId !== b.parkedGroupId)
+    )
+      return;
     const merged = {
       ...a,
       content: [...a.content, ...b.content],
@@ -1910,6 +1932,50 @@ export function useWorkspace() {
     canCoachTarget,
     showLocalWorkbench: () => setDocumentWorkbench(false),
     addSectionAfter,
+    createParkedGroup: (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return null;
+      const id = uid();
+      update((doc) => ({
+        ...doc,
+        parkedGroups: [
+          ...doc.parkedGroups,
+          { id, name: trimmed, collapsed: false },
+        ],
+      }));
+      return id;
+    },
+    renameParkedGroup: (id: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      update((doc) => ({
+        ...doc,
+        parkedGroups: doc.parkedGroups.map((group) =>
+          group.id === id ? { ...group, name: trimmed } : group,
+        ),
+      }));
+    },
+    setParkedGroupCollapsed: (id: string, collapsed: boolean) =>
+      update((doc) => ({
+        ...doc,
+        parkedGroups: doc.parkedGroups.map((group) =>
+          group.id === id ? { ...group, collapsed } : group,
+        ),
+      })),
+    moveParkedToGroup: (id: string, groupId: string | null) => {
+      try {
+        const next = moveParkedSectionToGroup(current.current, id, groupId);
+        sync({
+          ...next,
+          parkedGroups: next.parkedGroups.map((group) =>
+            group.id === groupId ? { ...group, collapsed: false } : group,
+          ),
+        });
+        focusSection(id);
+      } catch (error) {
+        setError((error as Error).message);
+      }
+    },
     parkThought: (id: string) => {
       try {
         sync(parkSection(current.current, id));

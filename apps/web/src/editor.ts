@@ -86,6 +86,7 @@ export const WritingSectionNode = Node.create({
       kind: { default: "Freeform" },
       label: { default: "Freeform" },
       placement: { default: "draft" },
+      parkedGroupId: { default: null },
     };
   },
   parseHTML() {
@@ -150,7 +151,13 @@ export function toEditor(doc: Document): JSONContent {
     type: "doc",
     content: doc.sections.map((s) => ({
       type: "writingSection",
-      attrs: { id: s.id, kind: s.kind, label: s.label, placement: s.placement },
+      attrs: {
+        id: s.id,
+        kind: s.kind,
+        label: s.label,
+        placement: s.placement,
+        parkedGroupId: s.parkedGroupId,
+      },
       content: s.content,
     })),
   };
@@ -167,6 +174,10 @@ export function fromEditor(
       kind: n.attrs!.kind,
       label: n.attrs!.label,
       placement: n.attrs?.placement === "parked" ? "parked" : "draft",
+      parkedGroupId:
+        n.attrs?.placement === "parked"
+          ? (n.attrs?.parkedGroupId ?? null)
+          : null,
       notes: prior?.notes ?? "",
       variants: prior?.variants ?? [],
       content: (n.content ?? [

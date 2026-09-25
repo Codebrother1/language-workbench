@@ -46,8 +46,8 @@ There is no second writer or provider-specific document persistence path. One re
 
 The shared domain module is the contract between browser, API, storage, and providers. Important records:
 
-- **Document** (`schemaVersion: 1`): ID, timestamps, revision, brief, ordered sections with unique nonempty IDs, sources, history; optional `focusTarget`, `defaultModel` and document `workbench`.
-- **WritingSection:** stable ID, `placement` (`draft` or `parked`), kind/label, rich-node content, notes (presented as Storyboard notes), variants; optional `modelOverride` and `workbench`. Missing placement in older version-1 documents defaults to `draft`.
+- **Document** (`schemaVersion: 1`): ID, timestamps, revision, brief, ordered sections with unique nonempty IDs, optional one-level parked-group definitions, sources, history; optional `focusTarget`, `defaultModel` and document `workbench`.
+- **WritingSection:** stable ID, `placement` (`draft` or `parked`), nullable current/previous parked-group IDs, kind/label, rich-node content, notes (presented as Storyboard notes), variants; optional `modelOverride` and `workbench`. Missing placement in older version-1 documents defaults to `draft`; missing group metadata defaults to empty/ungrouped.
 - **SectionWorkbench:** section instruction/answer drafts, optional `targetDrafts` containing exact local target/instruction/answer records, action/controls, lens options, one-off model, comparison choices, runs, `activeRunId`, proposal-state map, and optional `structure` draft. Structure holds raw notes, verbatim units with UTF-16 offsets, A/B/optional slots, relationship, register, connector/scaffold choice, custom template, and optional-detail purpose.
 - **WorkbenchRun:** ID/time, captured target/action/instruction/answer/controls/lens, actual model reference, full structured response with routing provenance, and optional Structure request snapshot. Human library/Structure previews use the same run pipeline with a null model and explicit human provider label.
 - **EditTarget:** document ID/revision, scope, section ID, text offsets, selected text, and the source section's text snapshot.

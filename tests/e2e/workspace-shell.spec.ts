@@ -161,6 +161,7 @@ test("dock resizing, pane visibility, presets and reload preserve one document",
   await expect(workbench).toBeVisible();
   await expect(preview).toBeVisible();
   await expect(inspector).toBeVisible();
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
   const afterLayout = await (
     await request.get(`/api/documents/${doc.id}`)
   ).json();

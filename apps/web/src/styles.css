@@ -2788,6 +2788,94 @@ body.resizing-dock * {
   justify-content: center;
   white-space: nowrap;
 }
+.thought-capture select {
+  max-width: 105px;
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.parked-group-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 0;
+}
+.parked-group-jump .button {
+  font-size: 11px;
+}
+.parked-ungrouped-heading,
+.parked-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 6px 4px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+}
+.parked-group-heading button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+.parked-group-heading .closed {
+  transform: rotate(-90deg);
+}
+.parked-group-heading input {
+  min-width: 0;
+  flex: 1;
+}
+.parked-group-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+.parked-group-select select {
+  min-width: 100px;
+  max-width: 170px;
+}
+.structure-item.group-collapsed {
+  display: none;
+}
+.parked-capture {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+}
+.parked-capture label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+.parked-capture textarea {
+  width: 100%;
+  min-height: 46px;
+  resize: vertical;
+  padding: 9px 11px;
+  font: 15px/1.5 inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.parked-capture > .button {
+  justify-self: start;
+}
+.parked-new-group input {
+  min-width: 0;
+  flex: 1;
+}
 .section-group-label,
 .parked-area-heading {
   scroll-margin-top: 53px;

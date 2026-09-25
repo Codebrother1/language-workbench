@@ -294,7 +294,9 @@ test("park and include preserve model, variants, history; layout visibility and 
   await expect(
     page.locator(`[data-section-id="${importedSide.id}"]`),
   ).toHaveAttribute("data-placement", "parked");
-  await page.getByRole("button", { name: "Add section", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Add draft section", exact: true })
+    .click();
   await expect(
     page.getByRole("dialog", { name: "Insert section" }),
   ).toBeVisible();

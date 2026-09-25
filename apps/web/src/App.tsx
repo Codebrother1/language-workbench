@@ -10,6 +10,8 @@ import {
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { DockDivider, type PaneWidths } from "./DockDivider";
 import { EditorContent } from "@tiptap/react";
+import { Selection, TextSelection } from "@tiptap/pm/state";
+import { sectionLocation } from "./editor";
 import {
   PanelLeft,
   Plus,
@@ -48,11 +50,81 @@ import {
   toMarkdown,
   sectionText,
   contentTypeConfig,
+  type ParkedGroup,
+  type WritingSection,
 } from "./domain";
 import { Button, Select, Field, Dialog, GrowingTextarea, download } from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
+
+function draftPositionLabel(section: WritingSection, index: number): string {
+  const opening = sectionText(section).replace(/\s+/g, " ").trim();
+  const name =
+    section.label.trim() && section.label !== section.kind
+      ? section.label.trim()
+      : opening || section.label;
+  const short = name.length > 52 ? name.slice(0, 49).trimEnd() + "…" : name;
+  return `Before ${index + 1}. “${short}” · ${section.kind}`;
+}
+
+function ParkedGroupHeading({
+  group,
+  count,
+  onToggle,
+  onRename,
+}: {
+  group: ParkedGroup;
+  count: number;
+  onToggle: () => void;
+  onRename: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(group.name);
+  const finish = () => {
+    if (name.trim()) onRename(name);
+    else setName(group.name);
+    setEditing(false);
+  };
+  return (
+    <div className="parked-group-heading" data-parked-group-heading={group.id}>
+      <button
+        aria-label={`${group.collapsed ? "Expand" : "Collapse"} ${group.name}`}
+        aria-expanded={!group.collapsed}
+        onClick={onToggle}
+      >
+        <ChevronDown size={14} className={group.collapsed ? "closed" : ""} />
+        {group.name} · {count}
+      </button>
+      {editing ? (
+        <input
+          aria-label={`Rename ${group.name}`}
+          value={name}
+          maxLength={80}
+          onChange={(event) => setName(event.target.value)}
+          onBlur={finish}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") finish();
+            if (event.key === "Escape") {
+              setName(group.name);
+              setEditing(false);
+            }
+          }}
+          autoFocus
+        />
+      ) : (
+        <Button
+          onClick={() => {
+            setName(group.name);
+            setEditing(true);
+          }}
+        >
+          Rename
+        </Button>
+      )}
+    </div>
+  );
+}
 function Structure({
   w,
   onRemove,
@@ -70,13 +142,20 @@ function Structure({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropGap, setDropGap] = useState<number | null>(null);
   const [thought, setThought] = useState("");
+  const [captureDestination, setCaptureDestination] = useState<
+    "draft" | "parked"
+  >("draft");
+  const [parkedThought, setParkedThought] = useState("");
+  const parkedThoughtRef = useRef<HTMLTextAreaElement>(null);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [includeId, setIncludeId] = useState<string | null>(null);
   const [includePosition, setIncludePosition] = useState("");
   const structureRef = useRef<HTMLElement>(null);
   const thoughtRef = useRef<HTMLTextAreaElement>(null);
   const draftStart = useRef<HTMLDivElement>(null);
   const parkedStart = useRef<HTMLDivElement>(null);
-  const jumpTo = (target: HTMLDivElement | null) => {
+  const jumpTo = (target: HTMLElement | null) => {
     const pane = structureRef.current;
     if (!target || !pane) return;
     if (
@@ -121,10 +200,77 @@ function Structure({
     finishDrag();
   };
   const capture = () => {
-    if (!w.captureThought(thought)) return;
+    if (!w.captureThought(thought, captureDestination)) return;
     setThought("");
     requestAnimationFrame(() => thoughtRef.current?.focus());
   };
+  const captureParked = () => {
+    if (!w.captureThought(parkedThought, "parked")) return;
+    setParkedThought("");
+    requestAnimationFrame(() => parkedThoughtRef.current?.focus());
+  };
+  const jumpToGroup = (group: ParkedGroup) => {
+    if (group.collapsed) w.setParkedGroupCollapsed(group.id, false);
+    requestAnimationFrame(() => {
+      const heading = Array.from(
+        structureRef.current?.querySelectorAll<HTMLElement>(
+          "[data-parked-group-heading]",
+        ) ?? [],
+      ).find((element) => element.dataset.parkedGroupHeading === group.id);
+      jumpTo(heading ?? null);
+    });
+  };
+  const groupHeading = (group: ParkedGroup) => (
+    <ParkedGroupHeading
+      key={group.id}
+      group={group}
+      count={parked.filter((item) => item.parkedGroupId === group.id).length}
+      onToggle={() => w.setParkedGroupCollapsed(group.id, !group.collapsed)}
+      onRename={(name) => w.renameParkedGroup(group.id, name)}
+    />
+  );
+  const addDraftButton = (
+    <Button
+      className="add-section"
+      onClick={(event) =>
+        w.requestSectionInsertion(parked[0]?.id ?? null, event.currentTarget)
+      }
+    >
+      <Plus size={14} /> Add draft section
+    </Button>
+  );
+  const parkedBeginning = (
+    <>
+      <div
+        ref={parkedStart}
+        className="parked-area-heading"
+        data-testid="parked-area"
+      >
+        <b>PARKED THOUGHTS · {parked.length}</b>
+        <span>Still in this project. Outside the reader draft.</span>
+      </div>
+      {w.doc.parkedGroups.length > 0 && (
+        <div
+          className="parked-group-jump"
+          role="group"
+          aria-label="Parked groups"
+        >
+          {w.doc.parkedGroups.map((group) => (
+            <Button key={group.id} onClick={() => jumpToGroup(group)}>
+              {group.name} ·{" "}
+              {
+                parked.filter((section) => section.parkedGroupId === group.id)
+                  .length
+              }
+            </Button>
+          ))}
+        </div>
+      )}
+      <div className="parked-ungrouped-heading">
+        Ungrouped · {parked.filter((section) => !section.parkedGroupId).length}
+      </div>
+    </>
+  );
   return (
     <nav
       ref={structureRef}
@@ -183,7 +329,19 @@ function Structure({
       )}
       {w.layout.primaryView === "workbench" && (
         <div className="thought-capture">
-          <label htmlFor="new-thought">NEW THOUGHT · CAPTURE FIRST</label>
+          <div className="row between">
+            <label htmlFor="new-thought">NEW THOUGHT · CAPTURE FIRST</label>
+            <select
+              aria-label="Thought destination"
+              value={captureDestination}
+              onChange={(event) =>
+                setCaptureDestination(event.target.value as "draft" | "parked")
+              }
+            >
+              <option value="draft">Draft</option>
+              <option value="parked">Parked</option>
+            </select>
+          </div>
           <textarea
             id="new-thought"
             ref={thoughtRef}
@@ -206,7 +364,10 @@ function Structure({
           <Button onClick={capture} disabled={!thought.trim()}>
             <Plus size={14} /> Add thought
           </Button>
-          <small>Enter adds a Freeform card. Shift+Enter adds a line.</small>
+          <small>
+            Enter adds a Freeform card to {captureDestination}. Shift+Enter adds
+            a line.
+          </small>
         </div>
       )}
       <div className="section-list">
@@ -216,15 +377,26 @@ function Structure({
         {visibleSections.map((s, i) => (
           <Fragment key={s.id}>
             {w.layout.primaryView === "workbench" && i === draft.length && (
-              <div
-                ref={parkedStart}
-                className="parked-area-heading"
-                data-testid="parked-area"
-              >
-                <b>PARKED THOUGHTS · {parked.length}</b>
-                <span>Still in this project. Outside the reader draft.</span>
-              </div>
+              <>
+                {addDraftButton}
+                {parkedBeginning}
+              </>
             )}
+            {w.layout.primaryView === "workbench" &&
+              s.placement === "parked" &&
+              s.parkedGroupId &&
+              w.doc.sections[i - 1]?.parkedGroupId !== s.parkedGroupId &&
+              w.doc.parkedGroups
+                .slice(
+                  w.doc.parkedGroups.findIndex(
+                    (group) =>
+                      group.id === w.doc.sections[i - 1]?.parkedGroupId,
+                  ) + 1,
+                  w.doc.parkedGroups.findIndex(
+                    (group) => group.id === s.parkedGroupId,
+                  ) + 1,
+                )
+                .map(groupHeading)}
             {dropGap === i && draggingId && (
               <div
                 className="drop-marker"
@@ -237,6 +409,11 @@ function Structure({
               className={
                 "structure-item " +
                 (s.placement === "parked" ? "parked " : "") +
+                (s.placement === "parked" &&
+                w.doc.parkedGroups.find((group) => group.id === s.parkedGroupId)
+                  ?.collapsed
+                  ? "group-collapsed "
+                  : "") +
                 (w.target?.sectionId === s.id ? "active " : "") +
                 (draggingId === s.id ? "dragging" : "")
               }
@@ -276,6 +453,12 @@ function Structure({
                     ?.placement !== s.placement
                 )
                   return;
+                if (
+                  s.placement === "parked" &&
+                  w.doc.sections.find((item) => item.id === drag.current)
+                    ?.parkedGroupId !== s.parkedGroupId
+                )
+                  return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
                 setDropGap(gapFor(drag.current, i));
@@ -286,7 +469,10 @@ function Structure({
                   e.dataTransfer.getData("text/plain") || drag.current || "";
                 if (
                   w.doc.sections.find((item) => item.id === source)
-                    ?.placement === s.placement
+                    ?.placement === s.placement &&
+                  (s.placement !== "parked" ||
+                    w.doc.sections.find((item) => item.id === source)
+                      ?.parkedGroupId === s.parkedGroupId)
                 )
                   drop(source, gapFor(source, i));
                 else finishDrag();
@@ -320,11 +506,49 @@ function Structure({
                   w.target?.sectionId === s.id ? (
                     <div className="card-writing" data-testid="card-writing">
                       <div className="card-layer-label">
-                        WRITING <span>· reader-facing prose</span>
+                        WRITING{" "}
+                        <span>
+                          ·{" "}
+                          {s.placement === "parked"
+                            ? "currently parked"
+                            : "reader-facing prose"}
+                        </span>
                       </div>
                       <div
                         className="card-editor-host"
                         data-card-editor-host={s.id}
+                        onKeyDownCapture={(event) => {
+                          if (
+                            editorCard !== s.id ||
+                            !(event.metaKey || event.ctrlKey) ||
+                            event.key.toLowerCase() !== "a" ||
+                            !w.editor
+                          )
+                            return;
+                          const located = sectionLocation(w.editor, s.id);
+                          if (!located) return;
+                          const doc = w.editor.state.doc;
+                          const first = Selection.findFrom(
+                            doc.resolve(located.pos + 1),
+                            1,
+                            true,
+                          );
+                          const last = Selection.findFrom(
+                            doc.resolve(
+                              located.pos + located.node.nodeSize - 1,
+                            ),
+                            -1,
+                            true,
+                          );
+                          if (!first || !last) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          w.editor.view.dispatch(
+                            w.editor.state.tr.setSelection(
+                              TextSelection.create(doc, first.from, last.to),
+                            ),
+                          );
+                        }}
                         onClick={() => {
                           if (editorCard !== s.id) onWriteCard(s.id);
                         }}
@@ -392,14 +616,36 @@ function Structure({
                   {w.target?.sectionId === s.id && (
                     <div className="card-essential row wrap">
                       {s.placement === "parked" ? (
-                        <Button
-                          onClick={() => {
-                            setIncludeId(s.id);
-                            setIncludePosition("");
-                          }}
-                        >
-                          Include in draft
-                        </Button>
+                        <>
+                          <Button
+                            onClick={() => {
+                              setIncludeId(s.id);
+                              setIncludePosition("");
+                            }}
+                          >
+                            Include in draft
+                          </Button>
+                          <label className="parked-group-select">
+                            Group
+                            <select
+                              aria-label={`Group for ${s.label}`}
+                              value={s.parkedGroupId ?? ""}
+                              onChange={(event) =>
+                                w.moveParkedToGroup(
+                                  s.id,
+                                  event.target.value || null,
+                                )
+                              }
+                            >
+                              <option value="">Ungrouped</option>
+                              {w.doc.parkedGroups.map((group) => (
+                                <option key={group.id} value={group.id}>
+                                  {group.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </>
                       ) : (
                         <>
                           <Button
@@ -450,7 +696,7 @@ function Structure({
                         <option value="">Choose an exact position…</option>
                         {draft.map((item, index) => (
                           <option key={item.id} value={item.id}>
-                            Before {index + 1}. {item.label}
+                            {draftPositionLabel(item, index)}
                           </option>
                         ))}
                         <option value="__end__">At end of draft</option>
@@ -557,7 +803,10 @@ function Structure({
                       aria-label="Move section up"
                       disabled={
                         i === 0 ||
-                        w.doc.sections[i - 1]?.placement !== s.placement
+                        w.doc.sections[i - 1]?.placement !== s.placement ||
+                        (s.placement === "parked" &&
+                          w.doc.sections[i - 1]?.parkedGroupId !==
+                            s.parkedGroupId)
                       }
                       onClick={() => w.moveSection(s.id, i - 1)}
                     >
@@ -567,7 +816,10 @@ function Structure({
                       aria-label="Move section down"
                       disabled={
                         i === w.doc.sections.length - 1 ||
-                        w.doc.sections[i + 1]?.placement !== s.placement
+                        w.doc.sections[i + 1]?.placement !== s.placement ||
+                        (s.placement === "parked" &&
+                          w.doc.sections[i + 1]?.parkedGroupId !==
+                            s.parkedGroupId)
                       }
                       onClick={() => w.moveSection(s.id, i + 1)}
                     >
@@ -578,7 +830,10 @@ function Structure({
                       title="Merge with next section"
                       disabled={
                         i === w.doc.sections.length - 1 ||
-                        w.doc.sections[i + 1]?.placement !== s.placement
+                        w.doc.sections[i + 1]?.placement !== s.placement ||
+                        (s.placement === "parked" &&
+                          w.doc.sections[i + 1]?.parkedGroupId !==
+                            s.parkedGroupId)
                       }
                       onClick={() => w.mergeSection(s.id)}
                     >
@@ -596,6 +851,21 @@ function Structure({
             </div>
           </Fragment>
         ))}
+        {w.layout.primaryView === "workbench" && parked.length === 0 && (
+          <>
+            {addDraftButton}
+            {parkedBeginning}
+          </>
+        )}
+        {w.layout.primaryView !== "workbench" && addDraftButton}
+        {w.layout.primaryView === "workbench" &&
+          w.doc.parkedGroups
+            .slice(
+              w.doc.parkedGroups.findIndex(
+                (group) => group.id === parked.at(-1)?.parkedGroupId,
+              ) + 1,
+            )
+            .map(groupHeading)}
         {dropGap === w.doc.sections.length && draggingId && (
           <div
             className="drop-marker"
@@ -605,14 +875,69 @@ function Structure({
           />
         )}
       </div>
-      <Button
-        className="add-section"
-        onClick={(event) =>
-          w.requestSectionInsertion(parked[0]?.id ?? null, event.currentTarget)
-        }
-      >
-        <Plus size={14} /> Add section
-      </Button>
+      {w.layout.primaryView === "workbench" && (
+        <div className="parked-capture">
+          <label htmlFor="parked-thought">PARKED · QUICK CAPTURE</label>
+          <textarea
+            id="parked-thought"
+            ref={parkedThoughtRef}
+            aria-label="Parked thought"
+            rows={2}
+            value={parkedThought}
+            onChange={(event) => setParkedThought(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                captureParked();
+              }
+            }}
+            placeholder="Keep a thought nearby…"
+          />
+          <Button onClick={captureParked} disabled={!parkedThought.trim()}>
+            <Plus size={14} /> Add parked thought
+          </Button>
+          {creatingGroup ? (
+            <div className="row parked-new-group">
+              <input
+                aria-label="New parked group name"
+                maxLength={80}
+                value={newGroupName}
+                onChange={(event) => setNewGroupName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    if (w.createParkedGroup(newGroupName)) {
+                      setNewGroupName("");
+                      setCreatingGroup(false);
+                    }
+                  }
+                  if (event.key === "Escape") setCreatingGroup(false);
+                }}
+                autoFocus
+              />
+              <Button
+                disabled={!newGroupName.trim()}
+                onClick={() => {
+                  if (w.createParkedGroup(newGroupName)) {
+                    setNewGroupName("");
+                    setCreatingGroup(false);
+                  }
+                }}
+              >
+                Create group
+              </Button>
+              <Button onClick={() => setCreatingGroup(false)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button onClick={() => setCreatingGroup(true)}>
+              + New parked group
+            </Button>
+          )}
+        </div>
+      )}
       <div className="structure-bottom">
         <span className="eyebrow">CONTEXT</span>
         <Button

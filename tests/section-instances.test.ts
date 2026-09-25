@@ -22,8 +22,10 @@ import {
 import {
   duplicateSection,
   insertSectionAt,
+  insertParkedSection,
   parkSection,
   includeSectionAt,
+  moveParkedSectionToGroup,
   removeSection,
 } from "../packages/domain/src/section-operations";
 
@@ -562,9 +564,14 @@ describe("draft and parked placement", () => {
     const legacy = newDocument("Legacy", "Old prose");
     const plain = JSON.parse(JSON.stringify(legacy));
     delete plain.sections[0].placement;
+    delete plain.sections[0].parkedGroupId;
+    delete plain.sections[0].lastParkedGroupId;
+    delete plain.parkedGroups;
     const parsed = documentSchema.parse(plain);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.sections[0].placement).toBe("draft");
+    expect(parsed.parkedGroups).toEqual([]);
+    expect(parsed.sections[0].parkedGroupId).toBeNull();
   });
 
   it("parks without losing identity or metadata, then includes at an exact position", () => {
@@ -612,5 +619,63 @@ describe("draft and parked placement", () => {
     const restored = includeSectionAt(parked, doc.sections[0].id, null);
     expect(restored.sections[0].id).toBe(doc.sections[0].id);
     expect(documentText(restored)).toBe("A line to reconsider.");
+  });
+
+  it("captures parked directly, groups without copying prose, and restores the previous group on re-park", () => {
+    const doc = newDocument("Clusters", "Draft opening");
+    doc.parkedGroups = [
+      { id: "interface", name: "Interface", collapsed: false },
+      { id: "collaboration", name: "Collaboration", collapsed: false },
+    ];
+    const a = newSection("Freeform", "An interface thought");
+    const b = newSection("Freeform", "Another interface thought");
+    const c = newSection("Freeform", "Ungrouped thought");
+    let next = insertParkedSection(doc, a);
+    next = insertParkedSection(next, b);
+    next = insertParkedSection(next, c);
+    expect(next.sections.map((s) => s.id)).toEqual([
+      doc.sections[0].id,
+      a.id,
+      b.id,
+      c.id,
+    ]);
+    next = moveParkedSectionToGroup(next, a.id, "interface");
+    next = moveParkedSectionToGroup(next, b.id, "interface");
+    expect(next.sections.map((s) => s.id)).toEqual([
+      doc.sections[0].id,
+      c.id,
+      a.id,
+      b.id,
+    ]);
+    expect(documentText(next)).toBe("Draft opening");
+    const grouped = next.sections.find((s) => s.id === a.id)!;
+    next = includeSectionAt(next, a.id, null);
+    expect(next.sections.find((s) => s.id === a.id)).toMatchObject({
+      id: a.id,
+      placement: "draft",
+      parkedGroupId: null,
+      lastParkedGroupId: "interface",
+      content: grouped.content,
+    });
+    next = parkSection(next, a.id);
+    expect(next.sections.map((s) => s.id)).toEqual([
+      doc.sections[0].id,
+      c.id,
+      b.id,
+      a.id,
+    ]);
+    expect(next.sections.at(-1)?.parkedGroupId).toBe("interface");
+    next = moveParkedSectionToGroup(next, a.id, null);
+    expect(
+      next.sections.find((s) => s.id === a.id)?.lastParkedGroupId,
+    ).toBeNull();
+    expect(next.sections.map((s) => s.id)).toEqual([
+      doc.sections[0].id,
+      c.id,
+      a.id,
+      b.id,
+    ]);
+    expect(documentSchema.parse(next)).toEqual(next);
+    expect(() => moveParkedSectionToGroup(next, a.id, "missing")).toThrow();
   });
 });
