@@ -142,6 +142,39 @@ describe("section boundary guard: stable six-section identity independent of for
     },
   );
 
+  it("treats a previous wrapper edge plus the next section's sentence as one local selection", () => {
+    const f = fixture();
+    const p = locations(f.view.state);
+    const from = p[2].end; // after Point prose, before its wrapper closes
+    const to = p[3].start + "Section".length;
+    expect(f.view.state.doc.textBetween(from, to)).toBe("Section");
+    expect(sectionContentRange(f.doc, from, to)).toMatchObject({
+      kind: "single",
+      sectionId: f.ids[3],
+      from: p[3].start,
+      to,
+      clamped: true,
+    });
+    expect(text(f, from, to, "Revised")).toBe(true);
+    expect(f.view.state.doc.child(3).textContent).toBe(
+      "Revised 4 stays intact.",
+    );
+    expect(f.view.state.doc.child(2).eq(f.doc.child(2))).toBe(true);
+    expect(sectionTopology(f.view.state.doc)).toEqual(f.ids);
+    expect(f.onBlocked).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a selection containing prose from two sections", () => {
+    const f = fixture();
+    const p = locations(f.view.state);
+    const from = p[2].end - 1;
+    const to = p[3].start + 7;
+    expect(sectionContentRange(f.doc, from, to).kind).toBe("cross");
+    expect(text(f, from, to, "Unsafe")).toBe(true);
+    expect(f.view.state.doc.eq(f.doc)).toBe(true);
+    expect(f.onBlocked).toHaveBeenCalledWith("cross-section-selection");
+  });
+
   it("allows normal typing, Enter-style block changes, marks and semantic conversions", () => {
     const f = fixture();
     expect(text(f, 2, 2, "Hi ")).toBe(false); // native input retains its normal path

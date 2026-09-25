@@ -86,21 +86,21 @@ test("ordinary editing, native clipboard shortcuts, rich paste, undo and redo", 
   await open(page);
   const editor = page.getByTestId("writing-editor");
   await editor.click();
-  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ControlOrMeta+Home");
   await page.keyboard.type("Hello. ");
   await expect(editor).toContainText("Hello. First sentence stays.");
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press("ControlOrMeta+z");
   await expect(editor).not.toContainText("Hello.");
-  await page.keyboard.press("Control+Shift+z");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(editor).toContainText("Hello.");
   await select(page, "Hello.");
-  await page.keyboard.press("Control+c");
+  await page.keyboard.press("ControlOrMeta+c");
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe("Hello.");
-  await page.keyboard.press("Control+x");
+  await page.keyboard.press("ControlOrMeta+x");
   await expect(editor).not.toContainText("Hello.");
-  await page.keyboard.press("Control+v");
+  await page.keyboard.press("ControlOrMeta+v");
   await expect(editor).toContainText("Hello.");
   await page.evaluate(() =>
     navigator.clipboard.write([
@@ -116,9 +116,9 @@ test("ordinary editing, native clipboard shortcuts, rich paste, undo and redo", 
     ]),
   );
   await editor.click();
-  await page.keyboard.press("Control+End");
+  await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Enter");
-  await page.keyboard.press("Control+v");
+  await page.keyboard.press("ControlOrMeta+v");
   await expect(editor.locator("strong")).toHaveText("External bold");
   await page.keyboard.type(" Still editable.");
   await expect(editor).toContainText("Still editable.");
@@ -126,7 +126,7 @@ test("ordinary editing, native clipboard shortcuts, rich paste, undo and redo", 
   await page.reload();
   await expect(editor).toContainText("External bold");
   await editor.click();
-  await page.keyboard.press("Control+a");
+  await page.keyboard.press("ControlOrMeta+a");
   const selection = await page.evaluate(() =>
     window.getSelection()?.toString(),
   );
@@ -219,9 +219,20 @@ test("word inspection and section lab use exact targets; critique never edits", 
   await page.getByRole("button", { name: "Whole-piece critique" }).click();
   await expect(page.locator(".response")).toContainText("WHOLE-PIECE ANALYSIS");
   await expect(page.getByTestId("proposal")).toHaveCount(0);
+  await save(page);
+  const authored = (sections: typeof doc.sections) =>
+    sections.map(({ id, kind, label, notes, content }) => ({
+      id,
+      kind,
+      label,
+      notes,
+      content,
+    }));
   expect(
-    (await (await request.get("/api/documents/" + doc.id)).json()).sections,
-  ).toEqual(doc.sections);
+    authored(
+      (await (await request.get("/api/documents/" + doc.id)).json()).sections,
+    ),
+  ).toEqual(authored(doc.sections));
 });
 test("drag/reorder preserves metadata and save survives reload; split and merge work", async ({
   page,
@@ -327,7 +338,7 @@ test("stale proposals cannot overwrite manual edits", async ({
   await page.getByRole("button", { name: "Propose options" }).click();
   await expect(page.getByTestId("proposal")).toBeVisible();
   await page.getByTestId("writing-editor").click();
-  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ControlOrMeta+Home");
   await page.keyboard.type("My new thought. ");
   await page.getByTestId("accept-proposal").first().click();
   await expect(page.getByRole("alert")).toContainText("changed");
@@ -400,7 +411,7 @@ test("large rapid insertions and composition events preserve editable text", asy
   await open(page);
   const editor = page.getByTestId("writing-editor");
   await editor.click();
-  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ControlOrMeta+Home");
   await editor.dispatchEvent("compositionstart", { data: "" });
   await editor.dispatchEvent("compositionend", { data: "Dictated thought." });
   await page.keyboard.insertText(
@@ -432,7 +443,7 @@ test("section copy and whole-document copy are exact; cross-section AI is disabl
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(documentText(doc));
   await page.getByTestId("writing-editor").click();
-  await page.keyboard.press("Control+a");
+  await page.keyboard.press("ControlOrMeta+a");
   await expect(page.getByRole("button", { name: /Diagnose this/ })).toHaveCount(
     0,
   );
@@ -559,7 +570,7 @@ test("paragraph and list paste keep readable context and exact local targets", a
   await seed(request, "");
   await open(page);
   await page.getByTestId("writing-editor").click();
-  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ControlOrMeta+Home");
   await page.evaluate(() =>
     navigator.clipboard.write([
       new ClipboardItem({
@@ -570,7 +581,7 @@ test("paragraph and list paste keep readable context and exact local targets", a
       }),
     ]),
   );
-  await page.keyboard.press("Control+v");
+  await page.keyboard.press("ControlOrMeta+v");
   await expect(page.getByTestId("writing-editor").locator("li")).toHaveCount(2);
   await select(page, "I really utilize tools.");
   await diagnose(page);

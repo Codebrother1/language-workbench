@@ -67,19 +67,35 @@ async function firstSelection(page: Page, length: number) {
   await page
     .getByTestId("writing-section")
     .nth(3)
-    .evaluate((el) => {
+    .evaluate((el, length) => {
       const node = document
         .createTreeWalker(el, NodeFilter.SHOW_TEXT)
         .nextNode()!;
       const sel = window.getSelection()!;
-      sel.setBaseAndExtent(node, 0, node, 0);
+      sel.setBaseAndExtent(node, 0, node, length);
       document.dispatchEvent(new Event("selectionchange"));
-    });
-  for (let i = 0; i < length; i++)
-    await page.keyboard.press("Shift+ArrowRight");
+    }, length);
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString()))
     .toBe(firstParagraph.slice(0, length));
+}
+async function selectLastSection(page: Page) {
+  await page.getByTestId("writing-editor").focus();
+  await page
+    .getByTestId("writing-section")
+    .last()
+    .evaluate((el) => {
+      const node = document
+        .createTreeWalker(el, NodeFilter.SHOW_TEXT)
+        .nextNode()!;
+      window
+        .getSelection()!
+        .setBaseAndExtent(node, 0, node, node.textContent!.length);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe("Section 6 stays intact.");
 }
 async function undoRedo(
   page: Page,
@@ -97,7 +113,7 @@ async function undoRedo(
   await identity(page, doc);
 }
 
-test("keyboard first sentence and last paragraph replacement preserve six section identities through undo/redo", async ({
+test("native first sentence and last paragraph replacement preserve six section identities through undo/redo", async ({
   page,
   request,
 }) => {
@@ -108,9 +124,7 @@ test("keyboard first sentence and last paragraph replacement preserve six sectio
   const after = "Use tools to help. A second sentence stays.";
   await expect(page.getByTestId("writing-section").nth(3)).toHaveText(after);
   await undoRedo(page, firstParagraph, after, doc);
-  await page.getByTestId("writing-editor").focus();
-  await page.keyboard.press("Control+End");
-  await page.keyboard.press("Shift+Home");
+  await selectLastSection(page);
   await page.keyboard.insertText("The ending is still independent.");
   await expect(page.getByTestId("writing-section").last()).toHaveText(
     "The ending is still independent.",
@@ -155,7 +169,7 @@ test("rich paste at a native outer slice edge replaces only Reveal content, neve
       }),
     ]),
   );
-  await page.keyboard.press("Control+v");
+  await page.keyboard.press("ControlOrMeta+v");
   await expect(page.getByTestId("writing-section").nth(3)).toContainText(
     "Precisely replaced.",
   );
@@ -170,6 +184,47 @@ test("rich paste at a native outer slice edge replaces only Reveal content, neve
     expect(result.sections[i].content).toEqual(doc.sections[i].content);
 });
 
+test("a selection beginning at Segue's trailing content edge can replace only Reveal prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByTestId("writing-editor").evaluate((root, length) => {
+    const sections = root.querySelectorAll("section");
+    const previous = document
+      .createTreeWalker(sections[2], NodeFilter.SHOW_TEXT)
+      .nextNode()!;
+    const reveal = document
+      .createTreeWalker(sections[3], NodeFilter.SHOW_TEXT)
+      .nextNode()!;
+    (root as HTMLElement).focus();
+    window
+      .getSelection()!
+      .setBaseAndExtent(previous, previous.textContent!.length, reveal, length);
+    document.dispatchEvent(new Event("selectionchange"));
+  }, firstSentence.length);
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString().trim()))
+    .toBe(firstSentence);
+  await expect(page.locator(".target-box")).toContainText("SELECTED PASSAGE");
+  await expect(page.locator(".target-box")).toContainText(firstSentence);
+  await page.evaluate(() =>
+    navigator.clipboard.writeText("A clearer beginning."),
+  );
+  await page.keyboard.press("ControlOrMeta+v");
+  await expect(page.getByTestId("writing-section").nth(3)).toHaveText(
+    "A clearer beginning. A second sentence stays.",
+  );
+  await expect(page.getByTestId("writing-section").nth(2)).toHaveText(
+    "Section 3 stays intact.",
+  );
+  await identity(page, doc);
+  expect((await saved(page, request, doc)).sections[2].content).toEqual(
+    doc.sections[2].content,
+  );
+});
+
 test("native cross-section copy remains available but typing, paste, Delete and Backspace are non-destructive", async ({
   page,
   request,
@@ -179,13 +234,13 @@ test("native cross-section copy remains available but typing, paste, Delete and 
   const editor = page.getByTestId("writing-editor");
   const before = await editor.innerText();
   await editor.focus();
-  await page.keyboard.press("Control+Home");
-  await page.keyboard.press("Control+Shift+End");
-  await page.keyboard.press("Control+c");
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("ControlOrMeta+Shift+End");
+  await page.keyboard.press("ControlOrMeta+c");
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain("Section 6 stays intact.");
-  for (const key of ["Delete", "Backspace", "Control+v"]) {
+  for (const key of ["Delete", "Backspace", "ControlOrMeta+v"]) {
     await page.keyboard.press(key);
     await expect(editor).toHaveText(before, { useInnerText: true });
     await identity(page, doc);
@@ -213,8 +268,7 @@ test("empty Reveal cannot Backspace/Delete into Segue, and the empty last sectio
     await identity(page, doc);
     await expect(page.getByTestId("writing-section").nth(3)).toHaveText("");
   }
-  await page.keyboard.press("Control+End");
-  await page.keyboard.press("Shift+Home");
+  await selectLastSection(page);
   await page.keyboard.press("Delete");
   await expect(page.getByTestId("writing-section").last()).toHaveText("");
   for (const key of ["Delete", "Backspace"]) {

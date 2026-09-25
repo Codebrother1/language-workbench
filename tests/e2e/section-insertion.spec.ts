@@ -351,8 +351,8 @@ test("arbitrary counts and order survive insertion, editing and clipboard withou
     documentText(stored),
   );
   await page.getByTestId("writing-editor").click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+c");
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("ControlOrMeta+c");
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toContain("An unrestricted sixth Point.");
   expect(copied).not.toContain("Insert section");

@@ -284,6 +284,89 @@ test("comfortable cards expose meaningful prose/notes; overview and narrow layou
     await page.evaluate(() => document.body.scrollWidth <= innerWidth),
   ).toBe(true);
 });
+
+test("Overview lets a fifteen-section arc scan at timeline scale", async ({
+  page,
+  request,
+}) => {
+  const doc = await reset(request, false);
+  doc.sections = Array.from({ length: 15 }, (_, i) => {
+    const section = newSection("Point", `A thought for beat ${i + 1}.`);
+    section.label = `Beat ${i + 1}`;
+    section.notes = `Purpose for beat ${i + 1}.`;
+    return section;
+  });
+  await request.put("/api/documents/" + doc.id, { data: doc });
+  await open(page);
+  const timeline = page.getByRole("navigation", { name: "Document structure" });
+  const cards = page.getByTestId("structure-item");
+  await expect(cards).toHaveCount(15);
+  const comfortableHeight = (await cards.nth(1).boundingBox())!.height;
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  const overviewHeight = (await cards.nth(1).boundingBox())!.height;
+  expect(overviewHeight).toBeLessThan(comfortableHeight / 2);
+  expect(overviewHeight).toBeLessThan(80);
+  const timelineBox = (await timeline.boundingBox())!;
+  const previewBox = (await page.locator(".writing").boundingBox())!;
+  expect(timelineBox.width).toBeGreaterThan(previewBox.width);
+  const sixth = (await cards.nth(5).boundingBox())!;
+  expect(sixth.y + sixth.height).toBeLessThan(
+    timelineBox.y + timelineBox.height,
+  );
+  await page.reload();
+  await expect(cards).toHaveCount(15);
+  await expect(
+    page.getByRole("button", { name: "Overview", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Edit in preview opens a hidden preview with a local caret and honest copy", async ({
+  page,
+  request,
+}) => {
+  const doc = await reset(request, false);
+  await open(page);
+  await focus(page, 2);
+  await page.getByRole("button", { name: "Hide preview" }).click();
+  await page.getByRole("button", { name: "Edit in preview" }).click();
+  const editor = page.getByTestId("writing-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor).toBeFocused();
+  expect(
+    await page.evaluate(() => {
+      const selection = window.getSelection()!;
+      const owner =
+        selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+          ? (selection.anchorNode as Element)
+          : selection.anchorNode?.parentElement;
+      return {
+        text: selection.toString(),
+        sectionId: owner?.closest("section")?.id,
+      };
+    }),
+  ).toEqual({ text: "", sectionId: doc.sections[2].id });
+  await page.keyboard.insertText("Now this starts here. ");
+  await expect(page.getByTestId("writing-section").nth(2)).toHaveText(
+    "Now this starts here. The reveal begins here. Its ending remains.",
+  );
+  await expect(page.getByTestId("writing-section").nth(1)).toHaveText(
+    "Bridge stays here.",
+  );
+  await select(page, "The reveal begins here.");
+  await page.keyboard.insertText("The day finally made sense.");
+  await expect(page.getByTestId("writing-section").nth(2)).toHaveText(
+    "Now this starts here. The day finally made sense. Its ending remains.",
+  );
+  await expect(page.getByText("Nothing added until you choose.")).toHaveCount(
+    0,
+  );
+  await expect(page.getByText("Human-led writing")).toBeVisible();
+  await save(page);
+  await page.reload();
+  await expect(page.getByTestId("writing-section").nth(2)).toContainText(
+    "Now this starts here. The day finally made sense.",
+  );
+});
 test("phrase search crosses item kinds through all-types lookup and Sources are document-level", async ({
   page,
   request,
@@ -318,7 +401,7 @@ test("phrase search crosses item kinds through all-types lookup and Sources are 
   await expect(
     page.getByRole("button", { name: "Document sources" }),
   ).toContainText("1");
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page
     .getByRole("combobox", { name: "Search writing tools" })
     .fill("saved snippets");
@@ -332,7 +415,7 @@ test("phrase search crosses item kinds through all-types lookup and Sources are 
   }
   await page.getByRole("button", { name: "Close dialog" }).click();
   for (const q of ["reference material", "transcript", "paste source"]) {
-    await page.keyboard.press("Control+k");
+    await page.keyboard.press("ControlOrMeta+k");
     await page.getByRole("combobox", { name: "Search writing tools" }).fill(q);
     await page.keyboard.press("Enter");
     await expect(

@@ -76,6 +76,27 @@ describe("plain text / ProseMirror target boundary", () => {
     });
     expect(cursorTarget({ state } as Editor, doc)).toBeNull();
   });
+  it("keeps a sentence local when the native selection includes only the previous wrapper edge", () => {
+    const doc = newDocument("Test", "Previous.");
+    doc.sections.push(
+      newSection("Reveal", "The next sentence. Another remains."),
+    );
+    const pm = schema.nodeFromJSON(toEditor(doc));
+    const previousContentEnd = pm.child(0).nodeSize - 2;
+    const nextContentStart = pm.child(0).nodeSize + 2;
+    const state = EditorState.create({
+      schema,
+      doc: pm,
+      selection: TextSelection.create(
+        pm,
+        previousContentEnd,
+        nextContentStart + "The next sentence.".length,
+      ),
+    });
+    const target = cursorTarget({ state } as Editor, doc)!;
+    expect(target.sectionId).toBe(doc.sections[1].id);
+    expect(target.text).toBe("The next sentence.");
+  });
   it("rejects a stale editor snapshot instead of guessing an offset", () => {
     const { doc, editor } = fixture("Changed");
     const t = targetFor(doc, doc.sections[0].id);

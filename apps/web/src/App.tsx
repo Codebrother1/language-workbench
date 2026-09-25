@@ -215,11 +215,14 @@ function Structure({
                     </Button>
                     <Button
                       onClick={() => {
-                        w.setPreviewVisible(true);
-                        w.focusSection(s.id, true);
+                        void w.setPreviewVisible(true);
+                        // Let a previously hidden preview become visible before
+                        // moving the real editor caret into this section.
+                        requestAnimationFrame(() => w.focusSection(s.id, true));
                       }}
+                      title="Places the cursor at the start of this section in the assembled preview. Select text to replace it."
                     >
-                      Edit full prose
+                      Edit in preview
                     </Button>
                   </div>
                 )}
@@ -817,11 +820,6 @@ export default function App() {
               {!text.trim() && (
                 <FirstMove w={w} onCommand={navigation.runCommand} />
               )}
-            </div>
-            <div className="page-end">
-              <span />
-              <span>Nothing added until you choose.</span>
-              <span />
             </div>
           </div>
           <footer className="writing-footer">

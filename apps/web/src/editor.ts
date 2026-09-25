@@ -14,6 +14,7 @@ import {
   sectionText,
   targetFor,
 } from "./domain";
+import { sectionContentRange } from "./section-boundary";
 export {
   SectionBoundaryGuard,
   allowSectionTopologyChange,
@@ -240,19 +241,18 @@ export function highlight(editor: Editor, target: EditTarget | null) {
 }
 function selectionInfo(state: EditorState) {
   const { from, to } = state.selection;
-  const a = state.doc.resolve(from),
-    b = state.doc.resolve(to);
-  if (
-    a.depth < 1 ||
-    b.depth < 1 ||
-    a.node(1).type.name !== "writingSection" ||
-    a.node(1) !== b.node(1)
-  )
-    return null;
-  const map = positionMap(a.node(1), a.before(1));
-  let start = map.starts.findIndex((p) => p >= from);
+  const range = sectionContentRange(state.doc, from, to);
+  if (range.kind !== "single") return null;
+  let owner: { node: PMNode; pos: number } | null = null;
+  state.doc.forEach((node, pos) => {
+    if (node.attrs.id === range.sectionId) owner = { node, pos };
+  });
+  if (!owner) return null;
+  const { node, pos } = owner as { node: PMNode; pos: number };
+  const map = positionMap(node, pos);
+  let start = map.starts.findIndex((p) => p >= range.from);
   if (start < 0) start = map.text.length;
-  let end = map.ends.findIndex((p) => p > to);
+  let end = map.ends.findIndex((p) => p > range.to);
   if (end < 0) end = map.text.length;
   let scope: EditTarget["scope"] = "selection";
   if (from !== to) {
@@ -278,7 +278,7 @@ function selectionInfo(state: EditorState) {
       end = segment.index + segment.segment.trimEnd().length;
     }
   }
-  return { id: a.node(1).attrs.id as string, map, start, end, scope };
+  return { id: range.sectionId, map, start, end, scope };
 }
 export function cursorTarget(editor: Editor, doc: Document): EditTarget | null {
   const info = selectionInfo(editor.state);

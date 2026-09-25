@@ -769,7 +769,9 @@ export function useWorkspace() {
           .getSelection()
           ?.setBaseAndExtent(dom.node, dom.offset, dom.node, dom.offset);
         setTarget(next);
-        highlight(editor, next);
+        // A prose-edit jump places a caret; the whole-section target remains
+        // available to Labs, but must not look like selected replacement text.
+        highlight(editor, forceText ? null : next);
         const preview = editor.view.dom.closest<HTMLElement>(".writing");
         const node = Array.from(editor.view.dom.children).find(
           (node) => (node as HTMLElement).id === id,

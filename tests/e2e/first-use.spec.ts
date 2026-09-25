@@ -29,7 +29,7 @@ async function save(page: Page) {
   await expect(page.getByTestId("save-state")).toHaveText("Saved");
 }
 async function palette(page: Page, query: string) {
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await expect(
     page.getByRole("dialog", { name: "Find a writing tool" }),
   ).toBeVisible();
@@ -118,9 +118,9 @@ test("the prompts can be ignored: direct typing, slash, paste and native undo wo
   await page.keyboard.insertText("Just write / no setup.");
   await expect(editor).toContainText("Just write / no setup.");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press("ControlOrMeta+z");
   await expect(editor).toHaveText("");
-  await page.keyboard.press("Control+Shift+z");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(editor).toContainText("Just write / no setup.");
   await save(page);
   const data = await (await request.get("/api/documents/" + doc.id)).json();
@@ -129,8 +129,8 @@ test("the prompts can be ignored: direct typing, slash, paste and native undo wo
   await palette(page, "synonyms");
   await page.keyboard.press("Escape");
   await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+c");
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("ControlOrMeta+c");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     "Just write / no setup.",
   );
@@ -456,16 +456,16 @@ test("rapid start/end navigation cannot race subsequent typing or extend selecti
   const editor = page.getByTestId("writing-editor");
   await editor.click();
   for (let i = 0; i < 8; i++) {
-    await page.keyboard.press("Control+End");
+    await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type(" End.");
-    await page.keyboard.press("Control+Home");
+    await page.keyboard.press("ControlOrMeta+Home");
     await page.keyboard.type("Begin. ");
   }
   await expect(editor).toHaveText(
     "Begin. ".repeat(8) + "Start here." + " End.".repeat(8),
   );
-  await page.keyboard.press("Control+End");
-  await page.keyboard.press("Control+Shift+Home");
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("ControlOrMeta+Shift+Home");
   const selected = await page.evaluate(() => window.getSelection()?.toString());
   expect(selected).toContain("Start here.");
   expect(selected).not.toContain("Find a tool");

@@ -88,35 +88,66 @@ export function sectionContentRange(
   from: number,
   to: number,
 ):
-  | { kind: "single"; from: number; to: number; clamped: boolean }
+  | {
+      kind: "single";
+      sectionId: string;
+      from: number;
+      to: number;
+      clamped: boolean;
+    }
   | { kind: "cross" | "outside" } {
-  const sections: { node: PMNode; pos: number }[] = [];
+  const sections: {
+    node: PMNode;
+    pos: number;
+    first: Selection;
+    last: Selection;
+  }[] = [];
   doc.forEach((node, pos) => {
     if (node.type.name !== "writingSection") return;
-    const start = pos + 1,
-      end = pos + node.nodeSize - 1;
-    if (from === to ? from >= start && from <= end : to > start && from < end)
-      sections.push({ node, pos });
+    const outerStart = pos + 1;
+    const outerEnd = pos + node.nodeSize - 1;
+    if (
+      from === to
+        ? from < outerStart || from > outerEnd
+        : to <= outerStart || from >= outerEnd
+    )
+      return;
+    const first = Selection.findFrom(doc.resolve(pos + 1), 1, true);
+    const last = Selection.findFrom(
+      doc.resolve(pos + node.nodeSize - 1),
+      -1,
+      true,
+    );
+    if (
+      !first ||
+      !last ||
+      first.from < pos + 1 ||
+      last.to > pos + node.nodeSize - 1
+    )
+      return;
+    // The wrapper edge after one paragraph can be part of a native selection
+    // whose actual editable content is wholly in the next section. Count
+    // content intersections, not wrapper intersections, for nonempty ranges.
+    const intersects =
+      from === to
+        ? from >= pos + 1 && from <= pos + node.nodeSize - 1
+        : first.from === last.to
+          ? from <= first.from && to >= first.from
+          : to > first.from && from < last.to;
+    if (intersects) sections.push({ node, pos, first, last });
   });
   if (sections.length !== 1)
     return { kind: sections.length > 1 ? "cross" : "outside" };
-  const { node, pos } = sections[0];
-  const first = Selection.findFrom(doc.resolve(pos + 1), 1, true);
-  const last = Selection.findFrom(
-    doc.resolve(pos + node.nodeSize - 1),
-    -1,
-    true,
-  );
-  if (
-    !first ||
-    !last ||
-    first.from < pos + 1 ||
-    last.to > pos + node.nodeSize - 1
-  )
-    return { kind: "outside" };
+  const { node, first, last } = sections[0];
   const a = Math.max(first.from, Math.min(last.to, from));
   const b = Math.max(a, Math.min(last.to, to));
-  return { kind: "single", from: a, to: b, clamped: a !== from || b !== to };
+  return {
+    kind: "single",
+    sectionId: node.attrs.id,
+    from: a,
+    to: b,
+    clamped: a !== from || b !== to,
+  };
 }
 
 function sameTopology(a: string[] | null, b: string[] | null): boolean {
@@ -166,7 +197,7 @@ export function createSectionBoundaryPlugin(
       tr.replaceSelection(contentSlice(value))
         .setMeta("paste", true)
         .setMeta("uiEvent", "paste");
-    view.dispatch(tr.scrollIntoView());
+    view.dispatch(allowSectionLocalEdit(tr.scrollIntoView(), range.sectionId));
     return true;
   };
   return new Plugin({
@@ -206,12 +237,32 @@ export function createSectionBoundaryPlugin(
       }
       // Cross-section native editing is not a local edit, even if a transform happens
       // to retain the wrappers. Selection/copy/navigation transactions remain free.
-      if (
-        sectionContentRange(state.doc, state.selection.from, state.selection.to)
-          .kind === "cross"
-      ) {
+      const range = sectionContentRange(
+        state.doc,
+        state.selection.from,
+        state.selection.to,
+      );
+      if (range.kind === "cross") {
         blocked("cross-section-selection");
         return false;
+      }
+      if (range.kind === "outside") {
+        blocked("section-topology-change");
+        return false;
+      }
+      if (range.kind === "single") {
+        let neighborsUnchanged = true;
+        state.doc.forEach((node, _pos, index) => {
+          if (
+            node.attrs.id !== range.sectionId &&
+            !node.eq(tr.doc.child(index))
+          )
+            neighborsUnchanged = false;
+        });
+        if (!neighborsUnchanged) {
+          blocked("cross-section-selection");
+          return false;
+        }
       }
       return true;
     },
@@ -237,23 +288,11 @@ export function createSectionBoundaryPlugin(
           );
         if (!empty && range.clamped) return replace(view, from, to, "");
         // Native join/lift commands must not consume a neighboring empty section.
-        if (empty) {
-          const $pos = view.state.doc.resolve(from);
-          if ($pos.depth >= 1) {
-            const bounds = sectionContentRange(
-              view.state.doc,
-              $pos.before(1),
-              $pos.after(1),
-            );
-            if (
-              bounds.kind === "single" &&
-              (event.key === "Backspace"
-                ? from <= bounds.from
-                : from >= bounds.to)
-            )
-              return blocked("section-topology-change");
-          }
-        }
+        if (
+          empty &&
+          (event.key === "Backspace" ? from <= range.from : from >= range.to)
+        )
+          return blocked("section-topology-change");
         return false;
       },
       handleDOMEvents: {
