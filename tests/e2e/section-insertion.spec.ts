@@ -153,10 +153,17 @@ test("above/below actions, search, conversion, reorder and Undo share the same i
   await expect(page.getByTestId("structure-item")).toHaveCount(3);
   await page.getByRole("button", { name: "Redo", exact: true }).click();
   await expect(page.getByTestId("structure-item")).toHaveCount(4);
+  await page.getByTestId("structure-item").last().scrollIntoViewIfNeeded();
+  const firstHeight = (await page
+    .getByTestId("structure-item")
+    .first()
+    .boundingBox())!.height;
   await page
     .getByTestId("structure-item")
     .last()
-    .dragTo(page.getByTestId("structure-item").first());
+    .dragTo(page.getByTestId("structure-item").first(), {
+      targetPosition: { x: 20, y: firstHeight - 12 },
+    });
   await save(page);
   const stored = await data(request, doc.id);
   expect(stored.sections.map((s: any) => s.kind)).toEqual([

@@ -241,7 +241,11 @@ test("drag/reorder preserves metadata and save survives reload; split and merge 
   const doc = await seed(request);
   await open(page);
   const items = page.getByTestId("structure-item");
-  await items.nth(2).dragTo(items.nth(0));
+  await items.nth(2).scrollIntoViewIfNeeded();
+  const firstHeight = (await items.first().boundingBox())!.height;
+  await items
+    .nth(2)
+    .dragTo(items.nth(0), { targetPosition: { x: 20, y: firstHeight - 12 } });
   await expect(items.nth(0)).toHaveAttribute(
     "data-section-id",
     doc.sections[2].id,

@@ -860,6 +860,30 @@ export function useWorkspace() {
   };
   // All entry points share this insertion operation and its undo/scope semantics.
   const addSection = () => commitSectionInsertion("Freeform", null);
+  const captureThought = (text: string) => {
+    if (!text.trim()) return false;
+    const [first] = current.current.sections;
+    if (
+      current.current.sections.length === 1 &&
+      first.kind === "Freeform" &&
+      !sectionText(first).trim() &&
+      !first.notes.trim() &&
+      first.variants.length === 0
+    ) {
+      sync({
+        ...current.current,
+        sections: [
+          { ...first, content: newSection("Freeform", text.trim()).content },
+        ],
+      });
+      prepareSectionTarget(first.id);
+      return true;
+    }
+    const section = newSection("Freeform", text.trim());
+    sync(insertSectionAt(current.current, section, null));
+    prepareSectionTarget(section.id);
+    return true;
+  };
   const addSectionAfter = (
     id: string,
     kind: WritingSection["kind"] = "Freeform",
@@ -1796,6 +1820,7 @@ export function useWorkspace() {
     canCoachTarget,
     showLocalWorkbench: () => setDocumentWorkbench(false),
     addSectionAfter,
+    captureThought,
     addSource,
     focusSentence,
     insertion,

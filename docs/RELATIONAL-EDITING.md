@@ -23,7 +23,7 @@ Open `http://127.0.0.1:5173`; the API is `127.0.0.1:4318`. Alternatively, run `p
 
 ### Primary Workbench, one prose editor
 
-Workbench is the default, including for old settings with no saved view. It shows the actual ordered section instances as cards, the single editable prose preview, and the existing Inspector. Document is the alternate layout of that same editor. Card text, relational neighbors and comparison's canonical text are projections, not another canonical text store. **Edit full prose** reveals/focuses the existing editor; it does not instantiate a card editor.
+Workbench is the default, including for old settings with no saved view. The selected Comfortable card can host the single TipTap editor for direct prose writing; **Edit in preview** and Document View move that same editor back to the assembled page. Unselected card text, the Workbench assembled readout, relational neighbors, and comparison's canonical text are read-only projections of `Document.sections`. The readout is currently plain text; Document View retains rich formatting. There is no second card editor or copied prose state.
 
 `Settings.layout` persists `primaryView` (`workbench` or `document`), `density` (`comfortable` or `overview`), `previewVisible`, and `inspectorVisible`. Defaults are Workbench, Comfortable, both panels visible. Switching to Document makes the prose preview visible. Hide preview gives cards more width; Inspector can also be hidden.
 

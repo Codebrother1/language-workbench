@@ -1978,7 +1978,7 @@ summary {
   }
 }
 
-/* Workbench is the primary composing surface. The same single editor is its preview. */
+/* Workbench cards can host the same single editor used by Document View. */
 .viewbar {
   min-height: 50px;
   display: flex;
@@ -2048,6 +2048,99 @@ summary {
   overflow: hidden;
   white-space: pre-wrap;
   margin: 12px 0;
+}
+.thought-capture {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+}
+.thought-capture label,
+.card-layer-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+}
+.thought-capture textarea {
+  width: 100%;
+  min-height: 46px;
+  resize: vertical;
+  padding: 9px 11px;
+  font: 15px/1.5 inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.thought-capture .button {
+  justify-self: start;
+}
+.thought-capture small {
+  color: var(--muted);
+}
+.structure-item.dragging {
+  opacity: 0.48;
+}
+.drop-marker {
+  height: 0;
+  margin: 0;
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+}
+.drop-marker::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+  pointer-events: none;
+}
+.card-writing {
+  margin: 10px 0 14px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+}
+.card-layer-label span {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.card-write-prompt {
+  cursor: text;
+  min-height: 58px;
+}
+.card-write-prompt:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.card-editor-host .writing-editor {
+  min-height: 120px;
+  padding: 8px 0 0;
+  font-size: 18px;
+  line-height: 1.65;
+}
+.card-editor-host .writing-editor section {
+  margin: 0;
+}
+.assembled-readout {
+  font-family: "Literata Variable", Georgia, serif;
+  font-size: 18px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assembled-readout section {
+  margin: 0 0 1.4em;
 }
 .workbench-mode .section-role,
 .card-model {
@@ -2149,7 +2242,32 @@ summary {
   padding: 3px 7px;
 }
 .workbench-mode .density-overview .structure-item:not(.active) .card-note {
+  display: -webkit-box;
+}
+.workbench-mode .density-overview .structure-hint {
+  margin-bottom: 6px;
+}
+.workbench-mode .density-overview .density-controls {
+  margin-bottom: 8px;
+}
+.workbench-mode .density-overview .thought-capture small {
   display: none;
+}
+.workbench-mode .density-overview .thought-capture {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.workbench-mode .density-overview .thought-capture label {
+  grid-column: 1 / -1;
+}
+.workbench-mode .density-overview .thought-capture textarea {
+  min-height: 38px;
+  height: 38px;
+  resize: none;
+}
+.workbench-mode .density-overview .thought-capture .button {
+  grid-column: 2;
+  grid-row: 2;
 }
 .card-essential {
   margin: 12px 0;
