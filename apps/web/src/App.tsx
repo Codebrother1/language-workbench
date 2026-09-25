@@ -41,7 +41,6 @@ import {
 } from "lucide-react";
 import { useWorkspace, type Workspace } from "./useWorkspace";
 import {
-  sectionKinds,
   documentText,
   toMarkdown,
   sectionText,
@@ -50,6 +49,7 @@ import {
 import { Button, Select, Field, Dialog, GrowingTextarea, download } from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
+import { SectionConceptSelect } from "./SectionConceptHelp";
 function Structure({
   w,
   onRemove,
@@ -356,23 +356,16 @@ function Structure({
                       }
                     />
                   </Field>
-                  <Field label="Semantic kind">
-                    <Select
-                      value={s.kind}
-                      onChange={(e) =>
-                        w.patchSection(s.id, {
-                          kind: e.target.value as typeof s.kind,
-                          ...(s.label === s.kind
-                            ? { label: e.target.value }
-                            : {}),
-                        })
-                      }
-                    >
-                      {sectionKinds.map((k) => (
-                        <option key={k}>{k}</option>
-                      ))}
-                    </Select>
-                  </Field>
+                  <SectionConceptSelect
+                    label="Semantic kind"
+                    value={s.kind}
+                    onChange={(kind) =>
+                      w.patchSection(s.id, {
+                        kind,
+                        ...(s.label === s.kind ? { label: kind } : {}),
+                      })
+                    }
+                  />
                   {(w.layout.primaryView !== "workbench" ||
                     w.layout.density === "overview") && (
                     <>

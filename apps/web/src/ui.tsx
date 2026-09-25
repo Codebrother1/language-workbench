@@ -38,7 +38,11 @@ export function Field({
       {isValidElement<{ id?: string; "aria-describedby"?: string }>(children)
         ? cloneElement(children, {
             id,
-            "aria-describedby": hint ? id + "-hint" : undefined,
+            "aria-describedby": hint
+              ? [children.props["aria-describedby"], id + "-hint"]
+                  .filter(Boolean)
+                  .join(" ")
+              : children.props["aria-describedby"],
           })
         : children}
       {hint && <small id={id + "-hint"}>{hint}</small>}

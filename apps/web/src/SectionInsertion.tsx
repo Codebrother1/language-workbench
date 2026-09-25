@@ -2,7 +2,8 @@ import type { Editor } from "@tiptap/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sectionKinds, type WritingSection } from "./domain";
 import { Button, Field, Select } from "./ui";
-import { sectionPurposes } from "./section-purpose";
+import { SectionConceptHelp } from "./SectionConceptHelp";
+import { sectionConcepts } from "./section-purpose";
 import "./wayfinding.css";
 export type InsertionAnchor = {
   documentId: string;
@@ -25,6 +26,13 @@ export function SectionInsertionPicker({
   const root = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(""),
     [kind, setKind] = useState<WritingSection["kind"]>("Freeform");
+  const [hoveredConcept, setHoveredConcept] = useState<
+    WritingSection["kind"] | null
+  >(null);
+  const [focusedConcept, setFocusedConcept] = useState<
+    WritingSection["kind"] | null
+  >(null);
+  const helpId = "section-insertion-concept-help";
   const index =
     anchor.beforeSectionId === null
       ? sections.length
@@ -39,7 +47,13 @@ export function SectionInsertionPicker({
         : ["Point", "Example", "Segue", "Freeform"];
   const matchesQuery = (k: WritingSection["kind"], value: string) =>
     k.toLowerCase().includes(value.toLowerCase()) ||
-    sectionPurposes[k].purpose.toLowerCase().includes(value.toLowerCase());
+    sectionConcepts[k].rhetoricalJob
+      .toLowerCase()
+      .includes(value.toLowerCase()) ||
+    sectionConcepts[k].shortDescription
+      .toLowerCase()
+      .includes(value.toLowerCase()) ||
+    sectionConcepts[k].category.toLowerCase().includes(value.toLowerCase());
   const available = sectionKinds.filter((k) => matchesQuery(k, query));
   useEffect(() => {
     root.current?.querySelector<HTMLInputElement>("input")?.focus();
@@ -86,16 +100,25 @@ export function SectionInsertionPicker({
       <p className="small muted">
         Any type, any number. These choices are suggestions, not a template.
       </p>
+      <SectionConceptHelp
+        id={helpId}
+        kind={focusedConcept ?? hoveredConcept ?? kind}
+        visible
+      />
       <div className="insertion-suggestions">
         {suggested.map((k) => (
           <Button
             key={k}
             aria-label={`Insert ${k}`}
-            title={sectionPurposes[k].description}
+            aria-describedby={helpId}
+            onMouseEnter={() => setHoveredConcept(k)}
+            onMouseLeave={() => setHoveredConcept(null)}
+            onFocus={() => setFocusedConcept(k)}
+            onBlur={() => setFocusedConcept(null)}
             onClick={() => onInsert(k)}
           >
             <span className="insertion-purpose">
-              {sectionPurposes[k].purpose}
+              {sectionConcepts[k].rhetoricalJob}
               <small>{k}</small>
             </span>
           </Button>
@@ -118,11 +141,19 @@ export function SectionInsertionPicker({
       <Field label="All section types">
         <Select
           value={kind}
-          onChange={(e) => setKind(e.target.value as typeof kind)}
+          aria-describedby={helpId}
+          onChange={(e) => {
+            setKind(e.target.value as typeof kind);
+            setFocusedConcept(e.target.value as typeof kind);
+          }}
+          onMouseEnter={() => setHoveredConcept(kind)}
+          onMouseLeave={() => setHoveredConcept(null)}
+          onFocus={() => setFocusedConcept(kind)}
+          onBlur={() => setFocusedConcept(null)}
         >
           {available.map((k) => (
             <option key={k} value={k}>
-              {k} — {sectionPurposes[k].purpose}
+              {k} — {sectionConcepts[k].rhetoricalJob}
             </option>
           ))}
         </Select>

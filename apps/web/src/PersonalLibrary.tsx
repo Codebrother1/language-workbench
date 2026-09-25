@@ -3,13 +3,13 @@ import {
   type LibraryItem,
   libraryKinds,
   searchLibrary,
-  sectionKinds,
   contentTypes,
   contentTypeConfig,
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { type SaveLibraryItemInput } from "./library-helpers";
 import { Button, Field, Select, download } from "./ui";
+import { SectionConceptSelect } from "./SectionConceptHelp";
 const labels: Record<string, string> = {
   snippet: "Snippets",
   pattern: "Patterns",
@@ -451,19 +451,14 @@ export function ScopedStyleGuides({ w }: { w: Workspace }) {
           </Select>
         </Field>
         {level === "section" ? (
-          <Field label="Section style guide">
-            <Select
-              value={role}
-              onChange={(e) => {
-                setRole(e.target.value as typeof role);
-                setEdit(undefined);
-              }}
-            >
-              {sectionKinds.map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </Select>
-          </Field>
+          <SectionConceptSelect
+            label="Section style guide"
+            value={role}
+            onChange={(kind) => {
+              setRole(kind);
+              setEdit(undefined);
+            }}
+          />
         ) : (
           <Field label="Content style guide">
             <Select

@@ -1,5 +1,5 @@
 import { sectionKinds } from "./domain";
-import { sectionPurposes } from "./section-purpose";
+import { sectionConcepts } from "./section-purpose";
 export type CommandDefinition = {
   id: string;
   label: string;
@@ -330,13 +330,13 @@ export const commands: CommandDefinition[] = [
   },
   ...sectionKinds.map((kind) => ({
     id: "insert:" + kind,
-    label: sectionPurposes[kind].purpose + " — " + kind,
-    description: sectionPurposes[kind].description,
+    label: sectionConcepts[kind].rhetoricalJob + " — " + kind,
+    description: sectionConcepts[kind].shortDescription,
     keywords: [
       "add " + kind,
       "insert " + kind,
       kind,
-      ...sectionPurposes[kind].purpose.split(" "),
+      ...sectionConcepts[kind].rhetoricalJob.split(" "),
     ],
     group: "Add a section" as const,
   })),

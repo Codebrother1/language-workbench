@@ -8,6 +8,7 @@ import {
 } from "./domain";
 import { ModelPicker } from "./ModelControls";
 import { Field, Button, Select } from "./ui";
+import { SectionConceptSelect } from "./SectionConceptHelp";
 function ProviderCard({
   provider: p,
   w,
@@ -132,7 +133,7 @@ function ProviderCard({
 }
 export function ProviderSettings({ w }: { w: Workspace }) {
   const [task, setTask] = useState("words"),
-    [kind, setKind] = useState("Hook");
+    [kind, setKind] = useState<(typeof sectionKinds)[number]>("Hook");
   const prefs = routingPreferencesSchema.parse(w.settings.routing ?? {});
   return (
     <>
@@ -178,13 +179,11 @@ export function ProviderSettings({ w }: { w: Workspace }) {
             label="Task model"
             inherit="No task override"
           />
-          <Field label="Section type default">
-            <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-              {sectionKinds.map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </Select>
-          </Field>
+          <SectionConceptSelect
+            label="Section type default"
+            value={kind}
+            onChange={setKind}
+          />
           <ModelPicker
             catalog={w.catalog}
             value={prefs.sectionTypeDefaults[kind]}

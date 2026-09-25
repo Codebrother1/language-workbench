@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { commands, searchCommands } from "../apps/web/src/commands";
-import { sectionPurposes } from "../apps/web/src/section-purpose";
+import { sectionConcepts } from "../apps/web/src/section-purpose";
 import { sectionKinds } from "../packages/domain/src/index";
 describe("one discovery catalog over existing capabilities", () => {
   it("has unique command IDs and no command-local document or provider implementations", () => {
@@ -43,13 +43,33 @@ describe("one discovery catalog over existing capabilities", () => {
     expect(searchCommands("")).toHaveLength(7);
   });
   it("preserves every section type and explains its job", () => {
-    expect(Object.keys(sectionPurposes).sort()).toEqual(
+    expect(Object.keys(sectionConcepts).sort()).toEqual(
       [...sectionKinds].sort(),
     );
     for (const kind of sectionKinds) {
-      expect(sectionPurposes[kind].purpose.length).toBeGreaterThan(5);
-      expect(sectionPurposes[kind].description.length).toBeGreaterThan(10);
+      const concept = sectionConcepts[kind];
+      expect(concept.name).toBe(kind);
+      expect(concept.rhetoricalJob.length).toBeGreaterThan(5);
+      expect(concept.shortDescription.length).toBeGreaterThan(10);
+      expect(concept.whenToUse.length).toBeGreaterThan(10);
+      expect(concept.category.length).toBeGreaterThan(3);
+      expect([
+        "Opening",
+        "Development",
+        "Connection",
+        "Turn",
+        "Ending",
+        "Flexible",
+      ]).toContain(concept.category);
       expect(commands.find((c) => c.id === "insert:" + kind)).toBeTruthy();
     }
+    expect(sectionConcepts.Segue.shortDescription).toContain(
+      "Connects one idea",
+    );
+    expect(sectionConcepts.Reveal.whenToUse).toContain("tension");
+    expect(sectionConcepts.Callback.shortDescription).toContain(
+      "earlier phrase",
+    );
+    expect(sectionConcepts.Evidence.shortDescription).toContain("data, quote");
   });
 });

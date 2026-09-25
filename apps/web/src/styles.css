@@ -1919,6 +1919,50 @@ summary {
   margin: 0;
   font-size: 17px;
 }
+.section-concept-field {
+  position: relative;
+}
+.section-concept-help {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: absolute;
+  z-index: 12;
+  top: 100%;
+  left: 0;
+  width: min(320px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: 0 8px 24px #0002;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.section-concept-help[hidden] {
+  display: none;
+}
+.section-concept-help strong {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.section-concept-help small {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: normal;
+}
+.section-insertion-picker > .section-concept-help {
+  position: static;
+  width: auto;
+  margin-top: 10px;
+  box-shadow: none;
+}
 .section-insertion-picker .field {
   margin: 12px 0;
 }
