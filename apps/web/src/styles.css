@@ -2667,3 +2667,185 @@ summary {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Docked workspace: the same Workbench, editor and Inspector stay mounted. */
+.app .workspace.dock-workspace {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+}
+.dock-pane {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.dock-pane.pane-hidden {
+  display: none;
+}
+.dock-workspace .dock-workbench {
+  min-width: 320px;
+}
+.dock-workspace .dock-preview {
+  min-width: 300px;
+  container-type: inline-size;
+}
+.dock-workspace .dock-inspector {
+  min-width: 260px;
+}
+.dock-workspace .structure,
+.dock-workspace .writing,
+.dock-workspace .inspector {
+  width: 100%;
+  min-width: 0;
+}
+.dock-workspace .structure,
+.dock-workspace .writing,
+.dock-workspace .inspector {
+  height: calc(100vh - 124px);
+  max-height: calc(100vh - 124px);
+  min-height: 0;
+  overflow: auto;
+  position: sticky;
+  top: 0;
+}
+.dock-workspace .structure {
+  padding: 24px;
+  box-shadow: none;
+}
+.dock-divider {
+  flex: 0 0 8px;
+  position: relative;
+  background: var(--line);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 3;
+}
+.dock-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.dock-divider:hover::after,
+.dock-divider:focus-visible::after {
+  opacity: 1;
+}
+.dock-divider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+body.resizing-dock,
+body.resizing-dock * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+.layout-menu {
+  position: relative;
+}
+.layout-menu summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 7px 12px;
+  background: var(--paper);
+}
+.layout-menu summary::-webkit-details-marker {
+  display: none;
+}
+.layout-menu[open] > div {
+  display: grid;
+  gap: 4px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 25;
+  width: 175px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px #0002;
+}
+.layout-menu[open] .button {
+  justify-content: flex-start;
+}
+.area-jump {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 5px;
+  padding: 7px 0;
+  background: var(--panel);
+}
+.area-jump .button {
+  flex: 1;
+  justify-content: center;
+  white-space: nowrap;
+}
+.section-group-label,
+.parked-area-heading {
+  scroll-margin-top: 53px;
+}
+@container (max-width: 420px) {
+  .format-toolbar {
+    padding-inline: 10px;
+  }
+  .format-toolbar > .small {
+    display: none;
+  }
+  .format-toolbar .row {
+    gap: 2px;
+  }
+}
+@media (max-width: 1180px) {
+  .app .workspace.dock-workspace.dock-three {
+    flex-wrap: wrap;
+  }
+  .dock-three .dock-preview + .dock-divider {
+    display: none;
+  }
+  .dock-three .dock-inspector {
+    flex: 0 0 100% !important;
+  }
+  .dock-three .dock-inspector .inspector {
+    position: relative;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+  }
+}
+@media (max-width: 900px) {
+  .app .workspace.dock-workspace {
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+  .dock-workspace .dock-divider {
+    display: none;
+  }
+  .dock-workspace .dock-pane {
+    flex: 0 0 auto !important;
+    width: 100%;
+    min-width: 0;
+  }
+  .dock-workspace .structure,
+  .dock-workspace .writing,
+  .dock-workspace .inspector {
+    position: relative;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+  .dock-workspace .structure {
+    box-shadow: none;
+  }
+  .area-jump {
+    top: 0;
+  }
+}

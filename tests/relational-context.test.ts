@@ -12,6 +12,7 @@ import {
   newDocument,
   newSection,
   sectionText,
+  settingsSchema,
   targetFor,
   validateTarget,
   type AIRequest,
@@ -389,7 +390,9 @@ describe("restart and import preserve local context identities", () => {
       repository = new Repository(dir);
       const restarted = repository.get(doc.id);
       expect(documentSchema.parse(restarted)).toEqual(doc);
-      expect(repository.getSettings().layout).toEqual(settings.layout);
+      expect(repository.getSettings().layout).toEqual(
+        settingsSchema.parse(settings).layout,
+      );
       expect(() =>
         validateTarget(restarted, restarted.focusTarget!),
       ).not.toThrow();

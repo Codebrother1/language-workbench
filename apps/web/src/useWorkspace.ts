@@ -197,7 +197,6 @@ export function useWorkspace() {
   const targetRef = useRef<EditTarget | null>(null);
   const selectingExplicitTarget = useRef(false);
   const [panel, setPanel] = useState<Panel>(null);
-  const [nav, setNav] = useState(() => window.innerWidth > 900);
   const [busy, setBusy] = useState(false);
   const requestBusy = useRef(false);
   const navigating = useRef(false);
@@ -1748,8 +1747,10 @@ export function useWorkspace() {
   const defaultLayout = {
     primaryView: "workbench" as const,
     density: "comfortable" as const,
+    workbenchVisible: true,
     previewVisible: true,
     inspectorVisible: true,
+    paneWidths: { workbench: 50, preview: 30, inspector: 20 },
   };
   const layout = { ...defaultLayout, ...settings.layout };
   const patchLayout = (patch: Partial<NonNullable<Settings["layout"]>>) => {
@@ -1771,8 +1772,50 @@ export function useWorkspace() {
     patchLayout({ density });
   const setPreviewVisible = (previewVisible: boolean) =>
     patchLayout({ previewVisible });
+  const setWorkbenchVisible = (workbenchVisible: boolean) =>
+    patchLayout({ workbenchVisible });
   const setInspectorVisible = (inspectorVisible: boolean) =>
     patchLayout({ inspectorVisible });
+  const setPaneWidths = (
+    paneWidths: NonNullable<Settings["layout"]>["paneWidths"],
+  ) => patchLayout({ paneWidths });
+  const applyLayoutPreset = (
+    preset: "writing" | "review" | "workbench" | "all" | "reset",
+  ) => {
+    const base = { ...defaultLayout, ...settingsRef.current.layout };
+    const changes = {
+      writing: {
+        primaryView: "workbench" as const,
+        workbenchVisible: true,
+        previewVisible: true,
+        inspectorVisible: false,
+        paneWidths: { workbench: 70, preview: 30, inspector: 20 },
+      },
+      review: {
+        primaryView: "document" as const,
+        workbenchVisible: true,
+        previewVisible: true,
+        inspectorVisible: true,
+        paneWidths: { workbench: 25, preview: 50, inspector: 25 },
+      },
+      workbench: {
+        primaryView: "workbench" as const,
+        workbenchVisible: true,
+        previewVisible: false,
+        inspectorVisible: false,
+        paneWidths: { workbench: 70, preview: 30, inspector: 20 },
+      },
+      all: {
+        primaryView: "workbench" as const,
+        workbenchVisible: true,
+        previewVisible: true,
+        inspectorVisible: true,
+        paneWidths: { workbench: 50, preview: 30, inspector: 20 },
+      },
+      reset: defaultLayout,
+    }[preset];
+    return patchLayout({ ...base, ...changes });
+  };
   const setSectionTypeModel = (model: ModelRef | null) => {
     if (!selectedSection) return;
     const routing = routingPreferencesSchema.parse(
@@ -1857,8 +1900,11 @@ export function useWorkspace() {
     layout,
     setPrimaryView,
     setDensity,
+    setWorkbenchVisible,
     setPreviewVisible,
     setInspectorVisible,
+    setPaneWidths,
+    applyLayoutPreset,
     selectedSectionId: target?.sectionId ?? null,
     prepareSectionTarget,
     canCoachTarget,
@@ -1949,8 +1995,6 @@ export function useWorkspace() {
     editor,
     panel,
     setPanel,
-    nav,
-    setNav,
     response,
     responseTarget,
     busy,

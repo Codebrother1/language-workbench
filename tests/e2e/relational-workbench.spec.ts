@@ -279,7 +279,7 @@ test("comfortable cards expose meaningful prose/notes; overview and narrow layou
   await page.getByRole("button", { name: "Show preview", exact: true }).click();
   const t = await timeline.boundingBox(),
     p = await page.locator(".writing").boundingBox();
-  expect(t!.x + t!.width).toBeLessThanOrEqual(p!.x + 1);
+  expect(p!.y).toBeGreaterThanOrEqual(t!.y + t!.height - 2);
   expect(
     await page.evaluate(() => document.body.scrollWidth <= innerWidth),
   ).toBe(true);

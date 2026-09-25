@@ -8,6 +8,7 @@ import {
   SectionInsertionGaps,
 } from "./SectionInsertion";
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { DockDivider, type PaneWidths } from "./DockDivider";
 import { EditorContent } from "@tiptap/react";
 import {
   PanelLeft,
@@ -71,7 +72,27 @@ function Structure({
   const [thought, setThought] = useState("");
   const [includeId, setIncludeId] = useState<string | null>(null);
   const [includePosition, setIncludePosition] = useState("");
+  const structureRef = useRef<HTMLElement>(null);
   const thoughtRef = useRef<HTMLTextAreaElement>(null);
+  const draftStart = useRef<HTMLDivElement>(null);
+  const parkedStart = useRef<HTMLDivElement>(null);
+  const jumpTo = (target: HTMLDivElement | null) => {
+    const pane = structureRef.current;
+    if (!target || !pane) return;
+    if (
+      pane.scrollHeight > pane.clientHeight + 2 &&
+      ["auto", "scroll"].includes(getComputedStyle(pane).overflowY)
+    ) {
+      pane.scrollTo({
+        top:
+          pane.scrollTop +
+          target.getBoundingClientRect().top -
+          pane.getBoundingClientRect().top -
+          62,
+        behavior: "smooth",
+      });
+    } else target.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
   const visibleSections =
@@ -106,6 +127,7 @@ function Structure({
   };
   return (
     <nav
+      ref={structureRef}
       className={
         "structure " +
         (w.layout.primaryView === "workbench" ? "timeline" : "") +
@@ -126,6 +148,19 @@ function Structure({
       <p className="small muted structure-hint">
         Write, then move parts into order.
       </p>
+      {w.layout.primaryView === "workbench" && (
+        <div className="area-jump" role="group" aria-label="Thought areas">
+          <Button onClick={() => jumpTo(draftStart.current)}>
+            Draft · {draft.length}
+          </Button>
+          <Button
+            disabled={!parked.length}
+            onClick={() => jumpTo(parkedStart.current)}
+          >
+            Parked · {parked.length}
+          </Button>
+        </div>
+      )}
       {w.layout.primaryView === "workbench" && (
         <div
           className="row density-controls"
@@ -175,11 +210,17 @@ function Structure({
         </div>
       )}
       <div className="section-list">
-        <div className="section-group-label">DRAFT · reader order</div>
+        <div ref={draftStart} className="section-group-label">
+          DRAFT · reader order
+        </div>
         {visibleSections.map((s, i) => (
           <Fragment key={s.id}>
             {w.layout.primaryView === "workbench" && i === draft.length && (
-              <div className="parked-area-heading" data-testid="parked-area">
+              <div
+                ref={parkedStart}
+                className="parked-area-heading"
+                data-testid="parked-area"
+              >
                 <b>PARKED THOUGHTS · {parked.length}</b>
                 <span>Still in this project. Outside the reader draft.</span>
               </div>
@@ -683,6 +724,11 @@ export default function App() {
     id?: string;
   } | null>(null);
   const [menu, setMenu] = useState(false);
+  const layoutMenu = useRef<HTMLDetailsElement>(null);
+  const [dragWidths, setDragWidths] = useState<PaneWidths | null>(null);
+  const [documentPreviewOverride, setDocumentPreviewOverride] = useState<
+    boolean | null
+  >(null);
   const [compareSection, setCompareSection] = useState<string | null>(null);
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
@@ -690,7 +736,29 @@ export default function App() {
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
+  const widths = dragWidths ?? w.layout.paneWidths;
+  const previewShown =
+    w.layout.primaryView === "document" && documentPreviewOverride !== null
+      ? documentPreviewOverride
+      : w.layout.previewVisible;
+  const paneCount =
+    Number(w.layout.workbenchVisible) +
+    Number(previewShown) +
+    Number(w.layout.inspectorVisible);
+  const commitWidths = (next: PaneWidths) => {
+    setDragWidths(null);
+    void w.setPaneWidths(next);
+  };
+  const preset = (
+    name: "writing" | "review" | "workbench" | "all" | "reset",
+  ) => {
+    layoutMenu.current?.removeAttribute("open");
+    setDragWidths(null);
+    setDocumentPreviewOverride(null);
+    void w.applyLayoutPreset(name);
+  };
   const activeEditorCard =
+    w.layout.workbenchVisible &&
     w.layout.primaryView === "workbench" &&
     w.layout.density === "comfortable" &&
     editorCard &&
@@ -753,13 +821,7 @@ export default function App() {
         " " +
         (w.layout.density === "overview" ? "overview-mode" : "") +
         " " +
-        (!w.nav && w.layout.primaryView === "document" ? "nav-hidden" : "") +
-        " " +
-        (w.layout.primaryView === "workbench" && !w.layout.previewVisible
-          ? "preview-hidden"
-          : "") +
-        " " +
-        (!w.layout.inspectorVisible ? "inspector-hidden" : "")
+        "dock-shell"
       }
     >
       {activeEditorCard && (
@@ -771,13 +833,9 @@ export default function App() {
           <Button
             className="icon nav-toggle"
             aria-label="Toggle structure"
-            aria-pressed={w.layout.primaryView === "workbench" || w.nav}
-            onClick={() => {
-              if (w.layout.primaryView === "workbench") {
-                w.setPrimaryView("document");
-                w.setNav(false);
-              } else w.setNav(!w.nav);
-            }}
+            aria-pressed={w.layout.workbenchVisible}
+            disabled={w.layout.workbenchVisible && paneCount === 1}
+            onClick={() => w.setWorkbenchVisible(!w.layout.workbenchVisible)}
           >
             <PanelLeft size={19} />
           </Button>
@@ -1048,34 +1106,72 @@ export default function App() {
         <div className="row" role="group" aria-label="Primary view">
           <Button
             aria-pressed={w.layout.primaryView === "workbench"}
-            onClick={() => w.setPrimaryView("workbench")}
+            onClick={() => {
+              setDocumentPreviewOverride(null);
+              w.setPrimaryView("workbench");
+            }}
           >
             Workbench
           </Button>
           <Button
             aria-pressed={w.layout.primaryView === "document"}
-            onClick={() => w.setPrimaryView("document")}
+            onClick={() => {
+              setDocumentPreviewOverride(w.layout.previewVisible ? null : true);
+              w.setPrimaryView("document");
+            }}
           >
             Document View
           </Button>
         </div>
-        <div className="row">
-          {w.layout.primaryView === "workbench" && (
-            <Button
-              onClick={() => w.setPreviewVisible(!w.layout.previewVisible)}
-            >
-              {w.layout.previewVisible ? "Hide preview" : "Show preview"}
-            </Button>
-          )}
+        <div className="row pane-controls">
+          <details ref={layoutMenu} className="layout-menu">
+            <summary>Layout</summary>
+            <div role="group" aria-label="Layout presets">
+              <Button onClick={() => preset("writing")}>Writing</Button>
+              <Button onClick={() => preset("review")}>Review</Button>
+              <Button onClick={() => preset("workbench")}>
+                Workbench only
+              </Button>
+              <Button onClick={() => preset("all")}>All panes</Button>
+              <Button onClick={() => preset("reset")}>Reset layout</Button>
+            </div>
+          </details>
+          <Button
+            onClick={() => w.setWorkbenchVisible(!w.layout.workbenchVisible)}
+            disabled={w.layout.workbenchVisible && paneCount === 1}
+          >
+            {w.layout.workbenchVisible ? "Hide Workbench" : "Show Workbench"}
+          </Button>
+          <Button
+            onClick={() => {
+              setDocumentPreviewOverride(null);
+              w.setPreviewVisible(!previewShown);
+            }}
+            disabled={previewShown && paneCount === 1}
+          >
+            {previewShown ? "Hide preview" : "Show preview"}
+          </Button>
           <Button
             onClick={() => w.setInspectorVisible(!w.layout.inspectorVisible)}
+            disabled={w.layout.inspectorVisible && paneCount === 1}
           >
             {w.layout.inspectorVisible ? "Hide Inspector" : "Show Inspector"}
           </Button>
         </div>
       </div>
-      <div className="workspace">
-        {(w.nav || w.layout.primaryView === "workbench") && (
+      <div
+        className={
+          "workspace dock-workspace " + (paneCount === 3 ? "dock-three" : "")
+        }
+      >
+        <div
+          className={
+            "dock-pane dock-workbench " +
+            (!w.layout.workbenchVisible ? "pane-hidden" : "")
+          }
+          data-pane="workbench"
+          style={{ flexGrow: widths.workbench }}
+        >
           <Structure
             w={w}
             onRemove={(id) => setConfirmation({ kind: "section", id })}
@@ -1083,86 +1179,122 @@ export default function App() {
             onWriteCard={writeInCard}
             onEditPreview={editInPreview}
           />
-        )}
-        <main className="writing">
-          <Toolbar w={w} />
-          <div className="selected-preview-heading">
-            <span className="eyebrow">
-              {w.layout.primaryView === "workbench"
-                ? "Assembled preview · same writing"
-                : "Document View"}
-            </span>
-            <b>
-              {(w.layout.primaryView === "workbench"
-                ? w.doc.sections
-                : draft
-              ).find((s) => s.id === w.selectedSectionId)?.label ??
-                "Your document"}
-            </b>
-          </div>
-          {w.layout.primaryView === "workbench" && (
-            <RelationalContext
-              w={w}
-              onCompare={() => setCompareSection(w.selectedSectionId)}
+        </div>
+        {w.layout.workbenchVisible &&
+          (previewShown || w.layout.inspectorVisible) && (
+            <DockDivider
+              left="workbench"
+              right={previewShown ? "preview" : "inspector"}
+              widths={widths}
+              onResize={setDragWidths}
+              onCommit={commitWidths}
             />
           )}
-          <div className="page">
-            <div className="page-caption">
-              <span className="eyebrow">YOUR WORDS, FIRST</span>
-              <button
-                aria-label="Writing brief"
-                title="Optional: audience, purpose and format"
-                onClick={() => w.setPanel("brief")}
-              >
-                What are you making? <ArrowUp size={11} className="rotate" />
-              </button>
+        <div
+          className={
+            "dock-pane dock-preview " + (!previewShown ? "pane-hidden" : "")
+          }
+          data-pane="preview"
+          style={{ flexGrow: widths.preview }}
+        >
+          <main className="writing">
+            <Toolbar w={w} />
+            <div className="selected-preview-heading">
+              <span className="eyebrow">
+                {w.layout.primaryView === "workbench"
+                  ? "Assembled preview · same writing"
+                  : "Document View"}
+              </span>
+              <b>
+                {(w.layout.primaryView === "workbench"
+                  ? w.doc.sections
+                  : draft
+                ).find((s) => s.id === w.selectedSectionId)?.label ??
+                  "Your document"}
+              </b>
             </div>
-            <div className={"editor-wrap " + (!text ? "empty" : "")}>
-              <EditorContent editor={w.editor} />
-              {activeEditorCard && (
-                <div
-                  className="assembled-readout"
-                  aria-label="Assembled preview"
+            {w.layout.primaryView === "workbench" && (
+              <RelationalContext
+                w={w}
+                onCompare={() => setCompareSection(w.selectedSectionId)}
+              />
+            )}
+            <div className="page">
+              <div className="page-caption">
+                <span className="eyebrow">YOUR WORDS, FIRST</span>
+                <button
+                  aria-label="Writing brief"
+                  title="Optional: audience, purpose and format"
+                  onClick={() => w.setPanel("brief")}
                 >
-                  {draft.map((section) => (
-                    <section key={section.id}>
-                      {sectionText(section) || (
-                        <span className="muted">Unwritten section</span>
-                      )}
-                    </section>
-                  ))}
-                </div>
-              )}
-              {!activeEditorCard && (
-                <SectionInsertionGaps
-                  editor={w.editor}
-                  sections={draft}
-                  onInsert={w.requestSectionInsertion}
-                />
-              )}
-              {!activeEditorCard && !text.trim() && (
-                <FirstMove w={w} onCommand={navigation.runCommand} />
-              )}
+                  What are you making? <ArrowUp size={11} className="rotate" />
+                </button>
+              </div>
+              <div className={"editor-wrap " + (!text ? "empty" : "")}>
+                <EditorContent editor={w.editor} />
+                {activeEditorCard && (
+                  <div
+                    className="assembled-readout"
+                    aria-label="Assembled preview"
+                  >
+                    {draft.map((section) => (
+                      <section key={section.id}>
+                        {sectionText(section) || (
+                          <span className="muted">Unwritten section</span>
+                        )}
+                      </section>
+                    ))}
+                  </div>
+                )}
+                {!activeEditorCard && (
+                  <SectionInsertionGaps
+                    editor={w.editor}
+                    sections={draft}
+                    onInsert={w.requestSectionInsertion}
+                  />
+                )}
+                {!activeEditorCard && !text.trim() && (
+                  <FirstMove w={w} onCommand={navigation.runCommand} />
+                )}
+              </div>
             </div>
-          </div>
-          <footer className="writing-footer">
-            <span>
-              {wordCount.toLocaleString()} words{" "}
-              <span className="dot-separator">·</span>{" "}
-              {Math.max(1, Math.ceil(wordCount / 200))} min read
-            </span>
-            <span>
-              {draft.length} {draft.length === 1 ? "section" : "sections"}{" "}
-              {parked.length ? `· ${parked.length} parked ` : ""}
-              <span className="dot-separator">·</span> Human-led writing
-            </span>
-          </footer>
-        </main>
-        <WritingLabShell
-          w={w}
-          navigation={navigation}
-          onCompare={() => setCompareSection(w.selectedSectionId)}
-        />
+            <footer className="writing-footer">
+              <span>
+                {wordCount.toLocaleString()} words{" "}
+                <span className="dot-separator">·</span>{" "}
+                {Math.max(1, Math.ceil(wordCount / 200))} min read
+              </span>
+              <span>
+                {draft.length} {draft.length === 1 ? "section" : "sections"}{" "}
+                {parked.length ? `· ${parked.length} parked ` : ""}
+                <span className="dot-separator">·</span> Human-led writing
+              </span>
+            </footer>
+          </main>
+        </div>
+        {previewShown && w.layout.inspectorVisible && (
+          <DockDivider
+            left="preview"
+            right="inspector"
+            widths={widths}
+            onResize={setDragWidths}
+            onCommit={commitWidths}
+          />
+        )}
+        <div
+          className={
+            "dock-pane dock-inspector " +
+            (!w.layout.inspectorVisible ? "pane-hidden" : "")
+          }
+          data-pane="inspector"
+          style={{ flexGrow: widths.inspector }}
+        >
+          <WritingLabShell
+            w={w}
+            navigation={navigation}
+            onCompare={() => setCompareSection(w.selectedSectionId)}
+          />
+        </div>
       </div>
       <UtilityPanel w={w} libraryNavigation={navigation.libraryNavigation} />
       {compareSection && compareSection === w.selectedSectionId && (

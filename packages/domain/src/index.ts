@@ -309,8 +309,16 @@ export const settingsSchema = z.object({
     .object({
       primaryView: z.enum(["workbench", "document"]).default("workbench"),
       density: z.enum(["comfortable", "overview"]).default("comfortable"),
+      workbenchVisible: z.boolean().default(true),
       previewVisible: z.boolean().default(true),
       inspectorVisible: z.boolean().default(true),
+      paneWidths: z
+        .object({
+          workbench: z.number().min(10).max(80),
+          preview: z.number().min(10).max(80),
+          inspector: z.number().min(10).max(80),
+        })
+        .default({ workbench: 50, preview: 30, inspector: 20 }),
     })
     .optional(),
   styleDNA: styleDNASchema,

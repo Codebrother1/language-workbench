@@ -259,7 +259,7 @@ export function useWayfinding(w: Workspace) {
         showTool("structure", '[data-structure-slot="a"]');
         return;
       case "sections":
-        w.setNav(true);
+        w.setWorkbenchVisible(true);
         showTool("sections");
         w.setNotice(
           "Drag parts in the left-hand view, or put the cursor at a split point and use the scissors in the toolbar. Nothing was reorganized.",

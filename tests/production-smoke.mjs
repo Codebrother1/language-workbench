@@ -233,7 +233,13 @@ try {
     sectionTypeDefaults: { Hook: plain },
     taskDefaults: { words: conservative },
   };
-  await api("/settings", "PUT", settings);
+  const savedSettings = await api("/settings", "PUT", settings);
+  assert.deepEqual(savedSettings.layout.paneWidths, {
+    workbench: 50,
+    preview: 30,
+    inspector: 20,
+  });
+  assert.equal(savedSettings.layout.workbenchVisible, true);
   await api("/providers/openai/models", "POST", {
     id: "smoke-catalog-fixture",
   });
@@ -288,7 +294,7 @@ try {
   await stop();
   await start();
   assert.deepEqual(await api("/documents/" + doc.id), doc);
-  assert.deepEqual(await api("/settings"), settings);
+  assert.deepEqual(await api("/settings"), savedSettings);
   assert.deepEqual(await api("/providers"), catalog);
   assert.deepEqual(await api("/library"), personalLibrary);
   assert.equal(

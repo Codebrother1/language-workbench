@@ -153,6 +153,7 @@ test("above/below actions, search, conversion, reorder and Undo share the same i
   await expect(page.getByTestId("structure-item")).toHaveCount(3);
   await page.getByRole("button", { name: "Redo", exact: true }).click();
   await expect(page.getByTestId("structure-item")).toHaveCount(4);
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.getByTestId("structure-item").last().scrollIntoViewIfNeeded();
   const firstHeight = (await page
     .getByTestId("structure-item")
