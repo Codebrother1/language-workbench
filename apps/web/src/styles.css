@@ -330,6 +330,61 @@ hr {
   flex-direction: column;
   gap: 7px;
 }
+.section-group-label,
+.parked-area-heading {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.section-group-label {
+  padding: 4px 2px;
+}
+.parked-area-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 15px 10px 7px;
+  border-top: 2px solid var(--accent);
+}
+.parked-area-heading b {
+  color: var(--accent);
+}
+.parked-area-heading span {
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.workbench-mode .structure-item.parked {
+  background: var(--accent-light);
+}
+.parked-status {
+  display: block;
+  margin: 5px 0 0 28px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+.include-picker {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.include-picker label {
+  font-size: 12px;
+  font-weight: 700;
+}
+.include-picker select {
+  width: 100%;
+}
+.writing-editor > section[placement="parked"] {
+  display: none;
+}
 .structure-item {
   padding: 10px 8px;
   border: 1px solid transparent;

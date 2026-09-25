@@ -2,6 +2,10 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   documentSchema,
   documentTarget,
+  documentText,
+  draftSections,
+  parkedSections,
+  toMarkdown,
   emptyStructure,
   emptyWorkbench,
   newDocument,
@@ -18,6 +22,8 @@ import {
 import {
   duplicateSection,
   insertSectionAt,
+  parkSection,
+  includeSectionAt,
   removeSection,
 } from "../packages/domain/src/section-operations";
 
@@ -548,5 +554,63 @@ describe("removeSection", () => {
         newSection("Freeform", "Not empty"),
       ),
     ).toThrow("empty Freeform");
+  });
+});
+
+describe("draft and parked placement", () => {
+  it("defaults legacy sections to draft without changing the schema version", () => {
+    const legacy = newDocument("Legacy", "Old prose");
+    const plain = JSON.parse(JSON.stringify(legacy));
+    delete plain.sections[0].placement;
+    const parsed = documentSchema.parse(plain);
+    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.sections[0].placement).toBe("draft");
+  });
+
+  it("parks without losing identity or metadata, then includes at an exact position", () => {
+    const doc = richDocument();
+    doc.sections.push(newSection("Closer", "Final line"));
+    const original = structuredClone(doc.sections[0]);
+    const parked = parkSection(freeze(doc), original.id);
+    expect(parked.sections.map((section) => section.id)).toEqual([
+      doc.sections[1].id,
+      doc.sections[2].id,
+      original.id,
+    ]);
+    expect(parked.sections[2]).toEqual({ ...original, placement: "parked" });
+    expect(parked.history).toEqual(doc.history);
+    expect(draftSections(parked)).toHaveLength(2);
+    expect(parkedSections(parked)).toHaveLength(1);
+    expect(documentText(parked)).not.toContain("Alpha beta");
+    expect(toMarkdown(parked)).not.toContain("Alpha beta");
+    expect(() =>
+      validateTarget(parked, targetFor(parked, original.id)),
+    ).not.toThrow();
+
+    const included = includeSectionAt(parked, original.id, doc.sections[2].id);
+    expect(included.sections.map((section) => section.id)).toEqual([
+      doc.sections[1].id,
+      original.id,
+      doc.sections[2].id,
+    ]);
+    expect(included.sections[1]).toEqual(original);
+    expect(documentText(included)).toContain("Alpha beta");
+    expect(() => includeSectionAt(included, original.id, null)).toThrow(
+      "already in the draft",
+    );
+    expect(() => includeSectionAt(parked, original.id, "missing")).toThrow(
+      "current draft",
+    );
+  });
+
+  it("allows an empty reader draft and explicit reinclusion from an all-parked project", () => {
+    const doc = newDocument("Ideas waiting", "A line to reconsider.");
+    const parked = parkSection(doc, doc.sections[0].id);
+    expect(documentText(parked)).toBe("");
+    expect(toMarkdown(parked)).toBe("");
+    expect(parkedSections(parked)).toHaveLength(1);
+    const restored = includeSectionAt(parked, doc.sections[0].id, null);
+    expect(restored.sections[0].id).toBe(doc.sections[0].id);
+    expect(documentText(restored)).toBe("A line to reconsider.");
   });
 });

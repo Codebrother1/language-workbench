@@ -33,12 +33,15 @@ export function SectionInsertionPicker({
     WritingSection["kind"] | null
   >(null);
   const helpId = "section-insertion-concept-help";
+  const draft = sections.filter((section) => section.placement !== "parked");
   const index =
-    anchor.beforeSectionId === null
-      ? sections.length
-      : sections.findIndex((s) => s.id === anchor.beforeSectionId);
-  const prior = sections[index - 1],
-    next = sections[index];
+    anchor.beforeSectionId === null ||
+    sections.find((section) => section.id === anchor.beforeSectionId)
+      ?.placement === "parked"
+      ? draft.length
+      : draft.findIndex((s) => s.id === anchor.beforeSectionId);
+  const prior = draft[index - 1],
+    next = draft[index];
   const suggested: WritingSection["kind"][] =
     index === 0
       ? ["Hook", "Headline", "Point", "Freeform"]
@@ -91,11 +94,11 @@ export function SectionInsertionPicker({
         </Button>
       </div>
       <p className="small muted">
-        Position {index + 1} of {sections.length + 1}
+        Position {index + 1} of {draft.length + 1} in draft
       </p>
       <p className="small muted">
         {prior ? `After ${prior.label}` : "At the beginning"}
-        {next ? ` · before ${next.label}` : " · at the end"}
+        {next ? ` · before ${next.label}` : " · at draft end"}
       </p>
       <p className="small muted">
         Any type, any number. These choices are suggestions, not a template.
@@ -196,7 +199,7 @@ export function SectionInsertionGaps({
         editor.view.dom.querySelectorAll<HTMLElement>(
           ":scope > section[data-writing-section]",
         ),
-      );
+      ).filter((node) => node.getAttribute("placement") !== "parked");
       const next: Gap[] = [];
       nodes.forEach((node, index) => {
         const bounds = node.getBoundingClientRect();

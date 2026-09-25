@@ -42,6 +42,8 @@ import {
 import { useWorkspace, type Workspace } from "./useWorkspace";
 import {
   documentText,
+  draftSections,
+  parkedSections,
   toMarkdown,
   sectionText,
   contentTypeConfig,
@@ -67,7 +69,13 @@ function Structure({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropGap, setDropGap] = useState<number | null>(null);
   const [thought, setThought] = useState("");
+  const [includeId, setIncludeId] = useState<string | null>(null);
+  const [includePosition, setIncludePosition] = useState("");
   const thoughtRef = useRef<HTMLTextAreaElement>(null);
+  const draft = draftSections(w.doc);
+  const parked = parkedSections(w.doc);
+  const visibleSections =
+    w.layout.primaryView === "workbench" ? w.doc.sections : draft;
   const finishDrag = () => {
     drag.current = null;
     setDraggingId(null);
@@ -83,7 +91,11 @@ function Structure({
     const from = w.doc.sections.findIndex((section) => section.id === source);
     if (from >= 0) {
       const to = gap > from ? gap - 1 : gap;
-      if (to !== from) w.moveSection(source, to);
+      if (
+        to !== from &&
+        w.doc.sections[from]?.placement === w.doc.sections[to]?.placement
+      )
+        w.moveSection(source, to);
     }
     finishDrag();
   };
@@ -106,7 +118,10 @@ function Structure({
         <span className="eyebrow">
           {w.layout.primaryView === "workbench" ? "WORKBENCH" : "STRUCTURE"}
         </span>
-        <span className="count">{w.doc.sections.length}</span>
+        <span className="count">
+          {draft.length} draft
+          {parked.length ? ` · ${parked.length} parked` : ""}
+        </span>
       </div>
       <p className="small muted structure-hint">
         Write, then move parts into order.
@@ -160,8 +175,15 @@ function Structure({
         </div>
       )}
       <div className="section-list">
-        {w.doc.sections.map((s, i) => (
+        <div className="section-group-label">DRAFT · reader order</div>
+        {visibleSections.map((s, i) => (
           <Fragment key={s.id}>
+            {w.layout.primaryView === "workbench" && i === draft.length && (
+              <div className="parked-area-heading" data-testid="parked-area">
+                <b>PARKED THOUGHTS · {parked.length}</b>
+                <span>Still in this project. Outside the reader draft.</span>
+              </div>
+            )}
             {dropGap === i && draggingId && (
               <div
                 className="drop-marker"
@@ -173,11 +195,13 @@ function Structure({
             <div
               className={
                 "structure-item " +
+                (s.placement === "parked" ? "parked " : "") +
                 (w.target?.sectionId === s.id ? "active " : "") +
                 (draggingId === s.id ? "dragging" : "")
               }
               data-testid="structure-item"
               data-section-id={s.id}
+              data-placement={s.placement}
               onClick={(event) => {
                 if (
                   (event.target as HTMLElement).closest(
@@ -205,7 +229,12 @@ function Structure({
                 e.dataTransfer.effectAllowed = "move";
               }}
               onDragOver={(e) => {
-                if (!drag.current) return;
+                if (
+                  !drag.current ||
+                  w.doc.sections.find((item) => item.id === drag.current)
+                    ?.placement !== s.placement
+                )
+                  return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
                 setDropGap(gapFor(drag.current, i));
@@ -214,7 +243,12 @@ function Structure({
                 e.preventDefault();
                 const source =
                   e.dataTransfer.getData("text/plain") || drag.current || "";
-                drop(source, gapFor(source, i));
+                if (
+                  w.doc.sections.find((item) => item.id === source)
+                    ?.placement === s.placement
+                )
+                  drop(source, gapFor(source, i));
+                else finishDrag();
               }}
             >
               <div className="structure-line">
@@ -236,6 +270,11 @@ function Structure({
               {w.layout.primaryView === "workbench" && (
                 <>
                   <span className="section-role">ROLE · {s.kind}</span>
+                  {s.placement === "parked" && (
+                    <span className="parked-status">
+                      Parked · excluded from draft
+                    </span>
+                  )}
                   {w.layout.density === "comfortable" &&
                   w.target?.sectionId === s.id ? (
                     <div className="card-writing" data-testid="card-writing">
@@ -311,29 +350,90 @@ function Structure({
                   )}
                   {w.target?.sectionId === s.id && (
                     <div className="card-essential row wrap">
-                      <Button
-                        onClick={(e) =>
-                          w.requestSectionInsertion(s.id, e.currentTarget)
+                      {s.placement === "parked" ? (
+                        <Button
+                          onClick={() => {
+                            setIncludeId(s.id);
+                            setIncludePosition("");
+                          }}
+                        >
+                          Include in draft
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            onClick={(e) =>
+                              w.requestSectionInsertion(s.id, e.currentTarget)
+                            }
+                          >
+                            + Add before
+                          </Button>
+                          <Button
+                            onClick={(e) =>
+                              w.requestSectionInsertion(
+                                w.doc.sections[i + 1]?.id ?? null,
+                                e.currentTarget,
+                              )
+                            }
+                          >
+                            + Add after
+                          </Button>
+                          <Button
+                            onClick={() => onEditPreview(s.id)}
+                            title="Places the cursor at the start of this section in the assembled preview. Select text to replace it."
+                          >
+                            Edit in preview
+                          </Button>
+                          <Button onClick={() => w.parkThought(s.id)}>
+                            Park thought
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {s.placement === "parked" && includeId === s.id && (
+                    <div
+                      className="include-picker"
+                      role="group"
+                      aria-label="Include thought position"
+                    >
+                      <label htmlFor={`include-${s.id}`}>Place in draft</label>
+                      <select
+                        id={`include-${s.id}`}
+                        aria-label="Draft position"
+                        value={includePosition}
+                        onChange={(event) =>
+                          setIncludePosition(event.target.value)
                         }
                       >
-                        + Add before
-                      </Button>
-                      <Button
-                        onClick={(e) =>
-                          w.requestSectionInsertion(
-                            w.doc.sections[i + 1]?.id ?? null,
-                            e.currentTarget,
-                          )
-                        }
-                      >
-                        + Add after
-                      </Button>
-                      <Button
-                        onClick={() => onEditPreview(s.id)}
-                        title="Places the cursor at the start of this section in the assembled preview. Select text to replace it."
-                      >
-                        Edit in preview
-                      </Button>
+                        <option value="">Choose an exact position…</option>
+                        {draft.map((item, index) => (
+                          <option key={item.id} value={item.id}>
+                            Before {index + 1}. {item.label}
+                          </option>
+                        ))}
+                        <option value="__end__">At end of draft</option>
+                      </select>
+                      <div className="row wrap">
+                        <Button
+                          className="primary"
+                          disabled={!includePosition}
+                          onClick={() => {
+                            w.includeThought(
+                              s.id,
+                              includePosition === "__end__"
+                                ? null
+                                : includePosition,
+                            );
+                            setIncludeId(null);
+                          }}
+                        >
+                          Include here
+                        </Button>
+                        <Button onClick={() => setIncludeId(null)}>
+                          Cancel
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </>
@@ -387,39 +487,47 @@ function Structure({
                       </Field>
                     </>
                   )}
-                  <div className="instance-actions">
-                    <Button
-                      onClick={(e) =>
-                        w.requestSectionInsertion(s.id, e.currentTarget)
-                      }
-                    >
-                      Insert above
-                    </Button>
-                    <Button
-                      onClick={(e) =>
-                        w.requestSectionInsertion(
-                          w.doc.sections[i + 1]?.id ?? null,
-                          e.currentTarget,
-                        )
-                      }
-                    >
-                      Insert below
-                    </Button>
-                    <Button onClick={() => w.duplicateSection(s.id)}>
-                      Duplicate section
-                    </Button>
-                  </div>
+                  {s.placement !== "parked" && (
+                    <div className="instance-actions">
+                      <Button
+                        onClick={(e) =>
+                          w.requestSectionInsertion(s.id, e.currentTarget)
+                        }
+                      >
+                        Insert above
+                      </Button>
+                      <Button
+                        onClick={(e) =>
+                          w.requestSectionInsertion(
+                            w.doc.sections[i + 1]?.id ?? null,
+                            e.currentTarget,
+                          )
+                        }
+                      >
+                        Insert below
+                      </Button>
+                      <Button onClick={() => w.duplicateSection(s.id)}>
+                        Duplicate section
+                      </Button>
+                    </div>
+                  )}
                   <div className="row wrap">
                     <Button
                       aria-label="Move section up"
-                      disabled={i === 0}
+                      disabled={
+                        i === 0 ||
+                        w.doc.sections[i - 1]?.placement !== s.placement
+                      }
                       onClick={() => w.moveSection(s.id, i - 1)}
                     >
                       <ArrowUp size={13} />
                     </Button>
                     <Button
                       aria-label="Move section down"
-                      disabled={i === w.doc.sections.length - 1}
+                      disabled={
+                        i === w.doc.sections.length - 1 ||
+                        w.doc.sections[i + 1]?.placement !== s.placement
+                      }
                       onClick={() => w.moveSection(s.id, i + 1)}
                     >
                       <ArrowDown size={13} />
@@ -427,7 +535,10 @@ function Structure({
                     <Button
                       aria-label="Merge with next section"
                       title="Merge with next section"
-                      disabled={i === w.doc.sections.length - 1}
+                      disabled={
+                        i === w.doc.sections.length - 1 ||
+                        w.doc.sections[i + 1]?.placement !== s.placement
+                      }
                       onClick={() => w.mergeSection(s.id)}
                     >
                       <Combine size={13} />
@@ -453,7 +564,12 @@ function Structure({
           />
         )}
       </div>
-      <Button className="add-section" onClick={w.addSection}>
+      <Button
+        className="add-section"
+        onClick={(event) =>
+          w.requestSectionInsertion(parked[0]?.id ?? null, event.currentTarget)
+        }
+      >
         <Plus size={14} /> Add section
       </Button>
       <div className="structure-bottom">
@@ -568,6 +684,8 @@ export default function App() {
   } | null>(null);
   const [menu, setMenu] = useState(false);
   const [compareSection, setCompareSection] = useState<string | null>(null);
+  const draft = draftSections(w.doc);
+  const parked = parkedSections(w.doc);
   const text = documentText(w.doc);
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
   const filename =
@@ -637,7 +755,9 @@ export default function App() {
         " " +
         (!w.nav && w.layout.primaryView === "document" ? "nav-hidden" : "") +
         " " +
-        (!w.layout.previewVisible ? "preview-hidden" : "") +
+        (w.layout.primaryView === "workbench" && !w.layout.previewVisible
+          ? "preview-hidden"
+          : "") +
         " " +
         (!w.layout.inspectorVisible ? "inspector-hidden" : "")
       }
@@ -973,8 +1093,11 @@ export default function App() {
                 : "Document View"}
             </span>
             <b>
-              {w.doc.sections.find((s) => s.id === w.selectedSectionId)
-                ?.label ?? "Your document"}
+              {(w.layout.primaryView === "workbench"
+                ? w.doc.sections
+                : draft
+              ).find((s) => s.id === w.selectedSectionId)?.label ??
+                "Your document"}
             </b>
           </div>
           {w.layout.primaryView === "workbench" && (
@@ -1001,7 +1124,7 @@ export default function App() {
                   className="assembled-readout"
                   aria-label="Assembled preview"
                 >
-                  {w.doc.sections.map((section) => (
+                  {draft.map((section) => (
                     <section key={section.id}>
                       {sectionText(section) || (
                         <span className="muted">Unwritten section</span>
@@ -1013,7 +1136,7 @@ export default function App() {
               {!activeEditorCard && (
                 <SectionInsertionGaps
                   editor={w.editor}
-                  sections={w.doc.sections}
+                  sections={draft}
                   onInsert={w.requestSectionInsertion}
                 />
               )}
@@ -1029,8 +1152,8 @@ export default function App() {
               {Math.max(1, Math.ceil(wordCount / 200))} min read
             </span>
             <span>
-              {w.doc.sections.length}{" "}
-              {w.doc.sections.length === 1 ? "section" : "sections"}{" "}
+              {draft.length} {draft.length === 1 ? "section" : "sections"}{" "}
+              {parked.length ? `· ${parked.length} parked ` : ""}
               <span className="dot-separator">·</span> Human-led writing
             </span>
           </footer>

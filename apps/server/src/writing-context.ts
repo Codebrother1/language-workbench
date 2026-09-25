@@ -2,6 +2,7 @@ import {
   matchesLibraryScope,
   relevantLibraryItems,
   resolveWritingStyle,
+  draftSections,
   sectionText,
   type AIRequest,
   type PersonalLibrary,
@@ -10,7 +11,7 @@ import type { Repository } from "./repository.js";
 
 /** Derived read-only context; duplicate labels/kinds never determine adjacency. */
 export function relationalContext(request: AIRequest) {
-  const sections = request.readContext.document.sections;
+  const sections = draftSections(request.readContext.document);
   const index = sections.findIndex(
     (s) => s.id === request.editTarget.sectionId,
   );

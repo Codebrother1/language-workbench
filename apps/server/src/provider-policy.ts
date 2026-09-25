@@ -104,6 +104,15 @@ export const protectedQuotePattern =
 export function protectedQuotes(text: string): string[] {
   return [...text.matchAll(protectedQuotePattern)].map((m) => m[0]);
 }
+function protectedSpanMessage(quote: string): string {
+  const isCode = quote.startsWith("`");
+  const label = isCode ? "code span" : "quote";
+  const excerpt =
+    !isCode && quote.length <= 100 && !quote.includes("\n")
+      ? ` ${quote}`
+      : " in this section";
+  return `A protected ${label}${excerpt} was changed. Exact wording must remain unchanged; keep it verbatim, or remove the quotation formatting and reframe it as your own paraphrase.`;
+}
 const words = (s: string) => (s.trim() ? s.trim().split(/\s+/u).length : 0);
 export function proposalViolation(
   request: AIRequest,
@@ -147,7 +156,7 @@ export function proposalViolation(
   let quoteOffset = 0;
   for (const quote of protectedQuotes(snapshot)) {
     const index = replacement.indexOf(quote, quoteOffset);
-    if (index < 0) return "A protected quote was changed";
+    if (index < 0) return protectedSpanMessage(quote);
     quoteOffset = index + quote.length;
   }
   for (const phrase of forbiddenPhrases(request))
@@ -185,7 +194,7 @@ export function proposalViolation(
     if (text.length > preview.length)
       return "Structure tightening expanded the supplied preview";
     for (const quote of protectedQuotes(preview))
-      if (!text.includes(quote)) return "A protected preview quote was changed";
+      if (!text.includes(quote)) return protectedSpanMessage(quote);
   }
   if (request.action === "shorten" && words(text) > words(original))
     return "Shorten proposal exceeds original length";

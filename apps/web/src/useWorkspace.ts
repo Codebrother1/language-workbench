@@ -14,6 +14,10 @@ import {
   type Document,
   type WritingSection,
   insertSectionAt,
+  parkSection,
+  includeSectionAt,
+  draftSections,
+  parkedSections,
   duplicateSection as duplicateSectionInstance,
   removeSection as removeSectionInstance,
   type Settings,
@@ -69,6 +73,8 @@ import {
   positionMap,
   targetRange,
   clipboardPlainText,
+  draftClipboardSlice,
+  clipboardHTML,
 } from "./editor";
 import {
   getWorkbench,
@@ -222,6 +228,21 @@ export function useWorkspace() {
     content: toEditor(initial.current),
     editorProps: {
       clipboardTextSerializer: clipboardPlainText,
+      handleDOMEvents: {
+        copy: (view, event) => {
+          if (view.dom.classList.contains("in-card") || !event.clipboardData)
+            return false;
+          const draft = draftClipboardSlice(view.state.selection.content());
+          if (!draft) return false;
+          event.clipboardData.setData("text/plain", clipboardPlainText(draft));
+          event.clipboardData.setData(
+            "text/html",
+            clipboardHTML(draft, view.state.schema),
+          );
+          event.preventDefault();
+          return true;
+        },
+      },
       attributes: {
         "data-testid": "writing-editor",
         "aria-label": "Writing editor",
@@ -845,7 +866,13 @@ export function useWorkspace() {
     beforeId: string | null,
   ) => {
     const section = newSection(kind);
-    sync(insertSectionAt(current.current, section, beforeId));
+    const before =
+      beforeId &&
+      current.current.sections.find((item) => item.id === beforeId)
+        ?.placement !== "parked"
+        ? beforeId
+        : (parkedSections(current.current)[0]?.id ?? null);
+    sync(insertSectionAt(current.current, section, before));
     setInsertion(null);
     focusSection(section.id);
   };
@@ -859,12 +886,12 @@ export function useWorkspace() {
     }
   };
   // All entry points share this insertion operation and its undo/scope semantics.
-  const addSection = () => commitSectionInsertion("Freeform", null);
   const captureThought = (text: string) => {
     if (!text.trim()) return false;
     const [first] = current.current.sections;
     if (
       current.current.sections.length === 1 &&
+      first.placement !== "parked" &&
       first.kind === "Freeform" &&
       !sectionText(first).trim() &&
       !first.notes.trim() &&
@@ -880,7 +907,13 @@ export function useWorkspace() {
       return true;
     }
     const section = newSection("Freeform", text.trim());
-    sync(insertSectionAt(current.current, section, null));
+    sync(
+      insertSectionAt(
+        current.current,
+        section,
+        parkedSections(current.current)[0]?.id ?? null,
+      ),
+    );
     prepareSectionTarget(section.id);
     return true;
   };
@@ -960,6 +993,7 @@ export function useWorkspace() {
     const next = [...current.current.sections];
     const index = next.findIndex((s) => s.id === id);
     if (to < 0 || to >= next.length || index < 0) return;
+    if (next[index].placement !== next[to].placement) return;
     next.splice(to, 0, next.splice(index, 1)[0]);
     sync({ ...current.current, sections: next });
     focusSection(id);
@@ -975,7 +1009,11 @@ export function useWorkspace() {
     const first = loc.node.content.cut(0, offset),
       second = loc.node.content.cut(offset);
     const old = current.current.sections.find((s) => s.id === t.sectionId)!;
-    const fresh = { ...newSection(old.kind), content: second.toJSON() };
+    const fresh = {
+      ...newSection(old.kind),
+      placement: old.placement,
+      content: second.toJSON(),
+    };
     const sections = current.current.sections.flatMap((s) =>
       s.id === old.id ? [{ ...s, content: first.toJSON() }, fresh] : [s],
     );
@@ -988,6 +1026,7 @@ export function useWorkspace() {
     if (i < 0 || i >= list.length - 1) return;
     const a = list[i],
       b = list[i + 1];
+    if (a.placement !== b.placement) return;
     const merged = {
       ...a,
       content: [...a.content, ...b.content],
@@ -1727,10 +1766,7 @@ export function useWorkspace() {
     });
   };
   const setPrimaryView = (primaryView: "workbench" | "document") =>
-    patchLayout({
-      primaryView,
-      ...(primaryView === "document" ? { previewVisible: true } : {}),
-    });
+    patchLayout({ primaryView });
   const setDensity = (density: "comfortable" | "overview") =>
     patchLayout({ density });
   const setPreviewVisible = (previewVisible: boolean) =>
@@ -1796,12 +1832,20 @@ export function useWorkspace() {
   const copyDocument = async () => {
     try {
       if (!editor) throw new Error("No editor");
+      const html = document.createElement("div");
+      html.innerHTML = editor.getHTML();
+      const draftIds = new Set(draftSections(current.current).map((s) => s.id));
+      html
+        .querySelectorAll("section[data-writing-section]")
+        .forEach((section) => {
+          if (!draftIds.has(section.id)) section.remove();
+        });
       await navigator.clipboard.write([
         new ClipboardItem({
           "text/plain": new Blob([documentText(current.current)], {
             type: "text/plain",
           }),
-          "text/html": new Blob([editor.getHTML()], { type: "text/html" }),
+          "text/html": new Blob([html.innerHTML], { type: "text/html" }),
         }),
       ]);
       setNotice("Copied document with formatting");
@@ -1820,6 +1864,26 @@ export function useWorkspace() {
     canCoachTarget,
     showLocalWorkbench: () => setDocumentWorkbench(false),
     addSectionAfter,
+    parkThought: (id: string) => {
+      try {
+        sync(parkSection(current.current, id));
+        focusSection(id);
+        setNotice(
+          "Thought parked. It stays in this project, outside the reader draft.",
+        );
+      } catch (error) {
+        setError((error as Error).message);
+      }
+    },
+    includeThought: (id: string, beforeId: string | null) => {
+      try {
+        sync(includeSectionAt(current.current, id, beforeId));
+        focusSection(id);
+        setNotice("Thought included at the chosen draft position.");
+      } catch (error) {
+        setError((error as Error).message);
+      }
+    },
     captureThought,
     addSource,
     focusSentence,
@@ -1910,7 +1974,6 @@ export function useWorkspace() {
     importDoc,
     focusSection,
     patchSection,
-    addSection,
     moveSection,
     splitSection,
     mergeSection,

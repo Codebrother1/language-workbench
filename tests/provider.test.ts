@@ -12,7 +12,10 @@ import {
 } from "../packages/domain/src/index";
 import { OpenAIProvider } from "../apps/server/src/openai-provider";
 import { MockProvider } from "../apps/server/src/mock-provider";
-import { forbiddenPhrases } from "../apps/server/src/provider-policy";
+import {
+  forbiddenPhrases,
+  proposalViolation,
+} from "../apps/server/src/provider-policy";
 
 // Resolve the official SDK from its owning workspace, not an undeclared root dependency.
 // Its real Responses serializer/parser runs; the injected fetch never leaves this process.
@@ -384,6 +387,20 @@ describe("source quote and excluded-language protections", () => {
     const offline = await new MockProvider().run(ai);
     expect(offline.proposals).toEqual([]);
     expect(offline.missingIngredients[0]).toContain("protected quote");
+  });
+  it("explains the exact protected quote when it is short and omits long source spans", () => {
+    const short = request("They said “keep this exact”.");
+    expect(proposalViolation(short, "They said keep this exact.")).toContain(
+      "“keep this exact”",
+    );
+    expect(proposalViolation(short, "They said keep this exact.")).toContain(
+      "remove the quotation formatting",
+    );
+    const longQuote = `“${"private source detail ".repeat(10)}”`;
+    const long = request(`They said ${longQuote}.`);
+    const message = proposalViolation(long, "They said something else.")!;
+    expect(message).toContain("protected quote in this section");
+    expect(message).not.toContain("private source detail");
   });
   it("does not permit removing one of two identical source quotes", async () => {
     const ai = request("“source” and “source”");

@@ -164,6 +164,19 @@ describe("derived relational read context", () => {
     expect(relationalContext(req).current?.index).toBe(2);
     expect(relationalContext(req).next?.sectionId).toBe(sections[0].id);
   });
+  it("uses reader-order neighbors and excludes parked thoughts", () => {
+    const req = request();
+    const sections = req.readContext.document.sections;
+    sections[2].placement = "parked";
+    expect(relationalContext(req).previous?.sectionId).toBe(sections[0].id);
+    expect(relationalContext(req).next?.sectionId).toBe(sections[3].id);
+    req.editTarget = targetFor(req.readContext.document, sections[2].id);
+    expect(relationalContext(req)).toEqual({
+      previous: null,
+      current: null,
+      next: null,
+    });
+  });
   it("returns null at edges and for document or unknown targets rather than guessing", () => {
     const req = request(),
       doc = req.readContext.document;

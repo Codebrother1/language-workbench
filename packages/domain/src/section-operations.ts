@@ -1,4 +1,6 @@
 import {
+  draftSections,
+  parkedSections,
   sectionText,
   uid,
   type Document,
@@ -32,6 +34,42 @@ function sectionIndex(doc: Document, sectionId: string): number {
   const index = doc.sections.findIndex((section) => section.id === sectionId);
   if (index < 0) throw new Error("Section not found");
   return index;
+}
+
+/** Move an existing instance out of reader order without changing its identity or metadata. */
+export function parkSection(doc: Document, sectionId: string): Document {
+  const index = sectionIndex(doc, sectionId);
+  const section = doc.sections[index];
+  if (section.placement === "parked") return doc;
+  return {
+    ...doc,
+    sections: [
+      ...doc.sections.slice(0, index),
+      ...doc.sections.slice(index + 1),
+      { ...section, placement: "parked" },
+    ],
+  };
+}
+
+/** Reinclude at an explicit draft boundary. null means the writer chose draft end. */
+export function includeSectionAt(
+  doc: Document,
+  sectionId: string,
+  beforeSectionId: string | null,
+): Document {
+  const index = sectionIndex(doc, sectionId);
+  const section = doc.sections[index];
+  if (section.placement !== "parked")
+    throw new Error("This thought is already in the draft.");
+  const draft = draftSections(doc).filter((item) => item.id !== sectionId);
+  const parked = parkedSections(doc).filter((item) => item.id !== sectionId);
+  const position =
+    beforeSectionId === null
+      ? draft.length
+      : draft.findIndex((item) => item.id === beforeSectionId);
+  if (position < 0) throw new Error("Choose a position in the current draft.");
+  draft.splice(position, 0, { ...section, placement: "draft" });
+  return { ...doc, sections: [...draft, ...parked] };
 }
 
 /** Reserve even historical/dangling references so fresh IDs cannot revive them. */

@@ -6,7 +6,12 @@ import {
   type EditorState,
 } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { Node as PMNode, Slice } from "@tiptap/pm/model";
+import {
+  DOMSerializer,
+  Fragment,
+  Slice,
+  type Node as PMNode,
+} from "@tiptap/pm/model";
 import {
   type Document,
   type EditTarget,
@@ -80,6 +85,7 @@ export const WritingSectionNode = Node.create({
       id: { default: null },
       kind: { default: "Freeform" },
       label: { default: "Freeform" },
+      placement: { default: "draft" },
     };
   },
   parseHTML() {
@@ -144,7 +150,7 @@ export function toEditor(doc: Document): JSONContent {
     type: "doc",
     content: doc.sections.map((s) => ({
       type: "writingSection",
-      attrs: { id: s.id, kind: s.kind, label: s.label },
+      attrs: { id: s.id, kind: s.kind, label: s.label, placement: s.placement },
       content: s.content,
     })),
   };
@@ -160,6 +166,7 @@ export function fromEditor(
       id: n.attrs!.id,
       kind: n.attrs!.kind,
       label: n.attrs!.label,
+      placement: n.attrs?.placement === "parked" ? "parked" : "draft",
       notes: prior?.notes ?? "",
       variants: prior?.variants ?? [],
       content: (n.content ?? [
@@ -304,6 +311,29 @@ export function clipboardPlainText(slice: Slice): string {
       ? "\n\n"
       : "\n";
   return nodes.map(render).join(separator);
+}
+
+/** Keep native partial selections, but omit parked section nodes from reader-facing copy. */
+export function draftClipboardSlice(slice: Slice): Slice | null {
+  let removed = false;
+  const nodes: PMNode[] = [];
+  slice.content.forEach((node) => {
+    if (
+      node.type.name === "writingSection" &&
+      node.attrs.placement === "parked"
+    )
+      removed = true;
+    else nodes.push(node);
+  });
+  return removed ? new Slice(Fragment.fromArray(nodes), 0, 0) : null;
+}
+
+export function clipboardHTML(slice: Slice, schema: Editor["schema"]): string {
+  const container = document.createElement("div");
+  container.appendChild(
+    DOMSerializer.fromSchema(schema).serializeFragment(slice.content),
+  );
+  return container.innerHTML;
 }
 
 export { allowSectionLocalEdit } from "./section-boundary";

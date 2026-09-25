@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { sectionText, type WritingSection } from "./domain";
+import { draftSections, sectionText, type WritingSection } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Dialog } from "./ui";
 import { modelLabel } from "./ModelControls";
@@ -56,17 +56,22 @@ export function RelationalContext({
   w: Workspace;
   onCompare: () => void;
 }) {
-  const index = w.doc.sections.findIndex((s) => s.id === w.selectedSectionId),
-    section = w.doc.sections[index];
+  const sections = draftSections(w.doc);
+  const index = sections.findIndex((s) => s.id === w.selectedSectionId),
+    section = w.doc.sections.find((s) => s.id === w.selectedSectionId);
   if (!section || !["Segue", "Transition"].includes(section.kind)) return null;
   return (
     <div className="relational-context" data-testid="relational-context">
       <div className="row between">
-        <span className="eyebrow">Connect these two parts</span>
+        <span className="eyebrow">
+          {section.placement === "parked"
+            ? "Parked · no reader neighbors until included"
+            : "Connect these two parts"}
+        </span>
         <Button onClick={onCompare}>Compare Segue versions</Button>
       </div>
       <NeighborContext
-        section={w.doc.sections[index - 1]}
+        section={index < 0 ? undefined : sections[index - 1]}
         label="Previous section"
         onSelect={w.focusSection}
       />
@@ -78,31 +83,33 @@ export function RelationalContext({
             <b>Intent:</b> {section.notes}
           </p>
         )}
-        <div className="row wrap">
-          <Button
-            onClick={(e) =>
-              w.requestSectionInsertion(section.id, e.currentTarget)
-            }
-          >
-            + Add before
-          </Button>
-          <Button
-            onClick={(e) =>
-              w.requestSectionInsertion(
-                w.doc.sections[index + 1]?.id ?? null,
-                e.currentTarget,
-              )
-            }
-          >
-            + Add after
-          </Button>
-          <Button onClick={() => w.focusSection(section.id)}>
-            Work this Segue
-          </Button>
-        </div>
+        {section.placement !== "parked" && (
+          <div className="row wrap">
+            <Button
+              onClick={(e) =>
+                w.requestSectionInsertion(section.id, e.currentTarget)
+              }
+            >
+              + Add before
+            </Button>
+            <Button
+              onClick={(e) =>
+                w.requestSectionInsertion(
+                  sections[index + 1]?.id ?? null,
+                  e.currentTarget,
+                )
+              }
+            >
+              + Add after
+            </Button>
+            <Button onClick={() => w.focusSection(section.id)}>
+              Work this Segue
+            </Button>
+          </div>
+        )}
       </div>
       <NeighborContext
-        section={w.doc.sections[index + 1]}
+        section={index < 0 ? undefined : sections[index + 1]}
         label="Next section"
         onSelect={w.focusSection}
       />
@@ -116,8 +123,9 @@ export function RelationalCompare({
   w: Workspace;
   close: () => void;
 }) {
-  const index = w.doc.sections.findIndex((s) => s.id === w.selectedSectionId),
-    section = w.doc.sections[index];
+  const sections = draftSections(w.doc);
+  const index = sections.findIndex((s) => s.id === w.selectedSectionId),
+    section = w.doc.sections.find((s) => s.id === w.selectedSectionId);
   const [included, setIncluded] = useState<string[]>([]);
   if (!section) return null;
   const allCandidates = [
@@ -169,7 +177,7 @@ export function RelationalCompare({
         targets. Nothing changes until you choose Use this version.
       </p>
       <NeighborContext
-        section={w.doc.sections[index - 1]}
+        section={index < 0 ? undefined : sections[index - 1]}
         label="Previous section"
         onSelect={(id) => {
           close();
@@ -268,7 +276,7 @@ export function RelationalCompare({
         </p>
       )}
       <NeighborContext
-        section={w.doc.sections[index + 1]}
+        section={index < 0 ? undefined : sections[index + 1]}
         label="Next section"
         onSelect={(id) => {
           close();

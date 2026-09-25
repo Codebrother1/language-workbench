@@ -47,7 +47,7 @@ There is no second writer or provider-specific document persistence path. One re
 The shared domain module is the contract between browser, API, storage, and providers. Important records:
 
 - **Document** (`schemaVersion: 1`): ID, timestamps, revision, brief, ordered sections with unique nonempty IDs, sources, history; optional `focusTarget`, `defaultModel` and document `workbench`.
-- **WritingSection:** stable ID, kind/label, rich-node content, notes (presented as Storyboard notes), variants; optional `modelOverride` and `workbench`.
+- **WritingSection:** stable ID, `placement` (`draft` or `parked`), kind/label, rich-node content, notes (presented as Storyboard notes), variants; optional `modelOverride` and `workbench`. Missing placement in older version-1 documents defaults to `draft`.
 - **SectionWorkbench:** section instruction/answer drafts, optional `targetDrafts` containing exact local target/instruction/answer records, action/controls, lens options, one-off model, comparison choices, runs, `activeRunId`, proposal-state map, and optional `structure` draft. Structure holds raw notes, verbatim units with UTF-16 offsets, A/B/optional slots, relationship, register, connector/scaffold choice, custom template, and optional-detail purpose.
 - **WorkbenchRun:** ID/time, captured target/action/instruction/answer/controls/lens, actual model reference, full structured response with routing provenance, and optional Structure request snapshot. Human library/Structure previews use the same run pipeline with a null model and explicit human provider label.
 - **EditTarget:** document ID/revision, scope, section ID, text offsets, selected text, and the source section's text snapshot.
@@ -59,6 +59,8 @@ The shared domain module is the contract between browser, API, storage, and prov
 - **AIRequest / AIResponse:** explicit readable context, edit target, action, stage, controls, and structured diagnosis/questions/findings/lexical results/proposals.
 
 Canonical **prose** is section rich-node content. Drafts/candidates/runs are persisted metadata, not a second canonical text. Each section owns its optional workbench; whole-piece critique/template analysis uses the optional document workbench separately. Persisted `activeRunId` restores the inspected response after reload. Diagnosis-only runs survive even when no proposal/iteration exists.
+
+`Document.sections` remains the only section sequence and prose store. Workbench commands keep draft sections in reader order at the front and parked sections afterward as project-specific material outside reader order. Parking and reinclusion move existing section instances and change their placement attribute. Rich editor nodes mirror that attribute so structural undo/redo restores placement without losing metadata. `documentText`, Markdown, Document View, copy-all, reader counts, and relational neighbors project only draft sections. Parked sections remain in project JSON export and editing context; they are not Personal Library records. A future Idea Space may add spatial organization, but this pass adds no graph or second content model.
 
 `workspace-helpers.ts` provides pure workbench read/update, lens classification, run capture/inspection/append, proposal editing, and fork-provenance helpers. Runs get fresh proposal IDs, avoiding collisions across fixtures/models. Successful comparison creates independent runs and saved variants. Human candidate edits update stored candidates/history, not prose.
 

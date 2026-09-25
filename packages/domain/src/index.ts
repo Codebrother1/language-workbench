@@ -190,6 +190,7 @@ export const writingSectionSchema = z.object({
   id: z.string(),
   kind: z.enum(sectionKinds),
   label: z.string(),
+  placement: z.enum(["draft", "parked"]).default("draft"),
   content: z.array(richNodeSchema),
   notes: z.string().default(""),
   variants: z.array(variantSchema).default([]),
@@ -417,8 +418,18 @@ function inlineText(node: RichNode): string {
 export function sectionText(section: Pick<WritingSection, "content">): string {
   return section.content.map(inlineText).join("\n");
 }
+export function draftSections(
+  doc: Pick<Document, "sections">,
+): WritingSection[] {
+  return doc.sections.filter((section) => section.placement !== "parked");
+}
+export function parkedSections(
+  doc: Pick<Document, "sections">,
+): WritingSection[] {
+  return doc.sections.filter((section) => section.placement === "parked");
+}
 export function documentText(doc: Document): string {
-  return doc.sections.map(sectionText).join("\n\n");
+  return draftSections(doc).map(sectionText).join("\n\n");
 }
 export function newSection(
   kind: WritingSection["kind"] = "Freeform",
@@ -428,6 +439,7 @@ export function newSection(
     id: uid(),
     kind,
     label: kind,
+    placement: "draft",
     content: paragraphs(text),
     notes: "",
     variants: [],
@@ -551,7 +563,7 @@ export function toMarkdown(doc: Document): string {
     if (n.type === "blockquote") return "> " + t;
     return t;
   };
-  return doc.sections
+  return draftSections(doc)
     .map((s) => s.content.map(render).join("\n\n"))
     .join("\n\n");
 }
