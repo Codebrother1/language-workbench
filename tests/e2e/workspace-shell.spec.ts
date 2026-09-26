@@ -8,6 +8,10 @@ import {
   defaultSettings,
   newDocument,
   newSection,
+  emptyWorkbench,
+  documentTarget,
+  targetFor,
+  sectionText,
 } from "../../packages/domain/src/index";
 
 async function seed(request: APIRequestContext) {
@@ -29,6 +33,11 @@ async function seed(request: APIRequestContext) {
   return (
     await request.post("/api/import", { data: { document: doc } })
   ).json();
+}
+
+async function save(page: Page) {
+  await page.getByTestId("save-state").click();
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
 }
 
 async function chooseLayout(page: Page, name: string) {
@@ -298,4 +307,269 @@ test("parked navigation, editing, reinclusion and narrow writing keep the single
   await expect(page.getByLabel("Document title")).toHaveValue(
     "A desk for a long piece",
   );
+});
+
+test("seven-section revision loop keeps reading, parked and Lab context without extra requests", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90000);
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument(
+    "Revision continuity",
+    "An opening on the doorstep. We listened for a while.",
+  );
+  for (let i = 1; i < 7; i++)
+    doc.sections.push(
+      newSection(
+        "Freeform",
+        i === 1
+          ? "We decide later. The kettle ticks while we wait."
+          : `Draft thought ${i + 1} changes the angle. A second line holds the thread.`,
+      ),
+    );
+  doc.sections[6].label = "Last door";
+  doc.sections[6].content = newSection(
+    "Freeform",
+    "A repeated sentence. Keep this ending.",
+  ).content;
+  for (const text of [
+    "An aside for later with more room to think.",
+    "Another question stays outside the draft.",
+  ]) {
+    const parked = newSection("Freeform", text);
+    parked.placement = "parked";
+    doc.sections.push(parked);
+  }
+  const phrase = "decide later";
+  const offset = sectionText(doc.sections[1]).indexOf(phrase);
+  const localTarget = targetFor(
+    doc,
+    doc.sections[1].id,
+    "selection",
+    offset,
+    offset + phrase.length,
+  );
+  const localId = "local-question";
+  doc.sections[1].workbench = {
+    ...emptyWorkbench(),
+    activeRunId: localId,
+    runs: [
+      {
+        id: localId,
+        createdAt: doc.createdAt,
+        target: localTarget,
+        action: "coach",
+        instruction: "Why the delay?",
+        answer: "",
+        controls: {},
+        model: { providerId: "mock", modelId: "conservative" },
+        response: {
+          provider: "mock",
+          diagnosis: "The phrase delays the choice.",
+          mechanism: "It lets the pause do work.",
+          question: "What are they waiting for?",
+          missingIngredients: [],
+          proposals: [],
+          findings: [],
+          lexical: [],
+        },
+      },
+    ],
+  };
+  const critiqueId = "whole-critique";
+  doc.workbench = {
+    ...emptyWorkbench(),
+    activeRunId: critiqueId,
+    runs: [
+      {
+        id: critiqueId,
+        createdAt: doc.createdAt,
+        target: documentTarget(doc),
+        action: "critique",
+        instruction: "Where does repetition hurt?",
+        answer: "",
+        controls: {},
+        model: { providerId: "mock", modelId: "conservative" },
+        response: {
+          provider: "mock",
+          diagnosis: "The last door repeats the earlier delay.",
+          mechanism: "Read the transitions together.",
+          question: "Which recurrence earns its place?",
+          missingIngredients: [],
+          proposals: [],
+          lexical: [],
+          findings: [
+            {
+              sectionId: doc.sections[6].id,
+              title: "Section 7 repeats the explanation.",
+              detail: "Cut only the repeated line.",
+              severity: "consider",
+            },
+          ],
+        },
+      },
+    ],
+  };
+  doc.focusTarget = localTarget;
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  const ids: string[] = imported.sections.map((s: { id: string }) => s.id);
+  let modelCalls = 0;
+  await page.route("**/api/ai", (route) => {
+    modelCalls++;
+    return route.continue();
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  await expect(page.getByLabel("Document title")).toHaveValue(
+    "Revision continuity",
+  );
+  await page.getByLabel("New thought").fill("A new thought belongs here.");
+  await page.getByLabel("New thought").press("Enter");
+  await expect(page.getByRole("button", { name: "Draft · 8" })).toBeVisible();
+  await page.locator(`[data-section-id="${ids[1]}"] .section-focus`).click();
+  await expect(page.locator(".response-original")).toContainText(phrase);
+  await page.getByRole("button", { name: "Return to selection" }).click();
+  await expect(page.locator(`[data-section-id="${ids[1]}"]`)).toHaveClass(
+    /active/,
+  );
+  await expect(page.locator(`[id="${ids[1]}"] .target-highlight`)).toHaveCount(
+    1,
+  );
+  const inspectorScroll = await page
+    .locator(".inspector")
+    .evaluate((node) => node.scrollTop);
+  await page.getByRole("button", { name: "Focus preview" }).click();
+  await expect(page.locator(".app")).toHaveClass(/preview-reading/);
+  await expect(page.locator(`[id="${ids[1]}"] .target-highlight`)).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(page.locator('[data-pane="inspector"]')).toBeHidden();
+  await page.getByRole("button", { name: "Restore panes" }).click();
+  await expect(page.locator(".app")).not.toHaveClass(/preview-reading/);
+  await expect(page.locator('[data-pane="inspector"]')).toBeVisible();
+  await expect
+    .poll(() => page.locator(".inspector").evaluate((node) => node.scrollTop))
+    .toBe(inspectorScroll);
+  await expect(page.locator(".response-original")).toContainText(phrase);
+  await save(page);
+  expect(
+    (await (await request.get(`/api/documents/${imported.id}`)).json())
+      .revisionTrail,
+  ).toEqual([]);
+  await page.locator(`[id="${ids[1]}"] p`).click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" Another hesitation.");
+  await save(page);
+  const localEdit = await (
+    await request.get(`/api/documents/${imported.id}`)
+  ).json();
+  expect(localEdit.revisionTrail).toHaveLength(1);
+  expect(localEdit.revisionTrail[0]).toMatchObject({
+    runId: localEdit.sections[1].workbench.runs[0].id,
+    sectionId: ids[1],
+    findingIndex: null,
+    savedRevision: localEdit.revision,
+  });
+  await page.locator(`[data-section-id="${ids[5]}"] .section-focus`).click();
+  await expect(page.locator(`[id="${ids[5]}"]`)).toBeVisible();
+  await expect
+    .poll(() =>
+      page.locator(`[id="${ids[5]}"]`).evaluate((element) => {
+        const pane = element.closest(".writing")!;
+        const ratio =
+          (element.getBoundingClientRect().top -
+            pane.getBoundingClientRect().top) /
+          pane.clientHeight;
+        return (
+          ratio < 0.55 ||
+          pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2
+        );
+      }),
+    )
+    .toBe(true);
+  await page.locator(`[data-section-id="${ids[8]}"] .section-focus`).click();
+  await expect(page.getByTestId("lab-return")).toContainText(
+    "Return to question",
+  );
+  await page
+    .getByRole("button", { name: "Read parked thought in Preview" })
+    .click();
+  await expect(page.locator(`[id="${ids[8]}"]`)).toBeVisible();
+  await expect(page.locator('[data-pane="preview"]')).toBeVisible();
+  await expect(page.locator('[data-pane="workbench"]')).toBeHidden();
+  await page.locator(`[id="${ids[8]}"] p`).click();
+  await page.keyboard.insertText("Still thinking: ");
+  await expect(page.locator(`[id="${ids[8]}"]`)).toContainText(
+    "Still thinking:",
+  );
+  await page.getByRole("button", { name: "Return to draft" }).click();
+  await expect(page.locator(`[data-section-id="${ids[5]}"]`)).toHaveClass(
+    /active/,
+  );
+  await expect(page.locator('[data-pane="workbench"]')).toBeVisible();
+  await page.getByTestId("lab-return").getByRole("button").click();
+  await expect(page.locator(".response-original")).toContainText(phrase);
+  await page.getByRole("button", { name: /Review saved critique/ }).click();
+  await page
+    .locator(".finding-references .button")
+    .filter({ hasText: "Last door" })
+    .click();
+  await page.getByTestId("writing-editor").evaluate((root) => {
+    const p = root.querySelector(
+      `[id="${root.querySelectorAll("section")[6].id}"] p`,
+    )!;
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    const first = walker.nextNode()!;
+    let last = first;
+    let remaining = "A repeated sentence.".length;
+    while (remaining > last.textContent!.length) {
+      remaining -= last.textContent!.length;
+      last = walker.nextNode()!;
+    }
+    const selection = window.getSelection()!;
+    selection.setBaseAndExtent(first, 0, last, remaining);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await page.keyboard.press("Backspace");
+  await expect(page.getByTestId("finding-return")).toContainText(
+    "Based on an earlier draft",
+  );
+  await save(page);
+  const after = await (
+    await request.get(`/api/documents/${imported.id}`)
+  ).json();
+  expect(after.revisionTrail).toHaveLength(2);
+  expect(after.revisionTrail[1]).toMatchObject({
+    runId: after.workbench.runs[0].id,
+    sectionId: ids[6],
+    findingIndex: 0,
+    savedRevision: after.revision,
+  });
+  await page.locator(".revision-trail > summary").click();
+  await expect(page.locator(".revision-trail")).toContainText(
+    "Viewed before edit",
+  );
+  await page.getByRole("button", { name: /Return to finding/ }).click();
+  await expect(page.getByTestId("analysis-state")).toHaveText(
+    "Based on an earlier draft",
+  );
+  expect(modelCalls).toBe(0);
+  await page.reload();
+  await page.getByRole("button", { name: /Review saved critique/ }).click();
+  await expect(page.getByTestId("analysis-state")).toHaveText(
+    "Based on an earlier draft",
+  );
+  const saved = await (
+    await request.get(`/api/documents/${imported.id}`)
+  ).json();
+  expect(
+    sectionText(saved.sections.find((s: { id: string }) => s.id === ids[8])),
+  ).toContain("Still thinking:");
+  expect(modelCalls).toBe(0);
 });

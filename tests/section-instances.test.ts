@@ -602,10 +602,12 @@ describe("draft and parked placement", () => {
     delete plain.sections[0].parkedGroupId;
     delete plain.sections[0].lastParkedGroupId;
     delete plain.parkedGroups;
+    delete plain.revisionTrail;
     const parsed = documentSchema.parse(plain);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.sections[0].placement).toBe("draft");
     expect(parsed.parkedGroups).toEqual([]);
+    expect(parsed.revisionTrail).toEqual([]);
     expect(parsed.sections[0].parkedGroupId).toBeNull();
   });
 

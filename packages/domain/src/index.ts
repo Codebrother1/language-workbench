@@ -186,6 +186,16 @@ export const iterationSchema = z.object({
   runId: z.string().optional(),
 });
 export type Iteration = z.infer<typeof iterationSchema>;
+export const revisionTrailEntrySchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  sectionId: z.string(),
+  findingIndex: z.number().int().min(0).nullable(),
+  viewedAt: z.string(),
+  editedAt: z.string(),
+  savedRevision: z.number().int().min(0).nullable(),
+});
+export type RevisionTrailEntry = z.infer<typeof revisionTrailEntrySchema>;
 export const writingSectionSchema = z.object({
   id: z.string(),
   kind: z.enum(sectionKinds),
@@ -236,6 +246,7 @@ export const documentSchema = z
     parkedGroups: z.array(parkedGroupSchema).default([]),
     sources: z.array(sourceMaterialSchema).default([]),
     history: z.array(iterationSchema).default([]),
+    revisionTrail: z.array(revisionTrailEntrySchema).max(100).default([]),
     focusTarget: editTargetSchema.nullable().optional(),
     defaultModel: modelRefSchema.nullable().optional(),
     workbench: sectionWorkbenchSchema.optional(),
@@ -524,6 +535,7 @@ export function newDocument(title = "Untitled", text = ""): Document {
     parkedGroups: [],
     sources: [],
     history: [],
+    revisionTrail: [],
   };
 }
 export function targetFor(

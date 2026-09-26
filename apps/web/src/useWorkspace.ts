@@ -12,6 +12,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import {
   type Document,
+  type RevisionTrailEntry,
   type WritingSection,
   insertSectionAt,
   insertParkedSection,
@@ -73,6 +74,7 @@ import {
   cursorTarget,
   highlight,
   sectionLocation,
+  scrollPreviewToSection,
   positionMap,
   targetRange,
   clipboardPlainText,
@@ -213,6 +215,13 @@ export function useWorkspace() {
   const [target, setTargetState] = useState<EditTarget | null>(null);
   const targetRef = useRef<EditTarget | null>(null);
   const selectingExplicitTarget = useRef(false);
+  const pendingRevisionContext = useRef<{
+    documentId: string;
+    runId: string;
+    sectionId: string;
+    findingIndex: number | null;
+    viewedAt: string;
+  } | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
   const requestBusy = useRef(false);
@@ -281,10 +290,43 @@ export function useWorkspace() {
       },
     },
     onUpdate: ({ editor }) => {
-      updateRef.current((d) => ({
-        ...d,
-        sections: fromEditor(editor, [...sectionMetadata.current.values()]),
-      }));
+      const sections = fromEditor(editor, [
+        ...sectionMetadata.current.values(),
+      ]);
+      updateRef.current((d) => {
+        const context = pendingRevisionContext.current;
+        const before = d.sections.find(
+          (section) => section.id === context?.sectionId,
+        );
+        const after = sections.find(
+          (section) => section.id === context?.sectionId,
+        );
+        if (
+          context &&
+          before &&
+          after &&
+          context.documentId === d.id &&
+          !selectingExplicitTarget.current &&
+          sectionText(before) !== sectionText(after)
+        ) {
+          pendingRevisionContext.current = null;
+          const entry: RevisionTrailEntry = {
+            id: uid(),
+            runId: context.runId,
+            sectionId: context.sectionId,
+            findingIndex: context.findingIndex,
+            viewedAt: context.viewedAt,
+            editedAt: new Date().toISOString(),
+            savedRevision: null,
+          };
+          return {
+            ...d,
+            sections,
+            revisionTrail: [...d.revisionTrail, entry].slice(-100),
+          };
+        }
+        return { ...d, sections };
+      });
       selectRef.current();
     },
     onSelectionUpdate: () => selectRef.current(),
@@ -304,6 +346,11 @@ export function useWorkspace() {
           snapshot = {
             ...withFocusTarget(current.current, targetRef.current),
             title: current.current.title.trim() || "Untitled",
+            revisionTrail: current.current.revisionTrail.map((entry) =>
+              entry.savedRevision === null
+                ? { ...entry, savedRevision: current.current.revision + 1 }
+                : entry,
+            ),
           };
         setSaveState("Saving");
         try {
@@ -318,6 +365,12 @@ export function useWorkspace() {
               ...withFocusTarget(current.current, targetRef.current),
               revision: result.revision,
               updatedAt: result.updatedAt,
+              revisionTrail: current.current.revisionTrail.map(
+                (entry) =>
+                  result.revisionTrail.find(
+                    (savedEntry) => savedEntry.id === entry.id,
+                  ) ?? entry,
+              ),
             };
             current.current = merged;
             setDoc(merged);
@@ -739,6 +792,7 @@ export function useWorkspace() {
   };
   const load = (next: Document) => {
     setInsertion(null);
+    pendingRevisionContext.current = null;
     sectionMetadata.current = new Map(next.sections.map((s) => [s.id, s]));
     current.current = next;
     persisted.current = next;
@@ -855,6 +909,31 @@ export function useWorkspace() {
     selectExactTarget(next, false);
     return next;
   };
+  const noteRevisionContext = (
+    runId: string,
+    sectionId: string,
+    findingIndex: number | null = null,
+  ) => {
+    const d = current.current;
+    const run = [
+      ...(d.workbench?.runs ?? []),
+      ...(d.sections.find((section) => section.id === sectionId)?.workbench
+        ?.runs ?? []),
+    ].find((item) => item.id === runId);
+    if (
+      !run ||
+      run.target.documentId !== d.id ||
+      (findingIndex !== null && !run.response.findings[findingIndex])
+    )
+      return;
+    pendingRevisionContext.current = {
+      documentId: d.id,
+      runId,
+      sectionId,
+      findingIndex,
+      viewedAt: new Date().toISOString(),
+    };
+  };
   const focusSection = (id: string, forceText = false) => {
     const next = prepareSectionTarget(id);
     if (next && editor) {
@@ -870,24 +949,7 @@ export function useWorkspace() {
         // A prose-edit jump places a caret; the whole-section target remains
         // available to Labs, but must not look like selected replacement text.
         highlight(editor, forceText ? null : next);
-        const preview = editor.view.dom.closest<HTMLElement>(".writing");
-        const node = Array.from(editor.view.dom.children).find(
-          (node) => (node as HTMLElement).id === id,
-        ) as HTMLElement | undefined;
-        if (preview && node && preview.scrollHeight > preview.clientHeight) {
-          const section = current.current.sections.find((s) => s.id === id);
-          if (
-            !forceText &&
-            section &&
-            ["Segue", "Transition"].includes(section.kind)
-          )
-            preview.scrollTop = 0;
-          else
-            preview.scrollTop +=
-              node.getBoundingClientRect().top -
-              preview.getBoundingClientRect().top -
-              150;
-        }
+        scrollPreviewToSection(id);
       } finally {
         selectingExplicitTarget.current = false;
       }
@@ -1235,6 +1297,14 @@ export function useWorkspace() {
     if (!run) return setError("That saved critique is no longer available.");
     update((d) => updateWorkbench(d, null, (wb) => inspectRun(wb, id)));
     selectExactTarget(documentTarget(current.current));
+  };
+  const inspectSectionRun = (sectionId: string, runId: string) => {
+    const run = getWorkbench(current.current, sectionId).runs.find(
+      (item) => item.id === runId,
+    );
+    if (!run || run.target.documentId !== current.current.id) return;
+    update((d) => updateWorkbench(d, sectionId, (wb) => inspectRun(wb, runId)));
+    selectExactTarget(run.target);
   };
   const selectRun = (id: string) => {
     const run = getWorkbench(current.current, sectionId).runs.find(
@@ -2135,6 +2205,7 @@ export function useWorkspace() {
     localHistory,
     activeRun,
     selectRun,
+    inspectSectionRun,
     inspectDocumentRun,
     lens,
     setLens,
@@ -2176,6 +2247,7 @@ export function useWorkspace() {
     remove,
     importDoc,
     focusSection,
+    noteRevisionContext,
     patchSection,
     moveSection,
     splitSection,

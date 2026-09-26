@@ -11,7 +11,7 @@ import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { DockDivider, type PaneWidths } from "./DockDivider";
 import { EditorContent } from "@tiptap/react";
 import { Selection, TextSelection } from "@tiptap/pm/state";
-import { sectionLocation } from "./editor";
+import { sectionLocation, scrollPreviewToSection } from "./editor";
 import { sectionContentRange } from "./section-boundary";
 import {
   PanelLeft,
@@ -192,6 +192,7 @@ function Structure({
   editorCard,
   onWriteCard,
   onEditPreview,
+  onReadParked,
   onOpenSavedWork,
 }: {
   w: Workspace;
@@ -199,6 +200,7 @@ function Structure({
   editorCard: string | null;
   onWriteCard: (id: string, point?: { x: number; y: number }) => void;
   onEditPreview: (id: string) => void;
+  onReadParked: (id: string) => void;
   onOpenSavedWork: (id: string, kind: SavedWorkKind) => void;
 }) {
   const drag = useRef<string | null>(null);
@@ -742,6 +744,9 @@ function Structure({
                     <div className="card-essential row wrap">
                       {s.placement === "parked" ? (
                         <>
+                          <Button onClick={() => onReadParked(s.id)}>
+                            Read parked thought in Preview
+                          </Button>
                           <Button
                             onClick={() => {
                               setIncludeId(s.id);
@@ -1227,13 +1232,30 @@ export default function App() {
   const layoutMenu = useRef<HTMLDetailsElement>(null);
   const [dragWidths, setDragWidths] = useState<PaneWidths | null>(null);
   const [previewFocused, setPreviewFocused] = useState(false);
+  const [readingMode, setReadingMode] = useState(false);
+  const [parkedFocusId, setParkedFocusId] = useState<string | null>(null);
+  const lastDraftId = useRef<string | null>(null);
+  const focusContext = useRef<{
+    documentId: string;
+    sectionId: string | null;
+    runId: string | null;
+    workbenchScroll: number;
+    previewScroll: number;
+    inspectorScroll: number;
+  } | null>(null);
   const [documentPreviewOverride, setDocumentPreviewOverride] = useState<
     boolean | null
   >(null);
   const [compareSection, setCompareSection] = useState<string | null>(null);
   const [pendingJump, setPendingJump] = useState<string | null>(null);
+  const [labOrigin, setLabOrigin] = useState<{
+    documentId: string;
+    sectionId: string;
+    runId: string;
+  } | null>(null);
   const [findingVisit, setFindingVisit] = useState<{
     documentId: string;
+    sectionId: string;
     runId: string;
     findingIndex: number;
     findingId: string;
@@ -1269,6 +1291,83 @@ export default function App() {
       : w.layout.previewVisible);
   const paneCount =
     Number(workbenchShown) + Number(previewShown) + Number(inspectorShown);
+  useLayoutEffect(() => {
+    const run = w.activeRun;
+    if (
+      run?.target.scope !== "document" &&
+      run?.target.sectionId === w.selectedSectionId
+    )
+      setLabOrigin((previous) =>
+        previous?.documentId === w.doc.id && previous.runId === run.id
+          ? previous
+          : {
+              documentId: w.doc.id,
+              sectionId: run.target.sectionId!,
+              runId: run.id,
+            },
+      );
+  }, [w.activeRun?.id, w.selectedSectionId, w.doc.id]);
+  useLayoutEffect(() => {
+    const selected = w.doc.sections.find(
+      (section) => section.id === w.selectedSectionId,
+    );
+    if (selected?.placement === "draft") lastDraftId.current = selected.id;
+  }, [w.doc.sections, w.selectedSectionId]);
+  const restorePanes = () => {
+    const previous = focusContext.current;
+    setPreviewFocused(false);
+    setReadingMode(false);
+    setParkedFocusId(null);
+    if (previous?.documentId !== w.doc.id) return;
+    if (
+      previous.runId &&
+      previous.sectionId &&
+      previous.sectionId !== w.selectedSectionId &&
+      w.doc.sections.some((section) => section.id === previous.sectionId)
+    )
+      setLabOrigin({
+        documentId: w.doc.id,
+        sectionId: previous.sectionId,
+        runId: previous.runId,
+      });
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        for (const [pane, top] of [
+          [".structure", previous.workbenchScroll],
+          [".writing", previous.previewScroll],
+          [".inspector", previous.inspectorScroll],
+        ] as const) {
+          const node = document.querySelector<HTMLElement>(
+            `.dock-workspace ${pane}`,
+          );
+          if (node) node.scrollTop = top;
+        }
+      }),
+    );
+  };
+  const focusPreview = (parkedId?: string) => {
+    focusContext.current = {
+      documentId: w.doc.id,
+      sectionId: w.selectedSectionId,
+      runId: w.activeRun?.id ?? null,
+      workbenchScroll:
+        document.querySelector<HTMLElement>(".structure")?.scrollTop ?? 0,
+      previewScroll:
+        document.querySelector<HTMLElement>(".writing")?.scrollTop ?? 0,
+      inspectorScroll:
+        document.querySelector<HTMLElement>(".inspector")?.scrollTop ?? 0,
+    };
+    const parked =
+      parkedId ??
+      w.doc.sections.find(
+        (section) =>
+          section.id === w.selectedSectionId && section.placement === "parked",
+      )?.id;
+    if (parked) setEditorCard(null);
+    setParkedFocusId(parked ?? null);
+    setReadingMode(true);
+    setPreviewFocused(true);
+  };
   const commitWidths = (next: PaneWidths) => {
     setDragWidths(null);
     void w.setPaneWidths(next);
@@ -1291,6 +1390,7 @@ export default function App() {
     const run = w.doc.workbench?.runs.find((item) => item.id === anchor?.runId);
     const finding = run?.response.findings[anchor?.findingIndex ?? -1];
     if (run && finding && anchor) {
+      w.noteRevisionContext(run.id, id, anchor.findingIndex);
       const referencedSectionIds = [
         ...new Set([
           finding.sectionId,
@@ -1304,6 +1404,7 @@ export default function App() {
       );
       setFindingVisit({
         documentId: w.doc.id,
+        sectionId: id,
         runId: run.id,
         findingIndex: anchor.findingIndex,
         findingId: `${run.id}:${anchor.findingIndex}`,
@@ -1318,8 +1419,17 @@ export default function App() {
     if (w.layout.primaryView !== "workbench")
       void w.setPrimaryView("workbench");
     setPreviewFocused(false);
+    setParkedFocusId(null);
+    setReadingMode(false);
     w.focusSection(id);
     setPendingJump(id);
+  };
+  const returnToLab = (sectionId: string, runId: string) => {
+    if (!w.doc.sections.some((section) => section.id === sectionId)) return;
+    w.noteRevisionContext(runId, sectionId);
+    jumpToSection(sectionId);
+    w.inspectSectionRun(sectionId, runId);
+    requestAnimationFrame(() => scrollPreviewToSection(sectionId));
   };
   const returnToFinding = () => {
     if (!findingVisit || findingVisit.documentId !== w.doc.id) return;
@@ -1350,6 +1460,7 @@ export default function App() {
     w.doc.sections,
   ]);
   const activeEditorCard =
+    !parkedFocusId &&
     workbenchShown &&
     w.layout.primaryView === "workbench" &&
     w.layout.density === "comfortable" &&
@@ -1392,7 +1503,22 @@ export default function App() {
       }
     }
     dom.classList.toggle("in-card", Boolean(activeEditorCard));
-  }, [w.editor, w.doc.sections, activeEditorCard]);
+    dom.classList.toggle(
+      "in-parked-focus",
+      Boolean(parkedFocusId && previewFocused),
+    );
+  }, [
+    w.editor,
+    w.doc.sections,
+    activeEditorCard,
+    parkedFocusId,
+    previewFocused,
+  ]);
+  useLayoutEffect(() => {
+    if (!previewFocused) return;
+    const id = parkedFocusId ?? w.selectedSectionId;
+    if (id) requestAnimationFrame(() => scrollPreviewToSection(id, true));
+  }, [previewFocused, parkedFocusId, w.selectedSectionId]);
   const writeInCard = (id: string, point?: { x: number; y: number }) => {
     pendingCardCaret.current = point ? { id, ...point } : null;
     w.prepareSectionTarget(id);
@@ -1412,13 +1538,18 @@ export default function App() {
           : "document-mode") +
         " " +
         (w.layout.density === "overview" ? "overview-mode" : "") +
-        " " +
-        "dock-shell"
+        (previewFocused && readingMode ? " preview-reading" : "") +
+        (parkedFocusId && previewFocused ? " parked-preview-mode" : "") +
+        " dock-shell"
       }
     >
       {activeEditorCard && (
         <style>{`.card-editor-host .writing-editor > section { display: none !important; }
 .card-editor-host .writing-editor > section#${CSS.escape(activeEditorCard)} { display: block !important; }`}</style>
+      )}
+      {previewFocused && parkedFocusId && (
+        <style>{`.dock-preview .writing-editor > section { display: none !important; }
+.dock-preview .writing-editor > section#${CSS.escape(parkedFocusId)} { display: block !important; }`}</style>
       )}
       <header className="topbar">
         <div className="topbar-main">
@@ -1478,7 +1609,11 @@ export default function App() {
               "save-state " + (w.saveState === "Not saved" ? "save-error" : "")
             }
             onClick={() => w.flush().catch(() => {})}
-            title="Save now"
+            title={
+              w.saveState === "Connecting"
+                ? "Connecting to the local workspace; your text remains here"
+                : "Save now"
+            }
           >
             {w.saveState === "Saved" ? (
               <Check size={12} />
@@ -1724,7 +1859,7 @@ export default function App() {
           {previewShown && (
             <Button
               aria-pressed={previewFocused}
-              onClick={() => setPreviewFocused(!previewFocused)}
+              onClick={() => (previewFocused ? restorePanes() : focusPreview())}
             >
               {previewFocused ? "Restore panes" : "Focus preview"}
             </Button>
@@ -1789,6 +1924,10 @@ export default function App() {
             editorCard={activeEditorCard}
             onWriteCard={writeInCard}
             onEditPreview={editInPreview}
+            onReadParked={(id) => {
+              w.prepareSectionTarget(id);
+              focusPreview(id);
+            }}
             onOpenSavedWork={(sectionId, kind) => {
               w.focusSection(sectionId);
               void w.setInspectorVisible(true);
@@ -1812,21 +1951,45 @@ export default function App() {
           data-pane="preview"
           style={{ flexGrow: widths.preview }}
         >
-          <main className="writing">
+          <main
+            className="writing"
+            onPointerDownCapture={(event) => {
+              if (
+                readingMode &&
+                (event.target as HTMLElement).closest(
+                  ".writing-editor,.format-toolbar",
+                )
+              )
+                setReadingMode(false);
+            }}
+          >
             <Toolbar w={w} />
             <div className="selected-preview-heading">
               <span className="eyebrow">
-                {w.layout.primaryView === "workbench"
-                  ? "Assembled preview · same writing"
-                  : "Document View"}
+                {parkedFocusId
+                  ? "PARKED THOUGHT · outside the reader draft"
+                  : w.layout.primaryView === "workbench"
+                    ? "Assembled preview · same writing"
+                    : "Document View"}
               </span>
               <b>
-                {(w.layout.primaryView === "workbench"
+                {(w.layout.primaryView === "workbench" || parkedFocusId
                   ? w.doc.sections
                   : draft
                 ).find((s) => s.id === w.selectedSectionId)?.label ??
                   "Your document"}
               </b>
+              {parkedFocusId && (
+                <Button
+                  onClick={() => {
+                    restorePanes();
+                    const id = lastDraftId.current ?? draft[0]?.id;
+                    if (id) w.focusSection(id);
+                  }}
+                >
+                  Return to draft
+                </Button>
+              )}
             </div>
             {w.layout.primaryView === "workbench" && (
               <RelationalContext
@@ -1853,7 +2016,10 @@ export default function App() {
                     aria-label="Assembled preview"
                   >
                     {draft.map((section) => (
-                      <section key={section.id}>
+                      <section
+                        key={section.id}
+                        data-preview-section-id={section.id}
+                      >
                         {sectionText(section) || (
                           <span className="muted">Unwritten section</span>
                         )}
@@ -1861,14 +2027,14 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                {!activeEditorCard && (
+                {!activeEditorCard && !parkedFocusId && (
                   <SectionInsertionGaps
                     editor={w.editor}
                     sections={draft}
                     onInsert={w.requestSectionInsertion}
                   />
                 )}
-                {!activeEditorCard && !text.trim() && (
+                {!activeEditorCard && !parkedFocusId && !text.trim() && (
                   <FirstMove w={w} onCommand={navigation.runCommand} />
                 )}
               </div>
@@ -1913,6 +2079,8 @@ export default function App() {
             }
             restoreFinding={restoreFinding}
             onReturnFinding={returnToFinding}
+            labOrigin={labOrigin?.documentId === w.doc.id ? labOrigin : null}
+            onReturnToLab={returnToLab}
             openWork={openWork}
           />
         </div>

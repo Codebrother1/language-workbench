@@ -189,6 +189,13 @@ export class Repository {
         target: remapTarget(h.target),
         runId: h.runId ? runIds.get(h.runId) : undefined,
       })),
+      revisionTrail: doc.revisionTrail.flatMap((entry) => {
+        const runId = runIds.get(entry.runId);
+        const sectionId = sectionIds.get(entry.sectionId);
+        return runId && sectionId
+          ? [{ ...entry, id: uid(), runId, sectionId, savedRevision: null }]
+          : [];
+      }),
     });
   }
   getLibrary(): PersonalLibrary {

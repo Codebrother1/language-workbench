@@ -72,6 +72,8 @@ export function WritingLabShell({
   findingVisit,
   restoreFinding,
   onReturnFinding,
+  labOrigin,
+  onReturnToLab,
 }: {
   w: Workspace;
   navigation: Wayfinding;
@@ -81,6 +83,7 @@ export function WritingLabShell({
     anchor?: { runId: string; findingIndex: number },
   ) => void;
   findingVisit?: {
+    sectionId: string;
     runId: string;
     findingIndex: number;
     findingId: string;
@@ -94,6 +97,8 @@ export function WritingLabShell({
     token: number;
   } | null;
   onReturnFinding: () => void;
+  labOrigin?: { documentId: string; sectionId: string; runId: string } | null;
+  onReturnToLab: (sectionId: string, runId: string) => void;
   openWork?: {
     sectionId: string;
     kind: "variants" | "structure" | "history";
@@ -400,7 +405,8 @@ export function WritingLabShell({
       {findingVisit &&
         visitedRun &&
         visitedFinding &&
-        target?.scope !== "document" && (
+        target?.scope !== "document" &&
+        findingVisit.sectionId === target?.sectionId && (
           <div className="finding-return" data-testid="finding-return">
             <Button
               onClick={onReturnFinding}
@@ -415,6 +421,22 @@ export function WritingLabShell({
                 ? "Based on an earlier draft"
                 : "Current draft"}
             </span>
+          </div>
+        )}
+      {!(findingVisit && findingVisit.sectionId === target?.sectionId) &&
+        labOrigin &&
+        labOrigin.sectionId !== target?.sectionId &&
+        target?.scope !== "document" &&
+        w.doc.sections.some((s) => s.id === labOrigin.sectionId) && (
+          <div className="finding-return" data-testid="lab-return">
+            <Button
+              onClick={() =>
+                onReturnToLab(labOrigin.sectionId, labOrigin.runId)
+              }
+            >
+              ← Return to question ·{" "}
+              {sectionReference(w.doc, labOrigin.sectionId)}
+            </Button>
           </div>
         )}
       <div className="lab-head">
@@ -723,6 +745,22 @@ export function WritingLabShell({
                 These options belong to this original, even if your cursor
                 moves.
               </small>
+              {w.activeRun?.id && responseTarget.sectionId && (
+                <Button
+                  className="text-button"
+                  onClick={() =>
+                    onReturnToLab(responseTarget.sectionId!, w.activeRun!.id)
+                  }
+                >
+                  {w.doc.sections.find((s) => s.id === responseTarget.sectionId)
+                    ?.placement === "parked"
+                    ? "Return to parked thought"
+                    : responseTarget.scope === "word" ||
+                        responseTarget.scope === "selection"
+                      ? "Return to selection"
+                      : "Return to section"}
+                </Button>
+              )}
             </div>
           )}
           <p className="diagnosis">
@@ -1021,6 +1059,45 @@ export function WritingLabShell({
             openWork?.sectionId === section?.id && openWork?.kind === "history"
           }
         />
+      )}
+      {w.doc.revisionTrail.length > 0 && (
+        <details className="revision-trail">
+          <summary>
+            Revision trail{" "}
+            <span className="count">{w.doc.revisionTrail.length}</span>
+          </summary>
+          <ul>
+            {[...w.doc.revisionTrail]
+              .reverse()
+              .slice(0, 8)
+              .map((entry) => {
+                const run = [
+                  ...(w.doc.workbench?.runs ?? []),
+                  ...w.doc.sections.flatMap(
+                    (item) => item.workbench?.runs ?? [],
+                  ),
+                ].find((item) => item.id === entry.runId);
+                const title =
+                  entry.findingIndex === null
+                    ? `${run?.action ?? "Saved Lab work"} run`
+                    : (run?.response.findings[entry.findingIndex]?.title ??
+                      "Whole-piece finding");
+                return (
+                  <li key={entry.id}>
+                    <b>{displayText(title)}</b> → edited{" "}
+                    {sectionReference(w.doc, entry.sectionId) ??
+                      "a section no longer in the draft"}
+                    <small>
+                      Viewed before edit ·{" "}
+                      {entry.savedRevision === null
+                        ? "Not saved yet"
+                        : `Saved with revision ${entry.savedRevision}`}
+                    </small>
+                  </li>
+                );
+              })}
+          </ul>
+        </details>
       )}
       {(hasTarget || explicitVariants) && section && !isWholeAnalysis && (
         <details ref={variantsRef} className="variants">

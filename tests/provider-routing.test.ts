@@ -532,6 +532,17 @@ describe("one authoritative routing algorithm and immutable comparison", () => {
       },
     ];
     section.workbench.activeRunId = "run";
+    doc.revisionTrail = [
+      {
+        id: "trail",
+        runId: "run",
+        sectionId: section.id,
+        findingIndex: 0,
+        viewedAt: "before",
+        editedAt: "after",
+        savedRevision: 3,
+      },
+    ];
     section.modelOverride = plain;
     doc.defaultModel = openai;
     section.variants = [
@@ -557,5 +568,11 @@ describe("one authoritative routing algorithm and immutable comparison", () => {
     expect(r.response.findings[0].sectionId).toBe(s.id);
     expect(r.response.model).toEqual(plain);
     expect(imported.defaultModel).toEqual(openai);
+    expect(imported.revisionTrail[0]).toMatchObject({
+      runId: r.id,
+      sectionId: s.id,
+      findingIndex: 0,
+      savedRevision: null,
+    });
   });
 });

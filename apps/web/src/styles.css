@@ -690,6 +690,17 @@ hr {
 .writing-editor ::selection {
   background: #cbdac6;
 }
+.app.preview-reading .writing-editor .target-highlight {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+}
+.app.preview-reading .writing-editor ::selection {
+  background: transparent;
+}
+.app.parked-preview-mode .selected-preview-heading {
+  display: flex;
+}
 .editor-placeholder {
   position: absolute;
   top: 0;
@@ -973,6 +984,20 @@ hr {
 .analysis-state {
   color: var(--muted);
   font-size: 11px;
+}
+.revision-trail {
+  margin: 14px 0;
+  font-size: 12px;
+}
+.revision-trail ul {
+  padding-left: 18px;
+}
+.revision-trail li {
+  margin: 8px 0;
+}
+.revision-trail small {
+  display: block;
+  color: var(--muted);
 }
 .related-draft-uses,
 .lens-more-analysis {

@@ -186,6 +186,38 @@ export function fromEditor(
     };
   });
 }
+export function scrollPreviewToSection(id: string, force = false): boolean {
+  const pane = document.querySelector<HTMLElement>(".dock-preview .writing");
+  if (!pane || getComputedStyle(pane).display === "none") return false;
+  const node = Array.from(
+    pane.querySelectorAll<HTMLElement>(
+      "[data-preview-section-id], .writing-editor > section",
+    ),
+  ).find(
+    (element) =>
+      (element.dataset.previewSectionId === id || element.id === id) &&
+      getComputedStyle(element).display !== "none",
+  );
+  if (!node) return false;
+  const bounds = pane.getBoundingClientRect();
+  const target = node.getBoundingClientRect();
+  if (
+    !force &&
+    target.top >= bounds.top + Math.min(bounds.height * 0.22, 180) &&
+    target.bottom <= bounds.top + bounds.height * 0.7
+  )
+    return false;
+  pane.scrollTo({
+    top:
+      pane.scrollTop +
+      target.top -
+      bounds.top -
+      Math.min(bounds.height * 0.3, 220),
+    behavior: "smooth",
+  });
+  return true;
+}
+
 export function sectionLocation(editor: Editor, id: string) {
   let found: { node: PMNode; pos: number } | null = null;
   editor.state.doc.forEach((node, pos) => {
