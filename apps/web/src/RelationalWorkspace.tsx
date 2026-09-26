@@ -3,6 +3,7 @@ import { draftSections, sectionText, type WritingSection } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Dialog } from "./ui";
 import { modelLabel } from "./ModelControls";
+import { sectionMentions } from "./workspace-helpers";
 export function NeighborContext({
   section,
   label,
@@ -127,6 +128,10 @@ export function RelationalCompare({
   const index = sections.findIndex((s) => s.id === w.selectedSectionId),
     section = w.doc.sections.find((s) => s.id === w.selectedSectionId);
   const [included, setIncluded] = useState<string[]>([]);
+  const display = (text: string) =>
+    sectionMentions(w.doc, text)
+      .map((part) => part.text)
+      .join("");
   if (!section) return null;
   const allCandidates = [
     ...section.variants.map((v) => ({
@@ -202,7 +207,7 @@ export function RelationalCompare({
                     })
                   }
                 />
-                {c.label} · {modelLabel(w.catalog, c.model)}
+                {display(c.label)} · {modelLabel(w.catalog, c.model)}
               </label>
             ))}
           </details>
@@ -219,55 +224,63 @@ export function RelationalCompare({
             Copy current
           </Button>
         </article>
-        {chosen.map((c) => (
-          <article
-            key={c.id}
-            className="comparison-version"
-            data-testid="compare-version"
-          >
-            <span className="eyebrow">{c.label}</span>
-            <small>{modelLabel(w.catalog, c.model)}</small>
-            <textarea
-              aria-label={"Edit version " + c.label}
-              rows={5}
-              value={c.text}
-              onChange={(e) =>
-                c.type === "proposal"
-                  ? w.proposalText(c.id, e.target.value)
-                  : w.update((d) => ({
-                      ...d,
-                      sections: d.sections.map((s) =>
-                        s.id === section.id
-                          ? {
-                              ...s,
-                              variants: s.variants.map((v) =>
-                                v.id === c.id
-                                  ? { ...v, text: e.target.value }
-                                  : v,
-                              ),
-                            }
-                          : s,
-                      ),
-                    }))
-              }
-            />
-            <div className="row wrap">
-              <Button onClick={() => w.copy(c.text)}>Copy version</Button>
-              <Button
-                className="primary"
-                onClick={() => {
-                  if (c.type === "proposal") w.decide(c.id, "accepted");
-                  else {
-                    const v = section.variants.find((v) => v.id === c.id);
-                    if (v) w.activate(v);
-                  }
-                }}
-              >
-                Use this version
-              </Button>
-            </div>
-          </article>
-        ))}
+        {chosen.map((c) => {
+          const containsKnownId = sectionMentions(w.doc, c.text).some(
+            (part) => part.sectionId,
+          );
+          return (
+            <article
+              key={c.id}
+              className="comparison-version"
+              data-testid="compare-version"
+            >
+              <span className="eyebrow">{display(c.label)}</span>
+              <small>{modelLabel(w.catalog, c.model)}</small>
+              <textarea
+                aria-label={"Edit version " + display(c.label)}
+                rows={5}
+                value={containsKnownId ? display(c.text) : c.text}
+                onChange={(e) =>
+                  c.type === "proposal"
+                    ? w.proposalText(c.id, e.target.value)
+                    : w.update((d) => ({
+                        ...d,
+                        sections: d.sections.map((s) =>
+                          s.id === section.id
+                            ? {
+                                ...s,
+                                variants: s.variants.map((v) =>
+                                  v.id === c.id
+                                    ? { ...v, text: e.target.value }
+                                    : v,
+                                ),
+                              }
+                            : s,
+                        ),
+                      }))
+                }
+              />
+              <div className="row wrap">
+                <Button onClick={() => w.copy(display(c.text))}>
+                  Copy version
+                </Button>
+                <Button
+                  className="primary"
+                  disabled={containsKnownId}
+                  onClick={() => {
+                    if (c.type === "proposal") w.decide(c.id, "accepted");
+                    else {
+                      const v = section.variants.find((v) => v.id === c.id);
+                      if (v) w.activate(v);
+                    }
+                  }}
+                >
+                  Use this version
+                </Button>
+              </div>
+            </article>
+          );
+        })}
       </div>
       {!candidates.length && (
         <p className="empty-note">

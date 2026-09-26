@@ -10,6 +10,7 @@ import {
   defaultSettings,
   emptyWorkbench,
   documentText,
+  sectionText,
   modelKey,
 } from "../../packages/domain/src/index";
 const conservative = { providerId: "mock", modelId: "conservative" },
@@ -702,6 +703,160 @@ test("shared-piece quality notes and a requested revision question remain review
   expect(documentText(await stored(request, imported.id))).toBe(
     documentText(imported),
   );
+});
+
+test("nine-section navigation resolves findings, names cards and layers Phrase Lens context", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90000);
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument("Nine rooms", "The kettle ticked. We kept waiting.");
+  for (let i = 1; i < 9; i++)
+    doc.sections.push(
+      newSection("Freeform", `Draft thought ${i + 1} returns to the decision.`),
+    );
+  doc.sections[1].label = "What waiting did";
+  doc.sections[2].content = newSection(
+    "Freeform",
+    "The list starts lying. We decide later.",
+  ).content;
+  doc.sections[7].label = "The callback";
+  doc.sections[2].workbench = {
+    ...emptyWorkbench(),
+    instruction: "Keep this local.",
+  };
+  doc.workbench = {
+    ...emptyWorkbench(),
+    instruction: "Where is repetition hurting this?",
+  };
+  doc.parkedGroups = [
+    { id: "side-roads", name: "Side roads", collapsed: false },
+  ];
+  const ungrouped = newSection("Freeform", "A loose thought stays parked.");
+  ungrouped.placement = "parked";
+  const grouped = newSection("Freeform", "A side road stays nearby.");
+  grouped.placement = "parked";
+  grouped.parkedGroupId = "side-roads";
+  doc.sections.push(ungrouped, grouped);
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  const ids: string[] = imported.sections.map((s: { id: string }) => s.id);
+  const unknown = "00000000-0000-4000-8000-000000000000";
+  await page.route("**/api/ai", (route) => {
+    const input = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        provider: "openai",
+        diagnosis: input.lens
+          ? "Here, decide later suspends a choice rather than resolving it. ".repeat(
+              13,
+            ) + `Elsewhere ${ids[6]} echoes the delay.`
+          : `Repetition gathers around ${ids[1]} and ${ids[2]}.`,
+        mechanism:
+          "The wording recurs across the piece without changing the selected phrase.",
+        question: "What should the reader know at this point?",
+        missingIngredients: [],
+        proposals: [],
+        lexical: [],
+        findings: input.lens
+          ? [ids[5], ids[6], ids[7]].map((id) => ({
+              sectionId: id,
+              title: "An echo elsewhere",
+              detail: `Related use in ${id}.`,
+              severity: "consider",
+            }))
+          : [
+              {
+                sectionId: ids[7],
+                title: "Sections 2 and 3 repeat the decision-delay move.",
+                detail: `The callback at ${ids[7]} returns. ${unknown} is not a known section.`,
+                severity: "consider",
+              },
+            ],
+      },
+    });
+  });
+  await open(page);
+  await expect(page.getByLabel("Document title")).toHaveValue("Nine rooms");
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(page.getByTestId("structure-item")).toHaveCount(11);
+  const third = page.locator(`[data-section-id="${ids[2]}"]`);
+  await third.getByRole("button", { name: "Name section 3" }).click();
+  await page
+    .getByLabel("Short label for section 3")
+    .fill("The list starts lying");
+  await page.getByLabel("Short label for section 3").press("Enter");
+  await expect(third.locator(".section-focus")).toContainText(
+    "The list starts lying",
+  );
+  await expect(third.locator(".section-role")).toContainText("Freeform");
+  const fourth = page.locator(`[data-section-id="${ids[3]}"]`);
+  await fourth.getByRole("button", { name: "Name section 4" }).click();
+  await page.getByLabel("Short label for section 4").fill("Not saved");
+  await page.getByLabel("Short label for section 4").press("Escape");
+  await expect(fourth.locator(".section-focus")).not.toContainText("Not saved");
+  await page.getByRole("button", { name: "Collapse Side roads" }).click();
+  await expect(page.locator(`[data-section-id="${ids[10]}"]`)).toBeHidden();
+  await expect(page.locator(`[data-section-id="${ids[9]}"]`)).toBeVisible();
+  await save(page);
+  await page.reload();
+  await expect(page.locator(`[data-section-id="${ids[10]}"]`)).toBeHidden();
+  await page.getByRole("button", { name: "Expand Side roads" }).press("Enter");
+  await expect(page.locator(`[data-section-id="${ids[10]}"]`)).toBeVisible();
+  await page.getByRole("button", { name: "Whole-piece critique" }).click();
+  await expect(page.locator(".finding")).toHaveCount(1);
+  const visible = await page.locator(".inspector").innerText();
+  for (const id of [ids[1], ids[2], ids[7]]) expect(visible).not.toContain(id);
+  expect(visible).toContain(unknown);
+  const finding = page.locator(".finding").first();
+  await expect(finding.locator(".finding-references .button")).toHaveCount(3);
+  await finding
+    .locator(".finding-references .button")
+    .filter({ hasText: "What waiting did" })
+    .click();
+  await expect(page.locator(`[data-section-id="${ids[1]}"]`)).toHaveClass(
+    /active/,
+  );
+  await page.getByRole("button", { name: "Whole-piece critique" }).click();
+  await page
+    .locator(".finding-references .button")
+    .filter({ hasText: "The list starts lying" })
+    .click();
+  await expect(third).toHaveClass(/active/);
+  await select(page, "decide later");
+  await page.getByRole("button", { name: "Diagnose this phrase" }).click();
+  await expect(page.locator(".diagnosis")).toContainText("suspends a choice");
+  expect((await page.locator(".diagnosis").innerText()).length).toBeLessThan(
+    350,
+  );
+  await expect(page.locator(".lens-more-analysis > summary")).toBeVisible();
+  await expect(page.locator(".related-draft-uses > summary")).toContainText(
+    "(3)",
+  );
+  await page.locator(".related-draft-uses > summary").click();
+  await expect(page.locator(".related-draft-uses .finding")).toHaveCount(3);
+  await page
+    .locator(".related-draft-uses .finding-references .button")
+    .filter({ hasText: "The callback" })
+    .first()
+    .click();
+  await expect(page.locator(`[data-section-id="${ids[7]}"]`)).toHaveClass(
+    /active/,
+  );
+  await third.locator(".section-focus").click();
+  await third.locator(".section-options summary").click();
+  await third.getByRole("button", { name: "Move section up" }).click();
+  await save(page);
+  const after = await stored(request, imported.id);
+  expect(after.sections[1].id).toBe(ids[2]);
+  expect(after.sections[1].label).toBe("The list starts lying");
+  expect(sectionText(after.sections[1])).toContain("decide later");
+  expect(after.sections[1].workbench.instruction).toBe("Keep this local.");
+  expect(after.sections[10].parkedGroupId).toBe("side-roads");
 });
 
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({

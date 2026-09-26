@@ -136,7 +136,14 @@ test("draft and parked capture, groups, reinclusion, labels and export share one
   await expect(
     page.locator(`[data-section-id="${parkedIds[0]}"]`),
   ).toBeHidden();
-  await page.getByRole("button", { name: "Expand Interface" }).click();
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(
+    page.locator(`[data-section-id="${parkedIds[0]}"]`),
+  ).toBeHidden();
+  await expect(
+    page.locator(`[data-section-id="${parkedIds[2]}"]`),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Expand Interface" }).press("Enter");
   await expect(
     page.getByRole("button", { name: "Collapse Collaborators" }),
   ).toBeVisible();

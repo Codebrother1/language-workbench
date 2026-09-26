@@ -10,6 +10,8 @@ Workbench shows persistent Draft and Parked count buttons above its cards. Each 
 
 Ran the built application on isolated port 4321 with temporary SQLite storage. Wrote **The marker on the map** as five rough thoughts, parked a side story, and revised its prose directly in the parked card. Writing gave the cards most width with Preview beside them and Inspector hidden. Review gave Document View the largest pane, with compact structure and Inspector alongside. Workbench only used the full width. Draft/Parked navigation made the side story reachable without scrolling through the four draft cards. Reincluding it preserved the revised prose. Reload restored the selected layout. Selecting Document View from a hidden Preview now reveals the document for that visit and restores the hidden Workbench preference on return.
 
+A later large-document pointer check used an isolated offline fixture with nine draft sections, two parked thoughts and a named group. The writer manually dragged a draft card by its grip and confirmed the insertion marker, card reorder and live assembled-Preview reorder all worked. The existing drag implementation was left unchanged; automated pointer checks remain useful regression gates but are not substitutes for this human check.
+
 ## Remaining friction and next step
 
 At narrower desktop widths, Inspector stacks below the other panes rather than sharing a row; this keeps the writing surface usable but means Inspector work can require vertical scrolling. Pane order is fixed. A constrained left/right order switch should follow only if repeated use shows that placement, rather than width or visibility, is the remaining obstacle. Arbitrary docking and floating windows are outside this model.

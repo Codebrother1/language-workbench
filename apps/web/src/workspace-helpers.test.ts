@@ -17,6 +17,8 @@ import {
   inspectRun,
   forkWorkbench,
   isLensTarget,
+  sectionReference,
+  sectionMentions,
   type RunCapture,
 } from "./workspace-helpers";
 
@@ -45,6 +47,36 @@ function fixture() {
   };
   return { doc, a, b, capture, response };
 }
+
+describe("writer-facing section references", () => {
+  it("resolves custom labels, roles, numbered Freeform cards and only known IDs", () => {
+    const doc = newDocument("Nine cards", "A first thought.");
+    for (let i = 1; i < 9; i++)
+      doc.sections.push(newSection("Freeform", `Thought ${i + 1}`));
+    doc.sections[1].label = "The list starts lying";
+    doc.sections[2].label = "What arranging did";
+    doc.sections[7].kind = "Callback";
+    doc.sections[7].label = "Callback";
+    expect(sectionReference(doc, doc.sections[1].id)).toBe(
+      "The list starts lying",
+    );
+    expect(sectionReference(doc, doc.sections[7].id)).toBe(
+      "Callback · Section 8",
+    );
+    expect(sectionReference(doc, doc.sections[3].id)).toBe("Section 4");
+    const unknown = "00000000-0000-4000-8000-000000000000";
+    const text = `Sections 2 and 3 echo; ${doc.sections[7].id} returns. ${unknown} is unrecognized.`;
+    const parts = sectionMentions(doc, text);
+    expect(
+      parts.filter((part) => part.sectionId).map((part) => part.sectionId),
+    ).toEqual([doc.sections[1].id, doc.sections[2].id, doc.sections[7].id]);
+    const rendered = parts.map((part) => part.text).join("");
+    expect(rendered).toContain("The list starts lying and What arranging did");
+    expect(rendered).toContain("Callback · Section 8");
+    expect(rendered).toContain(unknown);
+    expect(rendered).not.toContain(doc.sections[7].id);
+  });
+});
 
 describe("canonical section workbenches", () => {
   it("derives fresh defaults without sharing mutable fields or eagerly migrating documents", () => {

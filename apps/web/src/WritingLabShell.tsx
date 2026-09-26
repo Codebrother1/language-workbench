@@ -23,18 +23,53 @@ import {
   structuralMechanisms,
   sectionText,
   type WritingAction,
+  type AIResponse,
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Field, Select, Range, GrowingTextarea } from "./ui";
+import { sectionMentions, sectionReference } from "./workspace-helpers";
+
+function ReferencedText({
+  w,
+  text,
+  onJumpSection,
+}: {
+  w: Workspace;
+  text: string;
+  onJumpSection: (id: string) => void;
+}) {
+  return (
+    <>
+      {sectionMentions(w.doc, text).map((part, index) =>
+        part.sectionId ? (
+          <button
+            key={index}
+            type="button"
+            className="section-reference-link"
+            onClick={() => onJumpSection(part.sectionId!)}
+            aria-label={`Jump to ${part.text}`}
+          >
+            {part.text}
+          </button>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 export function WritingLabShell({
   w,
   navigation,
   onCompare,
   openWork,
+  onJumpSection,
 }: {
   w: Workspace;
   navigation: Wayfinding;
   onCompare?: () => void;
+  onJumpSection: (id: string) => void;
   openWork?: {
     sectionId: string;
     kind: "variants" | "structure" | "history";
@@ -83,6 +118,42 @@ export function WritingLabShell({
   );
   const isLexicalRun =
     w.activeRun?.action === "words" && Boolean(w.activeRun?.lens);
+  const phraseExploration =
+    isLexicalRun &&
+    w.activeRun?.lens?.mode === "explore" &&
+    responseTarget?.scope === "selection";
+  const displayText = (text: string) =>
+    sectionMentions(w.doc, text)
+      .map((part) => part.text)
+      .join("");
+  const findingIds = (finding: AIResponse["findings"][number]) =>
+    [
+      ...new Set([
+        finding.sectionId,
+        ...sectionMentions(w.doc, finding.title + " " + finding.detail).map(
+          (part) => part.sectionId,
+        ),
+      ]),
+    ].filter((id): id is string => !!id && !!sectionReference(w.doc, id));
+  const relatedFindings = phraseExploration
+    ? (response?.findings.filter((finding) =>
+        findingIds(finding).some((id) => id !== responseTarget?.sectionId),
+      ) ?? [])
+    : [];
+  const localFindings =
+    response?.findings.filter(
+      (finding) => !relatedFindings.includes(finding),
+    ) ?? [];
+  const relatedCount = new Set(
+    relatedFindings
+      .flatMap(findingIds)
+      .filter((id) => id !== responseTarget?.sectionId),
+  ).size;
+  const diagnosisSplit =
+    phraseExploration && (response?.diagnosis.length ?? 0) > 340
+      ? (response!.diagnosis.match(/^.{0,320}[.!?](?=\s|$)/s)?.[0].length ??
+        320)
+      : (response?.diagnosis.length ?? 0);
   const [compare, setCompare] = useState<string | null>(null);
   const responseRef = useRef<HTMLElement>(null);
   const variantsRef = useRef<HTMLDetailsElement>(null);
@@ -124,22 +195,65 @@ export function WritingLabShell({
         responseTarget?.scope !== "document" && responseTarget?.text
           ? "Original target\n" + responseTarget.text
           : "",
-        response.diagnosis,
-        response.mechanism,
-        response.question,
-        ...(response.qualityNotices ?? []),
-        ...response.missingIngredients,
-        ...response.findings.map((f) => f.title + "\n" + f.detail),
-        ...response.lexical.map((l) => Object.values(l).join("\n")),
+        displayText(response.diagnosis),
+        displayText(response.mechanism),
+        displayText(response.question),
+        ...(response.qualityNotices ?? []).map(displayText),
+        ...response.missingIngredients.map(displayText),
+        ...response.findings.map((f) => displayText(f.title + "\n" + f.detail)),
+        ...response.lexical.map((l) =>
+          displayText(Object.values(l).join("\n")),
+        ),
         ...response.proposals.map((p) =>
           [p.label, p.text, p.explanation, p.qualityNote]
             .filter(Boolean)
+            .map((part) => displayText(part!))
             .join("\n"),
         ),
       ]
         .filter(Boolean)
         .join("\n\n")
     : "";
+  const renderFinding = (
+    finding: AIResponse["findings"][number],
+    index: number,
+  ) => (
+    <article className="finding" key={index}>
+      <div className="row between">
+        <b>
+          <ReferencedText
+            w={w}
+            text={finding.title}
+            onJumpSection={onJumpSection}
+          />
+        </b>
+        <span className="tag">{finding.severity}</span>
+      </div>
+      <p>
+        <ReferencedText
+          w={w}
+          text={finding.detail}
+          onJumpSection={onJumpSection}
+        />
+      </p>
+      {findingIds(finding).length > 0 && (
+        <div
+          className="row wrap finding-references"
+          aria-label="Referenced sections"
+        >
+          {findingIds(finding).map((id) => (
+            <Button
+              key={id}
+              className="text-button"
+              onClick={() => onJumpSection(id)}
+            >
+              {sectionReference(w.doc, id)} <ArrowUpRight size={13} />
+            </Button>
+          ))}
+        </div>
+      )}
+    </article>
+  );
   const requestedTool = navigation.toolNavigation?.tool;
   const explicitVariants = requestedTool === "variants";
   const explicitStructure =
@@ -489,19 +603,70 @@ export function WritingLabShell({
               </small>
             </div>
           )}
-          <p className="diagnosis">{response.diagnosis}</p>
-          {response.mechanism && <p className="small">{response.mechanism}</p>}
+          <p className="diagnosis">
+            <ReferencedText
+              w={w}
+              text={response.diagnosis.slice(0, diagnosisSplit)}
+              onJumpSection={onJumpSection}
+            />
+          </p>
+          {phraseExploration &&
+          (diagnosisSplit < response.diagnosis.length || response.mechanism) ? (
+            <details className="lens-more-analysis">
+              <summary>More analysis</summary>
+              {diagnosisSplit < response.diagnosis.length && (
+                <p>
+                  <ReferencedText
+                    w={w}
+                    text={response.diagnosis.slice(diagnosisSplit).trim()}
+                    onJumpSection={onJumpSection}
+                  />
+                </p>
+              )}
+              {response.mechanism && (
+                <p>
+                  <ReferencedText
+                    w={w}
+                    text={response.mechanism}
+                    onJumpSection={onJumpSection}
+                  />
+                </p>
+              )}
+            </details>
+          ) : (
+            response.mechanism && (
+              <p className="small">
+                <ReferencedText
+                  w={w}
+                  text={response.mechanism}
+                  onJumpSection={onJumpSection}
+                />
+              </p>
+            )
+          )}
           {responseTarget?.scope === "document" && response.question && (
             <div className="revision-question" data-testid="revision-question">
               <b>Revision question</b>
-              <p>{response.question}</p>
+              <p>
+                <ReferencedText
+                  w={w}
+                  text={response.question}
+                  onJumpSection={onJumpSection}
+                />
+              </p>
             </div>
           )}
           {!!response.qualityNotices?.length && (
             <div className="quality-notices" role="status">
               <b>Output check</b>
               {response.qualityNotices.map((note) => (
-                <p key={note}>{note}</p>
+                <p key={note}>
+                  <ReferencedText
+                    w={w}
+                    text={note}
+                    onJumpSection={onJumpSection}
+                  />
+                </p>
               ))}
             </div>
           )}
@@ -510,33 +675,37 @@ export function WritingLabShell({
               <b>Bring your material</b>
               <ul>
                 {response.missingIngredients.map((m, i) => (
-                  <li key={i}>{m}</li>
+                  <li key={i}>
+                    <ReferencedText
+                      w={w}
+                      text={m}
+                      onJumpSection={onJumpSection}
+                    />
+                  </li>
                 ))}
               </ul>
             </div>
           )}
-          {response.findings.map((finding, i) => (
-            <article className="finding" key={i}>
-              <div className="row between">
-                <b>{finding.title}</b>
-                <span className="tag">{finding.severity}</span>
-              </div>
-              <p>{finding.detail}</p>
-              {finding.sectionId && (
-                <Button
-                  className="text-button"
-                  onClick={() => w.focusSection(finding.sectionId!)}
-                >
-                  Focus section <ArrowUpRight size={13} />
-                </Button>
-              )}
-            </article>
-          ))}
+          {localFindings.map(renderFinding)}
+          {relatedFindings.length > 0 && (
+            <details className="related-draft-uses">
+              <summary>
+                Related uses elsewhere in draft ({relatedCount})
+              </summary>
+              {relatedFindings.map(renderFinding)}
+            </details>
+          )}
           {(!isLexicalRun || w.activeRun?.lens?.mode === "explore") &&
             response.lexical.map((word, i) => (
               <article className="finding" key={i}>
                 <div className="row between">
-                  <h3>{word.term}</h3>
+                  <h3>
+                    <ReferencedText
+                      w={w}
+                      text={word.term}
+                      onJumpSection={onJumpSection}
+                    />
+                  </h3>
                   <Button
                     className="icon"
                     aria-label={"Copy " + word.term}
@@ -545,11 +714,35 @@ export function WritingLabShell({
                     <Copy size={13} />
                   </Button>
                 </div>
-                <p>{word.meaning}</p>
-                <p>{word.nuance}</p>
-                <span className="tag">{word.register}</span>
                 <p>
-                  <em>{word.example}</em>
+                  <ReferencedText
+                    w={w}
+                    text={word.meaning}
+                    onJumpSection={onJumpSection}
+                  />
+                </p>
+                <p>
+                  <ReferencedText
+                    w={w}
+                    text={word.nuance}
+                    onJumpSection={onJumpSection}
+                  />
+                </p>
+                <span className="tag">
+                  <ReferencedText
+                    w={w}
+                    text={word.register}
+                    onJumpSection={onJumpSection}
+                  />
+                </span>
+                <p>
+                  <em>
+                    <ReferencedText
+                      w={w}
+                      text={word.example}
+                      onJumpSection={onJumpSection}
+                    />
+                  </em>
                 </p>
               </article>
             ))}
@@ -563,7 +756,9 @@ export function WritingLabShell({
             !w.activeRun?.structure &&
             responseTarget?.scope !== "document" && (
               <>
-                <Field label={response.question || responseLab.question}>
+                <Field
+                  label={displayText(response.question) || responseLab.question}
+                >
                   <textarea
                     rows={3}
                     aria-label="Your material"
@@ -597,72 +792,103 @@ export function WritingLabShell({
                 </Button>
               </>
             )}
-          {response.proposals.map((p, i) => (
-            <article className="proposal" key={p.id} data-testid="proposal">
-              <div className="row between">
-                <span className="eyebrow">
-                  {String(i + 1).padStart(2, "0")} / {p.label}
-                </span>
-                <Button
-                  className="icon"
-                  aria-label={
-                    (isLexicalRun ? "Copy candidate " : "Copy proposal ") +
-                    (i + 1)
-                  }
-                  onClick={() => w.copy(p.text)}
-                >
-                  <Copy size={14} />
-                </Button>
-              </div>
-              <span className="eyebrow">Proposed</span>
-              <textarea
-                aria-label={"Edit proposal " + (i + 1)}
-                value={p.text}
-                rows={Math.min(9, Math.max(3, Math.ceil(p.text.length / 35)))}
-                onChange={(e) => w.proposalText(p.id, e.target.value)}
-              />
-              <p>{p.explanation}</p>
-              {p.qualityNote && (
-                <p className="quality-note" data-testid="quality-note">
-                  {p.qualityNote}
-                </p>
-              )}
-              <QuickSave w={w} text={p.text} origin="candidate" />
-              {isLexicalRun && (
-                <CandidatePreview w={w} text={p.text} open={i === 0} />
-              )}
-              {w.proposalStates[p.id] ? (
-                <div className="success">{w.proposalStates[p.id]}</div>
-              ) : (
-                <div className="proposal-actions">
+          {response.proposals.map((p, i) => {
+            const containsKnownId = sectionMentions(w.doc, p.text).some(
+              (part) => part.sectionId,
+            );
+            return (
+              <article className="proposal" key={p.id} data-testid="proposal">
+                <div className="row between">
+                  <span className="eyebrow">
+                    {String(i + 1).padStart(2, "0")} /{" "}
+                    <ReferencedText
+                      w={w}
+                      text={p.label}
+                      onJumpSection={onJumpSection}
+                    />
+                  </span>
                   <Button
-                    className="primary"
-                    data-testid="accept-proposal"
-                    disabled={responseTarget?.scope === "document"}
-                    onClick={() => w.decide(p.id, "accepted")}
+                    className="icon"
+                    aria-label={
+                      (isLexicalRun ? "Copy candidate " : "Copy proposal ") +
+                      (i + 1)
+                    }
+                    onClick={() => w.copy(displayText(p.text))}
                   >
-                    <Check size={13} />
-                    {isLexicalRun ? "Replace" : "Accept"}
-                  </Button>
-                  <Button
-                    data-testid="save-variant"
-                    onClick={() => w.decide(p.id, "saved")}
-                    title="Save as variant"
-                  >
-                    <Bookmark size={13} />
-                    Save
-                  </Button>
-                  <Button
-                    data-testid="reject-proposal"
-                    onClick={() => w.decide(p.id, "rejected")}
-                    title="Reject"
-                  >
-                    <X size={13} />
+                    <Copy size={14} />
                   </Button>
                 </div>
-              )}
-            </article>
-          ))}
+                <span className="eyebrow">Proposed</span>
+                <textarea
+                  aria-label={"Edit proposal " + (i + 1)}
+                  value={containsKnownId ? displayText(p.text) : p.text}
+                  rows={Math.min(9, Math.max(3, Math.ceil(p.text.length / 35)))}
+                  onChange={(e) => w.proposalText(p.id, e.target.value)}
+                />
+                <p>
+                  <ReferencedText
+                    w={w}
+                    text={p.explanation}
+                    onJumpSection={onJumpSection}
+                  />
+                </p>
+                {p.qualityNote && (
+                  <p className="quality-note" data-testid="quality-note">
+                    <ReferencedText
+                      w={w}
+                      text={p.qualityNote}
+                      onJumpSection={onJumpSection}
+                    />
+                  </p>
+                )}
+                {containsKnownId && (
+                  <p className="quality-note">
+                    Replace the internal reference with your own wording before
+                    accepting.
+                  </p>
+                )}
+                {!containsKnownId && (
+                  <QuickSave w={w} text={p.text} origin="candidate" />
+                )}
+                {isLexicalRun && !containsKnownId && (
+                  <CandidatePreview w={w} text={p.text} open={i === 0} />
+                )}
+                {w.proposalStates[p.id] ? (
+                  <div className="success">{w.proposalStates[p.id]}</div>
+                ) : (
+                  <div className="proposal-actions">
+                    <Button
+                      className="primary"
+                      data-testid="accept-proposal"
+                      disabled={
+                        responseTarget?.scope === "document" || containsKnownId
+                      }
+                      onClick={() => w.decide(p.id, "accepted")}
+                    >
+                      <Check size={13} />
+                      {isLexicalRun ? "Replace" : "Accept"}
+                    </Button>
+                    <Button
+                      data-testid="save-variant"
+                      disabled={containsKnownId}
+                      onClick={() => w.decide(p.id, "saved")}
+                      title="Save as variant"
+                    >
+                      <Bookmark size={13} />
+                      Save
+                    </Button>
+                    <Button
+                      data-testid="reject-proposal"
+                      onClick={() => w.decide(p.id, "rejected")}
+                      title="Reject"
+                    >
+                      <X size={13} />
+                    </Button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
         </section>
       )}
       {(hasTarget || isWholeAnalysis) && (

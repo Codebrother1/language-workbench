@@ -60,6 +60,7 @@ import { Button, Select, Field, Dialog, GrowingTextarea, download } from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
+import { customSectionLabel } from "./workspace-helpers";
 
 function draftPositionLabel(section: WritingSection, index: number): string {
   const opening = sectionText(section).replace(/\s+/g, " ").trim();
@@ -69,6 +70,62 @@ function draftPositionLabel(section: WritingSection, index: number): string {
       : opening || section.label;
   const short = name.length > 52 ? name.slice(0, 49).trimEnd() + "…" : name;
   return `Before ${index + 1}. “${short}” · ${section.kind}`;
+}
+
+function ShortLabelEditor({
+  section,
+  number,
+  onSave,
+}: {
+  section: WritingSection;
+  number: number;
+  onSave: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const cancelled = useRef(false);
+  const finish = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
+    onSave(value.trim() || section.kind);
+    setEditing(false);
+  };
+  return editing ? (
+    <input
+      className="short-label-input"
+      aria-label={`Short label for section ${number}`}
+      placeholder="Short label (optional)"
+      value={value}
+      maxLength={80}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={finish}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          cancelled.current = true;
+          setEditing(false);
+        }
+      }}
+      autoFocus
+    />
+  ) : (
+    <Button
+      className="short-label-action"
+      aria-label={`${customSectionLabel(section) ? "Rename" : "Name"} section ${number}`}
+      onClick={() => {
+        cancelled.current = false;
+        setValue(customSectionLabel(section) ?? "");
+        setEditing(true);
+      }}
+    >
+      {customSectionLabel(section) ? "Rename" : "Name"}
+    </Button>
+  );
 }
 
 function ParkedGroupHeading({
@@ -497,8 +554,27 @@ function Structure({
                   <span className="section-number">
                     {String(i + 1).padStart(2, "0")}
                   </span>
-                  <span>{s.label}</span>
+                  <span
+                    title={
+                      customSectionLabel(s) ??
+                      sectionText(s).replace(/\s+/g, " ")
+                    }
+                  >
+                    {customSectionLabel(s) ??
+                      (w.layout.primaryView === "workbench" &&
+                      w.layout.density === "overview"
+                        ? sectionText(s).replace(/\s+/g, " ").slice(0, 58) ||
+                          s.kind
+                        : s.kind)}
+                  </span>
                 </button>
+                {w.layout.primaryView === "workbench" && (
+                  <ShortLabelEditor
+                    section={s}
+                    number={i + 1}
+                    onSave={(label) => w.patchSection(s.id, { label })}
+                  />
+                )}
               </div>
               {w.layout.primaryView === "workbench" && (
                 <>
@@ -626,9 +702,12 @@ function Structure({
                       </div>
                     </div>
                   ) : (
-                    <div className="section-excerpt">
-                      {sectionText(s) || "No prose yet."}
-                    </div>
+                    (w.layout.density !== "overview" ||
+                      customSectionLabel(s)) && (
+                      <div className="section-excerpt">
+                        {sectionText(s) || "No prose yet."}
+                      </div>
+                    )
                   )}
                   {s.modelOverride && (
                     <small className="card-model">
@@ -1152,6 +1231,7 @@ export default function App() {
     boolean | null
   >(null);
   const [compareSection, setCompareSection] = useState<string | null>(null);
+  const [pendingJump, setPendingJump] = useState<string | null>(null);
   const [openWork, setOpenWork] = useState<{
     sectionId: string;
     kind: SavedWorkKind;
@@ -1188,6 +1268,36 @@ export default function App() {
     setPreviewFocused(false);
     void w.applyLayoutPreset(name);
   };
+  const jumpToSection = (id: string) => {
+    const section = w.doc.sections.find((item) => item.id === id);
+    if (!section) return;
+    if (section.parkedGroupId)
+      w.setParkedGroupCollapsed(section.parkedGroupId, false);
+    if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
+    if (w.layout.primaryView !== "workbench")
+      void w.setPrimaryView("workbench");
+    setPreviewFocused(false);
+    w.focusSection(id);
+    setPendingJump(id);
+  };
+  useLayoutEffect(() => {
+    if (!pendingJump || !workbenchShown || w.layout.primaryView !== "workbench")
+      return;
+    const card = Array.from(
+      document.querySelectorAll<HTMLElement>(".structure-item"),
+    ).find((element) => element.dataset.sectionId === pendingJump);
+    const pane = card?.closest<HTMLElement>(".structure");
+    if (!card || !pane || getComputedStyle(card).display === "none") return;
+    pane.scrollTop +=
+      card.getBoundingClientRect().top - pane.getBoundingClientRect().top - 75;
+    setPendingJump(null);
+  }, [
+    pendingJump,
+    workbenchShown,
+    w.layout.primaryView,
+    w.doc.parkedGroups,
+    w.doc.sections,
+  ]);
   const activeEditorCard =
     workbenchShown &&
     w.layout.primaryView === "workbench" &&
@@ -1746,6 +1856,7 @@ export default function App() {
             w={w}
             navigation={navigation}
             onCompare={() => setCompareSection(w.selectedSectionId)}
+            onJumpSection={jumpToSection}
             openWork={openWork}
           />
         </div>

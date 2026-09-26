@@ -13,6 +13,7 @@ import {
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Dialog, Button, Field, Select, safeURL } from "./ui";
+import { sectionMentions } from "./workspace-helpers";
 const words = (value: string) =>
   value
     .split(",")
@@ -431,6 +432,10 @@ function Radar({ w }: { w: Workspace }) {
   );
 }
 function History({ w }: { w: Workspace }) {
+  const display = (text: string) =>
+    sectionMentions(w.doc, text)
+      .map((part) => part.text)
+      .join("");
   return (
     <>
       <p className="panel-intro">
@@ -457,11 +462,11 @@ function History({ w }: { w: Workspace }) {
             <summary>Original target & direction</summary>
             <blockquote>{h.target.text}</blockquote>
             <p>{h.instruction}</p>
-            <p>{h.coachQuestion}</p>
+            <p>{display(h.coachQuestion)}</p>
             <p>{h.userAnswer}</p>
           </details>
-          <p className="preserve">{h.proposal}</p>
-          <Button onClick={() => w.copy(h.proposal)}>
+          <p className="preserve">{display(h.proposal)}</p>
+          <Button onClick={() => w.copy(display(h.proposal))}>
             <Copy size={13} />
             Copy proposal
           </Button>

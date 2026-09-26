@@ -715,6 +715,15 @@ describe("source quote and excluded-language protections", () => {
       ).rejects.toThrow("forbidden phrase");
     },
   );
+  it("rejects a known internal section ID in proposed prose without rewriting unrelated UUIDs", async () => {
+    const ai = request();
+    const known = ai.readContext.document.sections[0].id;
+    await expect(
+      harness(wire(output(`Replace ${known} with prose.`))).provider.run(ai),
+    ).rejects.toThrow("internal section reference");
+    const unknown = "00000000-0000-4000-8000-000000000000";
+    expect(proposalViolation(ai, `Unrecognized ${unknown}.`)).toBeUndefined();
+  });
   it("blocks StyleDNA neverSuggest terms", async () => {
     const ai = request();
     ai.readContext.styleDNA.neverSuggest = ["synergy"];

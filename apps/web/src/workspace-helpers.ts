@@ -3,6 +3,7 @@ import {
   structuralMechanisms,
   uid,
   type Document,
+  type WritingSection,
   type EditTarget,
   type SectionWorkbench,
   type WorkbenchRun,
@@ -14,6 +15,53 @@ import {
 } from "./domain";
 
 import { patchTargetDraft } from "./target-drafts";
+
+export function customSectionLabel(section: WritingSection): string | null {
+  const label = section.label.trim();
+  return label && label !== section.kind ? label : null;
+}
+export function sectionReference(doc: Document, id: string): string | null {
+  const index = doc.sections.findIndex((section) => section.id === id);
+  if (index < 0) return null;
+  const section = doc.sections[index];
+  return (
+    customSectionLabel(section) ??
+    (section.kind === "Freeform"
+      ? `Section ${index + 1}`
+      : `${section.kind} · Section ${index + 1}`)
+  );
+}
+export function sectionMentions(
+  doc: Document,
+  text: string,
+): { text: string; sectionId?: string }[] {
+  const pattern =
+    /\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b|\bSections?\s+\d+(?:\s*(?:,|and|&|\/)\s*\d+)*/gi;
+  const parts: { text: string; sectionId?: string }[] = [];
+  let offset = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > offset)
+      parts.push({ text: text.slice(offset, match.index) });
+    const ids = /^sections?\b/i.test(match[0])
+      ? (match[0].match(/\d+/g) ?? []).map(
+          (number) => doc.sections[Number(number) - 1]?.id,
+        )
+      : [
+          doc.sections.find(
+            (section) => section.id.toLowerCase() === match[0].toLowerCase(),
+          )?.id,
+        ];
+    if (ids.length && ids.every((id) => id && sectionReference(doc, id)))
+      ids.forEach((id, index) => {
+        if (index) parts.push({ text: " and " });
+        parts.push({ text: sectionReference(doc, id!)!, sectionId: id });
+      });
+    else parts.push({ text: match[0] });
+    offset = match.index + match[0].length;
+  }
+  if (offset < text.length) parts.push({ text: text.slice(offset) });
+  return parts.length ? parts : [{ text }];
+}
 
 export function getWorkbench(
   doc: Document,

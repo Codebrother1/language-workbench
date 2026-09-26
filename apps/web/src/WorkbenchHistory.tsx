@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Workspace } from "./useWorkspace";
 import { Button } from "./ui";
 import { modelLabel } from "./ModelControls";
+import { sectionMentions } from "./workspace-helpers";
 export function WorkbenchHistory({
   w,
   open = false,
@@ -10,6 +11,10 @@ export function WorkbenchHistory({
   open?: boolean;
 }) {
   const recent = [...w.localHistory].reverse();
+  const display = (text: string) =>
+    sectionMentions(w.doc, text)
+      .map((part) => part.text)
+      .join("");
   const detailsRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     if (open && detailsRef.current) detailsRef.current.open = true;
@@ -41,7 +46,8 @@ export function WorkbenchHistory({
           </div>
           <p className="small">{modelLabel(w.catalog, run.model)}</p>
           <p>
-            {run.instruction || run.response.question || run.response.diagnosis}
+            {run.instruction ||
+              display(run.response.question || run.response.diagnosis)}
           </p>
           <span className="small muted">
             {run.response.proposals.length} candidates · {run.target.scope}
@@ -63,9 +69,9 @@ export function WorkbenchHistory({
                   <b>{modelLabel(w.catalog, run.model)}</b>
                   {run.response.proposals.map((p) => (
                     <div key={p.id}>
-                      <p>{p.text}</p>
-                      <p className="small muted">{p.explanation}</p>
-                      <Button onClick={() => w.copy(p.text)}>
+                      <p>{display(p.text)}</p>
+                      <p className="small muted">{display(p.explanation)}</p>
+                      <Button onClick={() => w.copy(display(p.text))}>
                         Copy candidate
                       </Button>
                     </div>
