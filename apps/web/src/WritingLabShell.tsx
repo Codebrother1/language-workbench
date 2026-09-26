@@ -149,8 +149,11 @@ export function WritingLabShell({
   );
   const isLexicalRun =
     w.activeRun?.action === "words" && Boolean(w.activeRun?.lens);
+  const deliveryActive = w.isDeliveryTarget && w.lens.view === "delivery";
+  const isDeliveryRun = isLexicalRun && w.activeRun?.lens?.view === "delivery";
   const phraseExploration =
     isLexicalRun &&
+    !isDeliveryRun &&
     w.activeRun?.lens?.mode === "explore" &&
     responseTarget?.scope === "selection";
   const displayText = (text: string) =>
@@ -455,11 +458,13 @@ export function WritingLabShell({
           {isWholeAnalysis
             ? "Whole-piece analysis"
             : hasTarget
-              ? w.isLensTarget
-                ? target?.scope === "word"
-                  ? "Word intelligence · Lens"
-                  : "Phrase Lens"
-                : lab.title
+              ? deliveryActive
+                ? "Delivery Lens"
+                : w.isLensTarget
+                  ? target?.scope === "word"
+                    ? "Word intelligence · Lens"
+                    : "Phrase Lens"
+                  : lab.title
               : "Your words, first"}
         </h2>
         <p>
@@ -541,7 +546,36 @@ export function WritingLabShell({
               )}
             </div>
           </div>
-          {w.isLensTarget ? (
+          {w.isDeliveryTarget && (
+            <div
+              className="segmented lens-view"
+              role="group"
+              aria-label="Lens view"
+            >
+              <Button
+                aria-pressed={!deliveryActive}
+                disabled={!w.isLensTarget}
+                onClick={() =>
+                  w.setLens((lens) => ({ ...lens, view: "lexical" }))
+                }
+              >
+                Words/Phrases
+              </Button>
+              <Button
+                aria-pressed={deliveryActive}
+                onClick={() =>
+                  w.setLens((lens) => ({
+                    ...lens,
+                    view: "delivery",
+                    mode: "explore",
+                  }))
+                }
+              >
+                Delivery
+              </Button>
+            </div>
+          )}
+          {deliveryActive || w.isLensTarget ? (
             <WordLensControls w={w} />
           ) : (
             <>
@@ -826,47 +860,93 @@ export function WritingLabShell({
                 )}
             </div>
           )}
-          <p className="diagnosis">
-            <ReferencedText
-              w={w}
-              text={response.diagnosis.slice(0, diagnosisSplit)}
-              onJumpSection={onJumpSection}
-            />
-          </p>
-          {phraseExploration &&
-          (diagnosisSplit < response.diagnosis.length || response.mechanism) ? (
-            <details className="lens-more-analysis">
-              <summary>More analysis</summary>
-              {diagnosisSplit < response.diagnosis.length && (
-                <p>
-                  <ReferencedText
-                    w={w}
-                    text={response.diagnosis.slice(diagnosisSplit).trim()}
-                    onJumpSection={onJumpSection}
-                  />
-                </p>
-              )}
+          {isDeliveryRun && (
+            <div className="delivery-result" data-testid="delivery-result">
+              <b>Delivery · Effect</b>
+              <p>
+                <ReferencedText
+                  w={w}
+                  text={response.diagnosis}
+                  onJumpSection={onJumpSection}
+                />
+              </p>
               {response.mechanism && (
-                <p>
+                <>
+                  <b>Why it reads that way</b>
+                  <p>
+                    <ReferencedText
+                      w={w}
+                      text={response.mechanism}
+                      onJumpSection={onJumpSection}
+                    />
+                  </p>
+                </>
+              )}
+              {response.findings.slice(0, 2).map((finding, index) => (
+                <div key={index}>
+                  <b>{displayText(finding.title)}</b>
+                  <p>
+                    <ReferencedText
+                      w={w}
+                      text={finding.detail}
+                      onJumpSection={onJumpSection}
+                    />
+                  </p>
+                </div>
+              ))}
+              {response.question && (
+                <>
+                  <b>Question</b>
+                  <p>{displayText(response.question)}</p>
+                </>
+              )}
+            </div>
+          )}
+          {!isDeliveryRun && (
+            <p className="diagnosis">
+              <ReferencedText
+                w={w}
+                text={response.diagnosis.slice(0, diagnosisSplit)}
+                onJumpSection={onJumpSection}
+              />
+            </p>
+          )}
+          {!isDeliveryRun &&
+            (phraseExploration &&
+            (diagnosisSplit < response.diagnosis.length ||
+              response.mechanism) ? (
+              <details className="lens-more-analysis">
+                <summary>More analysis</summary>
+                {diagnosisSplit < response.diagnosis.length && (
+                  <p>
+                    <ReferencedText
+                      w={w}
+                      text={response.diagnosis.slice(diagnosisSplit).trim()}
+                      onJumpSection={onJumpSection}
+                    />
+                  </p>
+                )}
+                {response.mechanism && (
+                  <p>
+                    <ReferencedText
+                      w={w}
+                      text={response.mechanism}
+                      onJumpSection={onJumpSection}
+                    />
+                  </p>
+                )}
+              </details>
+            ) : (
+              response.mechanism && (
+                <p className="small">
                   <ReferencedText
                     w={w}
                     text={response.mechanism}
                     onJumpSection={onJumpSection}
                   />
                 </p>
-              )}
-            </details>
-          ) : (
-            response.mechanism && (
-              <p className="small">
-                <ReferencedText
-                  w={w}
-                  text={response.mechanism}
-                  onJumpSection={onJumpSection}
-                />
-              </p>
-            )
-          )}
+              )
+            ))}
           {responseTarget?.scope === "document" && response.question && (
             <div className="revision-question" data-testid="revision-question">
               <b>Revision question</b>
@@ -909,8 +989,8 @@ export function WritingLabShell({
               </ul>
             </div>
           )}
-          {localFindings.map(renderFinding)}
-          {relatedFindings.length > 0 && (
+          {!isDeliveryRun && localFindings.map(renderFinding)}
+          {!isDeliveryRun && relatedFindings.length > 0 && (
             <details className="related-draft-uses">
               <summary>
                 Related uses elsewhere in draft ({relatedCount})
@@ -918,7 +998,8 @@ export function WritingLabShell({
               {relatedFindings.map(renderFinding)}
             </details>
           )}
-          {(!isLexicalRun || w.activeRun?.lens?.mode === "explore") &&
+          {!isDeliveryRun &&
+            (!isLexicalRun || w.activeRun?.lens?.mode === "explore") &&
             response.lexical.map((word, i) => (
               <article className="finding" key={i}>
                 <div className="row between">

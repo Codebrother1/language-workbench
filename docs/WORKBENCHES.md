@@ -91,6 +91,12 @@ The lens displays the surrounding sentence with the narrow target bracketed. The
 
 The sentence preview is built by an isolated pure function: unchanged prefix + candidate + unchanged suffix. It has no editor/persistence side effects. A preview is a display of what the local substitution would look like, not proof of grammar, meaning or factual fidelity.
 
+### Delivery view
+
+The **Delivery** toggle uses this same Lens and `words` task routing for a selected mark, phrase, sentence, or short passage (up to 60 words, 400 characters and four lines). It is not an auto-correction mode. **Explore delivery** quotes the local wording, then separates its possible effect, the reason it can read that way, and one relevant writer question. Periods, pauses, case, spacing, fragments and even missing punctuation may be intentional. If the writer asks "what if?", an optional compact contrast may vary punctuation or case while keeping lexical words in order; contrasts are observations, never replacement proposals. The server rejects generated proposals and dictionary substitutions in this view, and omits labeled contrasts that change lexical words. Neither a Lens result nor a contrast edits `Document.sections`.
+
+Offline Delivery offers a limited descriptive reading of visible marks, not fresh model-quality interpretation. A configured live model receives the same local target, neighbor context and Style DNA as other Lens requests, with instructions to avoid grammar-police certainty and invented emotional intent. Delivery does not change default or task routing, and no live-model call is made automatically.
+
 ### Direct the lexical request
 
 Use **Lexical direction** for natural instructions—typed or inserted through your operating system's dictation tool. For example: “Keep the disrespect, lose the internet slang; this is for an older audience.” The app does not record audio or implement a speech recognizer; actual Wispr overlay compatibility needs the desktop checklist in [WISPR-QA.md](WISPR-QA.md).

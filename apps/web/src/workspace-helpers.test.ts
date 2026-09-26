@@ -17,6 +17,7 @@ import {
   inspectRun,
   forkWorkbench,
   isLensTarget,
+  isDeliveryTarget,
   sectionReference,
   sectionMentions,
   runDraftState,
@@ -312,5 +313,28 @@ describe("canonical section workbenches", () => {
     ).toBe(false);
     expect(isLensTarget({ ...sentence, scope: "word" }, true)).toBe(true);
     expect(isLensTarget(null, true)).toBe(false);
+  });
+  it("admits punctuation, full sentences and short line breaks for Delivery without broadening lexical replacement", () => {
+    const { capture } = fixture();
+    const sentence = {
+      ...capture.target,
+      scope: "selection" as const,
+      text: "Dre, please.",
+    };
+    expect(isLensTarget(sentence, true)).toBe(false);
+    expect(isDeliveryTarget(sentence)).toBe(true);
+    expect(isDeliveryTarget({ ...sentence, scope: "word", text: "." })).toBe(
+      true,
+    );
+    expect(
+      isDeliveryTarget({ ...sentence, text: "one line\nsecond line" }),
+    ).toBe(true);
+    expect(isDeliveryTarget({ ...sentence, text: "word ".repeat(61) })).toBe(
+      false,
+    );
+    expect(isDeliveryTarget({ ...sentence, text: "a\nb\nc\nd\ne" })).toBe(
+      false,
+    );
+    expect(isDeliveryTarget(null)).toBe(false);
   });
 });

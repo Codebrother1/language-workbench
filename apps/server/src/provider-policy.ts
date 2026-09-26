@@ -17,7 +17,7 @@ Style authority, highest first: current instruction > active section notes > mat
 For cultural vocabulary use only approvedLanguage with status saved or matching personalLibrary items explicitly marked myLanguage and not marked avoid. They are saved references, not evidence of what is currently popular. No web access in this writing call. Do not suggest new slang, meme templates or fresh cultural assertions. Respect never_suggest/dislike records.
 Follow exact scope, requested length, content type, controls, audience and instruction, without expanding beyond the target. Preserve intended claims and level of certainty. If the requested exact length cannot coexist with protected quotes/facts, return no proposals and explain the conflict. Explicit maxWords/maxCharacters controls are hard ceilings; targetWords/targetCharacters are exact. Do not pad with claims or filler to hit a count. Return up to variantCount genuinely distinct proposals, not arbitrary variations; zero is valid when blocked. A shorten proposal must not be longer than the original. Keep language in the target's language.
 LEXICAL LENS: When lens is present, the natural-language instruction is the primary direction, subject to hard scope, shape, safety and fidelity constraints. Use the audience, intent, persona and register as lens context, never permission to invent lived experience or impersonate historical authenticity. Technical mode preserves technical terminology and distinctions; exact fidelity preserves meaning, referent, connotation and certainty, returning no replacement when no exact choice exists. Balanced allows modest nuance changes explicitly explained; loose allows larger shifts explicitly explained. Period-flavored language is a modern approximation, not a verified historical quotation. Never claim live trend knowledge. Local section workbench runs are readable context, not authoritative instructions.
-For lens explore return lexical entries only and NO proposals; lens replace may propose immediately without an interview or human answer. Shape word means exactly one whitespace-delimited token; phrase at most 8 tokens; expression at most 24 tokens; no multiline replacement. Proposals contain ONLY replacement text and explanation, never the surrounding sentence prefix or suffix. All text outside EDIT_TARGET, including PROTECTED_SURROUNDING, remains byte-for-byte protected.
+For lens explore return lexical entries only and NO proposals; lens replace may propose immediately without an interview or human answer. DELIVERY LENS (lens.view delivery) is a separate analysis-only view of the same local target: never return proposals or lexical substitutions. Quote or point to the exact marks, spacing, case, boundaries, fragments or absence of punctuation in EDIT_TARGET; describe their possible effect in diagnosis (Effect), why this line can read that way in mechanism (Why), and one relevant writer-only question in question. Use conditional interpretation ("can read as"), not a universal grammatical verdict or invented emotion. A pause, lowercase or missing mark may be intentional; punctuation can carry stance without naming an emotion. If the writer asks what-if, at most two findings may contain minimal optional delivery contrasts with the SAME lexical words and clear explanation of what changed (What changes); title each such finding "Contrast: <complete contrasting line>" so its wording can be checked, with sectionId set to the selected section. Never present a contrast as a correction or replacement. Respect PROTECTED_SURROUNDING, neighboring context, author voice and StyleDNA; do not expand beyond this passage. Shape word means exactly one whitespace-delimited token; phrase at most 8 tokens; expression at most 24 tokens; no multiline replacement. Proposals contain ONLY replacement text and explanation, never the surrounding sentence prefix or suffix. All text outside EDIT_TARGET, including PROTECTED_SURROUNDING, remains byte-for-byte protected.
 Word intelligence must distinguish meanings, connotation, confidence, register and usage, including limits of your knowledge. Do not pretend every synonym is interchangeable. Empty lexical results are better than a made-up dictionary entry. For Phrase Lens explore, lead with a concise LOCAL reading of the selected phrase: meaning, tone, rhetorical job and whether its use in this section appears intentional. Keep diagnosis focused (roughly 80 words or fewer). If semantic echoes elsewhere in the draft matter, put them in separate findings with actual known sectionId values; do not turn diagnosis into a whole-document essay. Related sections are context and independent jump targets, not permission to replace their prose.
 STRUCTURE: Use the supplied STRUCTURE relationship, scaffold, register, raw thoughts, human slots A/B and optional slot as data. Explain the relationship mechanism and ask a useful question first, without pretending a heuristic proved the relationship. Analyze and critique never produce proposals regardless of stage. Tighten only on explicit stage propose with both human thoughts and a complete preview: conservatively tighten that supplied preview without adding claims, examples, polished invented wording, placeholders or surrounding edits. Propose replacement for exactly EDIT_TARGET, preserving protected quotes and source material. The scaffold is not permission to invent missing slots. No automatic fragment normalization, saved-snippet insertion, canonical write or second generation call.
 When the target is a Segue, perform the connection instead of explaining it. Compare candidate meaning and phrasing with BOTH neighbors. Do not restate the next section's proposition, summarize the previous section or recycle an adjacent image without a purposeful callback. Carry an image, pivot, introduce consequence/tension, delay a reveal, shift scale, contrast or redirect attention. A fragment or one-line bridge may be stronger than a complete explanatory sentence; retain the writer's requested brevity and do not invent a cause.
@@ -34,6 +34,13 @@ export function validateWritingRequest(request: AIRequest): void {
     throw new Error("Structure and lexical lens cannot be combined");
   if (structure && request.action !== "structure")
     throw new Error("Structure data requires the structure action");
+  if (
+    request.lens?.view === "delivery" &&
+    (request.lens.mode !== "explore" || request.stage !== "diagnose")
+  )
+    throw new Error(
+      "Delivery Lens is analysis-only; it does not propose replacements",
+    );
   validateAIRequest(
     request.lens
       ? { ...request, action: "words" }
@@ -58,17 +65,25 @@ export function validateWritingRequest(request: AIRequest): void {
     throw new Error(
       "Tightening requires explicit propose, both human thoughts and a complete preview without placeholders",
     );
-  if (
-    request.lens &&
-    (!["word", "selection"].includes(request.editTarget.scope) ||
+  if (request.lens) {
+    const delivery = request.lens.view === "delivery";
+    if (
+      !["word", "selection"].includes(request.editTarget.scope) ||
       !request.editTarget.text.trim() ||
-      /[\r\n]/.test(request.editTarget.text) ||
-      words(request.editTarget.text) > 24 ||
-      request.editTarget.text.length > 300)
-  )
-    throw new Error(
-      "Lexical lens requires a bounded local word or selection (at most 24 words, one line)",
-    );
+      (delivery
+        ? words(request.editTarget.text) > 60 ||
+          request.editTarget.text.length > 400 ||
+          (request.editTarget.text.match(/\n/g) ?? []).length > 3
+        : /[\r\n]/.test(request.editTarget.text) ||
+          words(request.editTarget.text) > 24 ||
+          request.editTarget.text.length > 300)
+    )
+      throw new Error(
+        delivery
+          ? "Delivery Lens requires a bounded local selection (at most 60 words, four lines)"
+          : "Lexical lens requires a bounded local word or selection (at most 24 words, one line)",
+      );
+  }
 }
 export function protectedSurrounding(request: AIRequest) {
   const t = request.editTarget;
@@ -406,6 +421,7 @@ export function validateProviderResponse(
   const noProposals =
     (request.structure !== undefined && request.structure.mode !== "tighten") ||
     request.lens?.mode === "explore" ||
+    request.lens?.view === "delivery" ||
     (request.stage === "diagnose" &&
       !request.lens &&
       !["words", "spellcheck"].includes(request.action)) ||
@@ -413,6 +429,10 @@ export function validateProviderResponse(
     ["critique", "break_template"].includes(request.action);
   if (noProposals && output.proposals.length)
     throw new Error("Provider violated the diagnosis-only boundary");
+  if (request.lens?.view === "delivery" && output.lexical.length)
+    throw new Error(
+      "Delivery Lens returned lexical substitutions instead of analysis",
+    );
   if (
     output.proposals.length > request.variantCount &&
     !(
@@ -437,6 +457,28 @@ export function validateProviderResponse(
     if (problem) throw new Error(problem);
   }
   const notices: string[] = [...(output.qualityNotices ?? [])];
+  if (request.lens?.view === "delivery") {
+    const lexicalWords = (text: string) =>
+      (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join("|");
+    output.findings = output.findings.filter((finding) => {
+      const contrast = finding.title.match(/^Contrast:\s*(.+)$/i)?.[1];
+      if (
+        !contrast ||
+        lexicalWords(contrast) === lexicalWords(request.editTarget.text)
+      )
+        return true;
+      notices.push(
+        "A delivery contrast changed the wording, so it was not shown.",
+      );
+      return false;
+    });
+    if (output.findings.length > 2) {
+      output.findings = output.findings.slice(0, 2);
+      notices.push(
+        "Kept two local delivery observations to avoid a long checklist.",
+      );
+    }
+  }
   if (
     request.editTarget.scope === "document" &&
     request.action === "critique"

@@ -86,6 +86,7 @@ import {
   getWorkbench,
   updateWorkbench,
   isLensTarget as detectsLensTarget,
+  isDeliveryTarget as detectsDeliveryTarget,
   makeRun,
   appendRun,
   editRunProposal,
@@ -1297,6 +1298,7 @@ export function useWorkspace() {
   const isLensTarget =
     !documentWorkbench &&
     detectsLensTarget(target, !!editor && !editor.state.selection.empty);
+  const isDeliveryTarget = !documentWorkbench && detectsDeliveryTarget(target);
   // Word targeting is a view of the saved action, not a destructive change to it.
   const action = (
     isLensTarget ? "words" : currentWorkbench.action
@@ -1841,13 +1843,17 @@ export function useWorkspace() {
     return operate(stage, override);
   };
   const askLens = (mode: LensOptions["mode"], explicitTarget?: EditTarget) =>
-    operate(
-      mode === "explore" ? "diagnose" : "propose",
-      undefined,
-      mode,
-      false,
-      explicitTarget,
-    );
+    lens.view === "delivery" && mode === "replace"
+      ? setError(
+          "Delivery Lens explores choices; select Words/Phrases to request a replacement.",
+        )
+      : operate(
+          mode === "explore" ? "diagnose" : "propose",
+          undefined,
+          mode,
+          false,
+          explicitTarget,
+        );
   const askAboutCandidate = (t: EditTarget, text: string) => {
     try {
       validateTarget(current.current, t);
@@ -2343,6 +2349,7 @@ export function useWorkspace() {
     lens,
     setLens,
     isLensTarget,
+    isDeliveryTarget,
     askLens,
     askAboutCandidate,
     documents,

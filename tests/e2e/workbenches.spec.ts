@@ -623,6 +623,50 @@ test("Word Lens dark mode stays readable and canonical preview remains distinct 
   expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
 });
 
+test("Delivery Lens explains exact punctuation without changing canonical sections", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument("Delivery lines", "Dre, please.");
+  doc.sections.push(
+    newSection(
+      "Freeform",
+      "I knew it was fake — and that was almost the point.",
+    ),
+  );
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  await open(page);
+  await select(page, "Dre, please.");
+  await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Delivery Lens" }),
+  ).toBeVisible();
+  await page.getByLabel("Delivery question").fill("What if this ended louder?");
+  await page.getByRole("button", { name: "Explore delivery" }).click();
+  await expect(page.getByTestId("delivery-result")).toContainText(
+    /deadpan|final/i,
+  );
+  await expect(page.getByTestId("delivery-result")).toContainText(
+    "Dre, please!",
+  );
+  await expect(page.getByTestId("proposal")).toHaveCount(0);
+  await select(page, "I knew it was fake — and that was almost the point.");
+  await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await page.getByRole("button", { name: "Explore delivery" }).click();
+  await expect(page.getByTestId("delivery-result")).toContainText(
+    /pivot|turn/i,
+  );
+  await save(page);
+  expect(documentText(await stored(request, imported.id))).toBe(
+    documentText(imported),
+  );
+});
+
 test("shared-piece quality notes and a requested revision question remain review-only", async ({
   page,
   request,

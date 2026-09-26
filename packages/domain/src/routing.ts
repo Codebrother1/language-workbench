@@ -73,6 +73,7 @@ export const providerCatalogSchema = z.object({
 });
 export type ProviderCatalog = z.infer<typeof providerCatalogSchema>;
 export const lensOptionsSchema = z.object({
+  view: z.enum(["lexical", "delivery"]).default("lexical"),
   mode: z.enum(["explore", "replace"]).default("explore"),
   fidelity: z.enum(["exact", "balanced", "loose"]).default("balanced"),
   shape: z.enum(["word", "phrase", "expression"]).default("word"),

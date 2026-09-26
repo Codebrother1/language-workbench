@@ -263,6 +263,158 @@ describe("honest offline lexical entries", () => {
   });
 });
 
+describe("Delivery Lens as interpretation, not correction", () => {
+  const delivery = (
+    text: string,
+    instruction = "Explain what the delivery does.",
+  ) => {
+    const input = fixture(text, text);
+    input.editTarget.scope = "selection";
+    input.lens = {
+      ...input.lens!,
+      view: "delivery",
+      mode: "explore",
+      shape: "expression",
+    };
+    input.stage = "diagnose";
+    input.instruction = instruction;
+    return input;
+  };
+  it.each([
+    ["Dre, please.", /deadpan|final/i],
+    ["Dre, please!", /intensity|volume/i],
+    ["I knew it was fake... but still.", /hesitat|withhold/i],
+    ["I knew it was fake; I wore it anyway.", /compos|relation/i],
+    ["I knew it was fake — and that was almost the point.", /pivot|turn/i],
+    ["this is ridiculous", /lowercase|casual/i],
+    ["THIS IS RIDICULOUS", /emphasis|volume/i],
+    ["The Receipt Problem", /label|category|slogan/i],
+    [
+      "he looked at the shoe looked at me looked back at the shoe",
+      /speed|flow/i,
+    ],
+    ["He lost the receipt. Again.", /again|timing|attitude/i],
+    ["Wait, now", /comma|breath/i],
+    ["The problem: the receipt.", /colon|setup/i],
+    ["(of course) he did", /parentheses|aside/i],
+    ["Why?", /question mark|invitation/i],
+    ["iPhone?!", /mixed casing|stylized/i],
+  ])(
+    "interprets %s without calling its delivery wrong",
+    async (text, effect) => {
+      const request = delivery(text);
+      const before = structuredClone(request.readContext.document);
+      const result = await new MockProvider().run(request);
+      expect([result.diagnosis, result.mechanism].join(" ")).toMatch(effect);
+      expect([result.diagnosis, result.mechanism].join(" ")).not.toMatch(
+        /incorrect|you should fix|grammar error/i,
+      );
+      expect(result.proposals).toEqual([]);
+      expect(result.lexical).toEqual([]);
+      expect(request.readContext.document).toEqual(before);
+    },
+  );
+  it("asks about timing rather than declaring an emotion, and about casing rather than correcting it", async () => {
+    const timing = await new MockProvider().run(
+      delivery("He lost the receipt. Again."),
+    );
+    expect(timing.question).toContain("words, the timing, or both");
+    const casing = await new MockProvider().run(
+      delivery("The Receipt Problem"),
+    );
+    expect(casing.question).toContain("casing a label");
+  });
+  it("uses at most one optional punctuation-only contrast and keeps the original prose", async () => {
+    const request = delivery("Dre, please.", "What if this ended louder?");
+    const result = await new MockProvider().run(request);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].title).toContain("Dre, please!");
+    expect(result.findings[0].title.match(/[\p{L}\p{N}]+/gu)).toEqual([
+      "Contrast",
+      "Dre",
+      "please",
+    ]);
+    expect(result.proposals).toEqual([]);
+    const dash = await new MockProvider().run(
+      delivery(
+        "I knew it was fake — and that was almost the point.",
+        "What if the pause were lighter?",
+      ),
+    );
+    expect(dash.findings[0].title).toContain("fake, and");
+    expect(dash.findings[0].title).not.toContain("fake ,");
+    const ellipsis = await new MockProvider().run(
+      delivery(
+        "I knew it was fake... but still.",
+        "What if the pause were a turn?",
+      ),
+    );
+    expect(ellipsis.findings[0].title).toContain("fake — but");
+    expect(request.readContext.document.sections[0].content).toEqual(
+      newDocument("draft", "Dre, please.").sections[0].content,
+    );
+  });
+  it("filters a model contrast that changes the words and keeps the analysis", async () => {
+    const request = delivery("Dre, please.", "What if this ended louder?");
+    const raw = {
+      ...response(),
+      diagnosis: "The period in Dre, please. can read as deadpan closure.",
+      mechanism: "The stop makes the request feel final.",
+      question: "Does that finality fit?",
+      findings: [
+        {
+          sectionId: request.editTarget.sectionId,
+          title: "Contrast: Dre, go away!",
+          detail: "Louder.",
+          severity: "note",
+        },
+      ],
+    };
+    const h = harness(raw);
+    const result = await h.provider.run(request);
+    expect(h.payloads[0].input[0].content).toContain("DELIVERY LENS");
+    expect(JSON.parse(h.payloads[0].input[1].content).lens.view).toBe(
+      "delivery",
+    );
+    expect(result.diagnosis).toContain("deadpan closure");
+    expect(result.findings).toEqual([]);
+    expect(result.qualityNotices?.join(" ")).toContain("changed the wording");
+    expect(result.proposals).toEqual([]);
+  });
+  it("rejects delivery proposals and requires a bounded local analysis target", () => {
+    const request = delivery("Dre, please.");
+    expect(() =>
+      validateProviderResponse(request, response("Dre, please!"), "openai"),
+    ).toThrow(/diagnosis-only/);
+    expect(() =>
+      validateProviderResponse(
+        request,
+        {
+          ...response(),
+          lexical: [
+            {
+              term: "different",
+              meaning: "a word",
+              nuance: "new",
+              register: "plain",
+              example: "different",
+            },
+          ],
+        },
+        "openai",
+      ),
+    ).toThrow(/lexical substitutions/);
+    request.editTarget = documentTarget(request.readContext.document);
+    expect(() => validateWritingRequest(request)).toThrow(
+      /bounded local|Document scope/,
+    );
+    const replacement = delivery("Dre, please.");
+    replacement.stage = "propose";
+    replacement.lens!.mode = "replace";
+    expect(() => validateWritingRequest(replacement)).toThrow(/analysis-only/);
+  });
+});
+
 describe("official OpenAI SDK lexical contract", () => {
   it("sends lens, technical/exact/persona instructions, surrounding boundaries and local workbench read-context while leaving structured output unchanged", async () => {
     const input = fixture();

@@ -311,6 +311,150 @@ function offlineEdit(
   return undefined;
 }
 
+function offlineDelivery(request: AIRequest, output: AIResponse): AIResponse {
+  const line = request.editTarget.text.trim();
+  const effects: string[] = [];
+  let question = "Is this delivery intentional in this line?";
+  if (/\.\.\.|…/.test(line)) {
+    effects.push(
+      "The ellipsis can read as hesitation or withholding rather than a settled stop.",
+    );
+    question = "Does this pause imply hesitation you want?";
+  } else if (/—/.test(line)) {
+    effects.push("The em dash makes a visible pivot or pressure shift here.");
+    question = "Is that dash a useful turn or added drama?";
+  } else if (/;/.test(line)) {
+    effects.push(
+      "The semicolon holds two thoughts in a controlled relation; the speaker can sound more composed.",
+    );
+    question = "Does holding these thoughts together match the intended voice?";
+  } else if (/:/.test(line)) {
+    effects.push(
+      "The colon can set up an explanation or reveal, asking the reader to expect what follows.",
+    );
+    question = "Is this setup meant to promise a reveal?";
+  } else if (/!/.test(line)) {
+    effects.push(
+      "The exclamation raises volume and intensity; it can read as excitement, disbelief or scolding here.",
+    );
+    question = "How loud should this line land?";
+  } else if (/\?/.test(line)) {
+    effects.push(
+      "The question mark can invite an answer or add rhetorical pressure and disbelief.",
+    );
+    question =
+      "Is this an invitation, a challenge, or a question only in form?";
+  } else if (/\.$/.test(line)) {
+    effects.push(
+      "The period gives this line closure; a short ending can read as final or deadpan rather than louder.",
+    );
+    question = "Would ending harder sharpen the timing or overstate it?";
+  } else if (/[,()]/.test(line)) {
+    effects.push(
+      /[()]/.test(line)
+        ? "The parentheses make an aside or secondary voice audible."
+        : "The comma makes a lighter breath and keeps the thought moving.",
+    );
+    question = "Is this breath or aside part of the voice?";
+  } else {
+    effects.push(
+      "Without punctuation, the words can run together with speed or spoken flow; the absence may be intentional.",
+    );
+    question = "Would adding a pause change the speed, flatness or joke?";
+  }
+  const letters = line.replace(/[^\p{L}]/gu, "");
+  if (letters.length > 2 && letters === letters.toUpperCase()) {
+    effects.push(
+      "ALL CAPS adds visible emphasis or volume; it can sound mock-serious rather than neutral.",
+    );
+    if (!/[.!?;:—…]/.test(line))
+      question = "Is the casing part of the voice or added visual volume?";
+  } else if (/\b[a-z]+[A-Z][a-zA-Z]*\b/.test(line))
+    effects.push(
+      "Mixed casing may be a stylized voice or emphasis, not a typo by default.",
+    );
+  else if (/^[a-z]/.test(line))
+    effects.push(
+      "The lowercase opening can feel casual, intimate or deliberately unpolished.",
+    );
+  else if (/^(?:[A-Z][a-z]+\s+){1,}[A-Z][a-z]+[.!?]?$/.test(line)) {
+    effects.push(
+      "Title Case can give this the energy of a label, category or slogan.",
+    );
+    question = "Is this casing a label in your voice, or just visual emphasis?";
+  }
+  if (/\.\s+Again[.!?]?$/i.test(line)) {
+    effects.push(
+      "The isolated 'Again.' creates timing and an implied attitude without naming an emotion as fact.",
+    );
+    question = "Is the attitude carried by the words, the timing, or both?";
+  }
+  if (/\n/.test(line))
+    effects.push(
+      "The line break makes a visual pause without needing a new claim.",
+    );
+  if (/ {2,}|\t/.test(line))
+    effects.push(
+      "The extra spacing can hold a beat or make the delivery feel deliberately uneven.",
+    );
+  if ((line.match(/—/g) ?? []).length >= 2)
+    effects.push(
+      "Several dashes add multiple visible turns; the wording may already supply one of those shifts.",
+    );
+  if ((line.match(/!/g) ?? []).length >= 2)
+    effects.push(
+      "Repeated exclamation increases visual pressure; consider whether the words carry it too.",
+    );
+  if ((line.match(/,/g) ?? []).length >= 3)
+    effects.push(
+      "The comma-heavy drift extends the breath; the wording may already hold the rhythm.",
+    );
+  output.diagnosis = `OFFLINE descriptive delivery reading — not an LLM. In ${JSON.stringify(line)}, ${effects.slice(0, 3).join(" ")}`;
+  const why = /\.\.\.|…/.test(line)
+    ? "The dots hold a beat before the next words arrive."
+    : /—/.test(line)
+      ? "The break makes the next phrase a more visible turn than a light comma would."
+      : /;/.test(line)
+        ? "Both thoughts keep their own shape while sharing one sentence."
+        : /:/.test(line)
+          ? "The words before the colon prepare the reader for what follows."
+          : /!/.test(line)
+            ? "The mark adds a burst of visual force after the wording has already landed."
+            : /\?/.test(line)
+              ? "The last mark leaves the response or challenge open to the reader."
+              : /\.$/.test(line)
+                ? "The stop gives the last word a clean edge without extending the beat."
+                : /,/.test(line)
+                  ? "The thought keeps moving through the comma instead of closing."
+                  : "The actions arrive without a marked breath between them.";
+  output.mechanism = `${why} This is one possible reading of the visible delivery, not a grammar verdict or a claim about the writer's feelings.`;
+  output.question = question;
+  if (/\b(what if|contrast|alternative|compare)\b/i.test(request.instruction)) {
+    const contrast = /\.\.\.|…/.test(line)
+      ? line.replace(/\s*(?:\.{3}|…)\s*/, " — ")
+      : /;/.test(line)
+        ? line.replace(";", ".")
+        : /—/.test(line)
+          ? line.replace(/\s*—\s*/, ", ")
+          : line.endsWith("!")
+            ? line.slice(0, -1) + "."
+            : line.endsWith(".")
+              ? line.slice(0, -1) + "!"
+              : null;
+    if (contrast && contrast !== line)
+      output.findings = [
+        {
+          sectionId: request.editTarget.sectionId,
+          title: `Contrast: ${contrast}`,
+          detail:
+            "Only the delivery changed. Compare its pace or volume with the original; neither version is automatically better.",
+          severity: "note",
+        },
+      ];
+  }
+  return validateProviderResponse(request, output, "mock");
+}
+
 export class MockProvider implements LLMProvider {
   constructor(
     private readonly model: "conservative" | "plain" = "conservative",
@@ -333,6 +477,8 @@ export class MockProvider implements LLMProvider {
       findings: [],
       lexical: [],
     };
+    if (request.lens?.view === "delivery")
+      return offlineDelivery(request, output);
     if (request.structure) {
       const { draft, mode, scaffold, preview } = request.structure;
       const suggestions = suggestRelationships(draft.thoughtA, draft.thoughtB);

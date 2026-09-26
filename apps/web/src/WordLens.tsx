@@ -28,137 +28,186 @@ export function lexicalPreview(target: EditTarget, candidate: string) {
 }
 export function WordLensControls({ w }: { w: Workspace }) {
   const phrase = w.target?.scope !== "word";
+  const delivery = w.lens.view === "delivery";
   const preview = w.target ? lexicalPreview(w.target, w.target.text) : null;
   return (
     <section
       className="word-lens"
-      aria-label={phrase ? "Phrase Lens" : "Word Lens"}
+      aria-label={
+        delivery ? "Delivery Lens" : phrase ? "Phrase Lens" : "Word Lens"
+      }
     >
-      <div className="segmented" role="group" aria-label="Lens mode">
-        {(["explore", "replace"] as const).map((mode) => (
+      {delivery ? (
+        <>
+          {preview && (
+            <div className="protected-sentence">
+              <span className="eyebrow">Original delivery</span>
+              <p>
+                {preview.before}
+                <mark>[{w.target?.text}]</mark>
+                {preview.after}
+              </p>
+              <small>
+                Observation only. Your punctuation, case and prose stay
+                unchanged.
+              </small>
+            </div>
+          )}
+          <Field
+            label="Delivery question"
+            hint="Optional: ask how the pause, marks or casing affect this line."
+          >
+            <GrowingTextarea
+              rows={3}
+              value={w.instruction}
+              onChange={(event) => w.setInstruction(event.target.value)}
+              placeholder="What does the period do here?"
+            />
+          </Field>
+          {w.catalog && w.effectiveModel.model.providerId === "mock" && (
+            <p className="offline-capability">
+              Offline Delivery describes visible marks with limited rules, not a
+              model's reading of your voice.
+            </p>
+          )}
           <Button
-            key={mode}
-            aria-pressed={w.lens.mode === mode}
-            className={w.lens.mode === mode ? "on" : ""}
-            onClick={() => w.setLens((l) => ({ ...l, mode }))}
+            className="primary full"
+            disabled={w.busy || !w.ready}
+            onClick={() => w.askLens("explore")}
           >
-            {mode === "explore" ? "Explore" : "Replace"}
+            {w.busy ? "Reading…" : "Explore delivery"}
           </Button>
-        ))}
-      </div>
-      {preview && (
-        <div className="protected-sentence">
-          <span className="eyebrow">Protected sentence</span>
-          <p>
-            {preview.before}
-            <mark>[{w.target?.text}]</mark>
-            {preview.after}
-          </p>
-          <small>Only the bracketed target can change.</small>
-        </div>
-      )}
-      <Field
-        label="Lexical direction"
-        hint="Describe the meaning, audience, attitude, or era you need. Type or dictate naturally."
-      >
-        <GrowingTextarea
-          rows={4}
-          value={w.instruction}
-          onChange={(e) => w.setInstruction(e.target.value)}
-          placeholder="Keep the disrespect, lose the internet slang…"
-        />
-      </Field>
-      <div className="form-grid">
-        <Field label="Meaning fidelity">
-          <Select
-            value={w.lens.fidelity}
-            onChange={(e) =>
-              w.setLens((l) => ({
-                ...l,
-                fidelity: e.target.value as typeof l.fidelity,
-              }))
-            }
-          >
-            <option value="exact">Exact meaning</option>
-            <option value="balanced">Balanced</option>
-            <option value="loose">Loose · effect first</option>
-          </Select>
-        </Field>
-        <Field label="Replacement shape">
-          <Select
-            value={w.lens.shape}
-            onChange={(e) =>
-              w.setLens((l) => ({
-                ...l,
-                shape: e.target.value as typeof l.shape,
-              }))
-            }
-          >
-            <option value="word">One word</option>
-            <option value="phrase">Short phrase</option>
-            <option value="expression">Fitting expression</option>
-          </Select>
-        </Field>
-      </div>
-      <details className="control-details">
-        <summary>Intent, register & era</summary>
-        <Field label="Quick word intent">
-          <Select
-            value={w.lens.intent}
-            onChange={(e) =>
-              w.setLens((l) => ({ ...l, intent: e.target.value }))
-            }
-          >
-            {quickWordIntents.map((i) => (
-              <option key={i}>{i}</option>
+        </>
+      ) : (
+        <>
+          <div className="segmented" role="group" aria-label="Lens mode">
+            {(["explore", "replace"] as const).map((mode) => (
+              <Button
+                key={mode}
+                aria-pressed={w.lens.mode === mode}
+                className={w.lens.mode === mode ? "on" : ""}
+                onClick={() => w.setLens((l) => ({ ...l, mode }))}
+              >
+                {mode === "explore" ? "Explore" : "Replace"}
+              </Button>
             ))}
-          </Select>
-        </Field>
-        <Field label="Persona / register / era">
-          <input
-            value={w.lens.persona}
-            onChange={(e) =>
-              w.setLens((l) => ({ ...l, persona: e.target.value }))
-            }
-            placeholder="An older audience; a British aristocrat…"
-          />
-        </Field>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={w.lens.technical}
-            onChange={(e) =>
-              w.setLens((l) => ({ ...l, technical: e.target.checked }))
-            }
-          />
-          Technical precision
-        </label>
-        <p className="small muted">
-          Historical plausibility and comedic approximation are different. The
-          model must state uncertainty; current usage requires cited research.
-        </p>
-      </details>
-      {w.catalog && w.effectiveModel.model.providerId === "mock" && (
-        <p className="offline-capability">
-          Offline Word Lens has curated entries only. It cannot search for or
-          verify a new nuance; configure a model for broader suggestions.
-        </p>
+          </div>
+          {preview && (
+            <div className="protected-sentence">
+              <span className="eyebrow">Protected sentence</span>
+              <p>
+                {preview.before}
+                <mark>[{w.target?.text}]</mark>
+                {preview.after}
+              </p>
+              <small>Only the bracketed target can change.</small>
+            </div>
+          )}
+          <Field
+            label="Lexical direction"
+            hint="Describe the meaning, audience, attitude, or era you need. Type or dictate naturally."
+          >
+            <GrowingTextarea
+              rows={4}
+              value={w.instruction}
+              onChange={(e) => w.setInstruction(e.target.value)}
+              placeholder="Keep the disrespect, lose the internet slang…"
+            />
+          </Field>
+          <div className="form-grid">
+            <Field label="Meaning fidelity">
+              <Select
+                value={w.lens.fidelity}
+                onChange={(e) =>
+                  w.setLens((l) => ({
+                    ...l,
+                    fidelity: e.target.value as typeof l.fidelity,
+                  }))
+                }
+              >
+                <option value="exact">Exact meaning</option>
+                <option value="balanced">Balanced</option>
+                <option value="loose">Loose · effect first</option>
+              </Select>
+            </Field>
+            <Field label="Replacement shape">
+              <Select
+                value={w.lens.shape}
+                onChange={(e) =>
+                  w.setLens((l) => ({
+                    ...l,
+                    shape: e.target.value as typeof l.shape,
+                  }))
+                }
+              >
+                <option value="word">One word</option>
+                <option value="phrase">Short phrase</option>
+                <option value="expression">Fitting expression</option>
+              </Select>
+            </Field>
+          </div>
+          <details className="control-details">
+            <summary>Intent, register & era</summary>
+            <Field label="Quick word intent">
+              <Select
+                value={w.lens.intent}
+                onChange={(e) =>
+                  w.setLens((l) => ({ ...l, intent: e.target.value }))
+                }
+              >
+                {quickWordIntents.map((i) => (
+                  <option key={i}>{i}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Persona / register / era">
+              <input
+                value={w.lens.persona}
+                onChange={(e) =>
+                  w.setLens((l) => ({ ...l, persona: e.target.value }))
+                }
+                placeholder="An older audience; a British aristocrat…"
+              />
+            </Field>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={w.lens.technical}
+                onChange={(e) =>
+                  w.setLens((l) => ({ ...l, technical: e.target.checked }))
+                }
+              />
+              Technical precision
+            </label>
+            <p className="small muted">
+              Historical plausibility and comedic approximation are different.
+              The model must state uncertainty; current usage requires cited
+              research.
+            </p>
+          </details>
+          {w.catalog && w.effectiveModel.model.providerId === "mock" && (
+            <p className="offline-capability">
+              Offline Word Lens has curated entries only. It cannot search for
+              or verify a new nuance; configure a model for broader suggestions.
+            </p>
+          )}
+          <Button
+            className="primary full"
+            disabled={w.busy || !w.ready}
+            onClick={() => w.askLens(w.lens.mode)}
+          >
+            {w.busy
+              ? "Searching…"
+              : w.lens.mode === "explore"
+                ? `Diagnose this ${phrase ? "phrase" : "word"}`
+                : "Find replacements"}
+          </Button>
+          <p className="small muted">
+            Exploration leaves your writing untouched. Only Replace activates a
+            candidate.
+          </p>
+        </>
       )}
-      <Button
-        className="primary full"
-        disabled={w.busy || !w.ready}
-        onClick={() => w.askLens(w.lens.mode)}
-      >
-        {w.busy
-          ? "Searching…"
-          : w.lens.mode === "explore"
-            ? `Diagnose this ${phrase ? "phrase" : "word"}`
-            : "Find replacements"}
-      </Button>
-      <p className="small muted">
-        Exploration leaves your writing untouched. Only Replace activates a
-        candidate.
-      </p>
     </section>
   );
 }

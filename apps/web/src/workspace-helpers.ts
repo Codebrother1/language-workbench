@@ -119,6 +119,17 @@ export function updateWorkbench(
   };
 }
 
+export function isDeliveryTarget(target: EditTarget | null): boolean {
+  return (
+    !!target?.sectionId &&
+    (target.scope === "word" || target.scope === "selection") &&
+    !!target.text.trim() &&
+    target.text.length <= 400 &&
+    target.text.trim().split(/\s+/u).length <= 60 &&
+    (target.text.match(/\n/g) ?? []).length <= 3
+  );
+}
+
 export function isLensTarget(
   target: EditTarget | null,
   hasSelection: boolean,

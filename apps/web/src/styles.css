@@ -1018,6 +1018,22 @@ hr {
   margin: 12px 0;
   font-size: 13px;
 }
+.lens-view {
+  margin: 10px 0;
+}
+.delivery-result {
+  display: grid;
+  gap: 4px;
+  margin: 14px 0;
+  font-size: 13px;
+}
+.delivery-result b:not(:first-child) {
+  margin-top: 8px;
+}
+.delivery-result p {
+  margin: 0;
+  white-space: pre-wrap;
+}
 .tag {
   font-size: 12px;
   color: var(--accent);
