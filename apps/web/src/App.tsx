@@ -12,6 +12,7 @@ import { DockDivider, type PaneWidths } from "./DockDivider";
 import { EditorContent } from "@tiptap/react";
 import { Selection, TextSelection } from "@tiptap/pm/state";
 import { sectionLocation } from "./editor";
+import { sectionContentRange } from "./section-boundary";
 import {
   PanelLeft,
   Plus,
@@ -23,6 +24,8 @@ import {
   Bold,
   Italic,
   Heading2,
+  List,
+  ListOrdered,
   Undo2,
   Redo2,
   Copy,
@@ -125,18 +128,21 @@ function ParkedGroupHeading({
     </div>
   );
 }
+type SavedWorkKind = "variants" | "structure" | "history";
 function Structure({
   w,
   onRemove,
   editorCard,
   onWriteCard,
   onEditPreview,
+  onOpenSavedWork,
 }: {
   w: Workspace;
   onRemove: (id: string) => void;
   editorCard: string | null;
   onWriteCard: (id: string, point?: { x: number; y: number }) => void;
   onEditPreview: (id: string) => void;
+  onOpenSavedWork: (id: string, kind: SavedWorkKind) => void;
 }) {
   const drag = useRef<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -501,6 +507,46 @@ function Structure({
                     <span className="parked-status">
                       Parked · excluded from draft
                     </span>
+                  )}
+                  {(s.variants.length > 0 ||
+                    Boolean(
+                      s.workbench?.structure?.thoughtA ||
+                      s.workbench?.structure?.thoughtB ||
+                      s.workbench?.structure?.raw,
+                    ) ||
+                    Boolean(s.workbench?.runs.length)) && (
+                    <div
+                      className="card-saved-work"
+                      aria-label="Saved Lab work"
+                    >
+                      {s.variants.length > 0 && (
+                        <Button
+                          onClick={() => onOpenSavedWork(s.id, "variants")}
+                        >
+                          {s.variants.length}{" "}
+                          {s.variants.length === 1 ? "variant" : "variants"}
+                        </Button>
+                      )}
+                      {(s.workbench?.structure?.thoughtA ||
+                        s.workbench?.structure?.thoughtB ||
+                        s.workbench?.structure?.raw) && (
+                        <Button
+                          onClick={() => onOpenSavedWork(s.id, "structure")}
+                        >
+                          Structure work
+                        </Button>
+                      )}
+                      {Boolean(s.workbench?.runs.length) && (
+                        <Button
+                          onClick={() => onOpenSavedWork(s.id, "history")}
+                        >
+                          {s.workbench!.runs.length}{" "}
+                          {s.workbench!.runs.length === 1
+                            ? "Lab run"
+                            : "Lab runs"}
+                        </Button>
+                      )}
+                    </div>
                   )}
                   {w.layout.density === "comfortable" &&
                   w.target?.sectionId === s.id ? (
@@ -970,6 +1016,27 @@ function Structure({
 }
 function Toolbar({ w }: { w: Workspace }) {
   const ed = w.editor;
+  const formatBlock = (kind: "heading" | "bulletList" | "orderedList") => {
+    if (!ed) return;
+    const { doc, selection } = ed.state;
+    const range = sectionContentRange(doc, selection.from, selection.to);
+    if (range.kind !== "single") {
+      w.setNotice(
+        "Section boundaries are protected. Format within one section.",
+      );
+      return;
+    }
+    if (range.clamped)
+      ed.view.dispatch(
+        ed.state.tr.setSelection(
+          TextSelection.create(doc, range.from, range.to),
+        ),
+      );
+    const chain = ed.chain().focus();
+    if (kind === "heading") chain.toggleHeading({ level: 2 }).run();
+    else if (kind === "bulletList") chain.toggleBulletList().run();
+    else chain.toggleOrderedList().run();
+  };
   return (
     <div className="format-toolbar" aria-label="Formatting toolbar">
       <div className="row">
@@ -996,10 +1063,39 @@ function Toolbar({ w }: { w: Workspace }) {
           title="Heading"
           className={ed?.isActive("heading") ? "on" : ""}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => ed?.chain().focus().toggleHeading({ level: 2 }).run()}
+          onClick={() => formatBlock("heading")}
         >
           <Heading2 size={17} />
         </Button>
+        <details className="format-list-menu">
+          <summary aria-label="List" title="List formatting">
+            <List size={15} /> List
+          </summary>
+          <div>
+            <Button
+              aria-label="Bullet list"
+              className={ed?.isActive("bulletList") ? "on" : ""}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(event) => {
+                formatBlock("bulletList");
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              <List size={15} /> Bullets
+            </Button>
+            <Button
+              aria-label="Numbered list"
+              className={ed?.isActive("orderedList") ? "on" : ""}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(event) => {
+                formatBlock("orderedList");
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              <ListOrdered size={15} /> Numbers
+            </Button>
+          </div>
+        </details>
         <span className="divider" />
         <Button
           aria-label="Undo"
@@ -1051,25 +1147,34 @@ export default function App() {
   const [menu, setMenu] = useState(false);
   const layoutMenu = useRef<HTMLDetailsElement>(null);
   const [dragWidths, setDragWidths] = useState<PaneWidths | null>(null);
+  const [previewFocused, setPreviewFocused] = useState(false);
   const [documentPreviewOverride, setDocumentPreviewOverride] = useState<
     boolean | null
   >(null);
   const [compareSection, setCompareSection] = useState<string | null>(null);
+  const [openWork, setOpenWork] = useState<{
+    sectionId: string;
+    kind: SavedWorkKind;
+    token: number;
+  } | null>(null);
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
   const text = documentText(w.doc);
-  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const wordCount = draft.flatMap((section) =>
+    sectionText(section).trim().split(/\s+/).filter(Boolean),
+  ).length;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
   const widths = dragWidths ?? w.layout.paneWidths;
+  const workbenchShown = w.layout.workbenchVisible && !previewFocused;
+  const inspectorShown = w.layout.inspectorVisible && !previewFocused;
   const previewShown =
-    w.layout.primaryView === "document" && documentPreviewOverride !== null
+    previewFocused ||
+    (w.layout.primaryView === "document" && documentPreviewOverride !== null
       ? documentPreviewOverride
-      : w.layout.previewVisible;
+      : w.layout.previewVisible);
   const paneCount =
-    Number(w.layout.workbenchVisible) +
-    Number(previewShown) +
-    Number(w.layout.inspectorVisible);
+    Number(workbenchShown) + Number(previewShown) + Number(inspectorShown);
   const commitWidths = (next: PaneWidths) => {
     setDragWidths(null);
     void w.setPaneWidths(next);
@@ -1080,10 +1185,11 @@ export default function App() {
     layoutMenu.current?.removeAttribute("open");
     setDragWidths(null);
     setDocumentPreviewOverride(null);
+    setPreviewFocused(false);
     void w.applyLayoutPreset(name);
   };
   const activeEditorCard =
-    w.layout.workbenchVisible &&
+    workbenchShown &&
     w.layout.primaryView === "workbench" &&
     w.layout.density === "comfortable" &&
     editorCard &&
@@ -1158,9 +1264,12 @@ export default function App() {
           <Button
             className="icon nav-toggle"
             aria-label="Toggle structure"
-            aria-pressed={w.layout.workbenchVisible}
-            disabled={w.layout.workbenchVisible && paneCount === 1}
-            onClick={() => w.setWorkbenchVisible(!w.layout.workbenchVisible)}
+            aria-pressed={workbenchShown}
+            disabled={workbenchShown && paneCount === 1}
+            onClick={() => {
+              setPreviewFocused(false);
+              void w.setWorkbenchVisible(!w.layout.workbenchVisible);
+            }}
           >
             <PanelLeft size={19} />
           </Button>
@@ -1433,6 +1542,7 @@ export default function App() {
             aria-pressed={w.layout.primaryView === "workbench"}
             onClick={() => {
               setDocumentPreviewOverride(null);
+              setPreviewFocused(false);
               w.setPrimaryView("workbench");
             }}
           >
@@ -1442,6 +1552,7 @@ export default function App() {
             aria-pressed={w.layout.primaryView === "document"}
             onClick={() => {
               setDocumentPreviewOverride(w.layout.previewVisible ? null : true);
+              setPreviewFocused(false);
               w.setPrimaryView("document");
             }}
           >
@@ -1449,6 +1560,14 @@ export default function App() {
           </Button>
         </div>
         <div className="row pane-controls">
+          {previewShown && (
+            <Button
+              aria-pressed={previewFocused}
+              onClick={() => setPreviewFocused(!previewFocused)}
+            >
+              {previewFocused ? "Restore panes" : "Focus preview"}
+            </Button>
+          )}
           <details ref={layoutMenu} className="layout-menu">
             <summary>Layout</summary>
             <div role="group" aria-label="Layout presets">
@@ -1462,23 +1581,30 @@ export default function App() {
             </div>
           </details>
           <Button
-            onClick={() => w.setWorkbenchVisible(!w.layout.workbenchVisible)}
-            disabled={w.layout.workbenchVisible && paneCount === 1}
+            onClick={() => {
+              setPreviewFocused(false);
+              void w.setWorkbenchVisible(!w.layout.workbenchVisible);
+            }}
+            disabled={workbenchShown && paneCount === 1}
           >
             {w.layout.workbenchVisible ? "Hide Workbench" : "Show Workbench"}
           </Button>
           <Button
             onClick={() => {
               setDocumentPreviewOverride(null);
-              w.setPreviewVisible(!previewShown);
+              setPreviewFocused(false);
+              w.setPreviewVisible(!w.layout.previewVisible);
             }}
             disabled={previewShown && paneCount === 1}
           >
             {previewShown ? "Hide preview" : "Show preview"}
           </Button>
           <Button
-            onClick={() => w.setInspectorVisible(!w.layout.inspectorVisible)}
-            disabled={w.layout.inspectorVisible && paneCount === 1}
+            onClick={() => {
+              setPreviewFocused(false);
+              void w.setInspectorVisible(!w.layout.inspectorVisible);
+            }}
+            disabled={inspectorShown && paneCount === 1}
           >
             {w.layout.inspectorVisible ? "Hide Inspector" : "Show Inspector"}
           </Button>
@@ -1491,8 +1617,7 @@ export default function App() {
       >
         <div
           className={
-            "dock-pane dock-workbench " +
-            (!w.layout.workbenchVisible ? "pane-hidden" : "")
+            "dock-pane dock-workbench " + (!workbenchShown ? "pane-hidden" : "")
           }
           data-pane="workbench"
           style={{ flexGrow: widths.workbench }}
@@ -1503,18 +1628,22 @@ export default function App() {
             editorCard={activeEditorCard}
             onWriteCard={writeInCard}
             onEditPreview={editInPreview}
+            onOpenSavedWork={(sectionId, kind) => {
+              w.focusSection(sectionId);
+              void w.setInspectorVisible(true);
+              setOpenWork({ sectionId, kind, token: Date.now() });
+            }}
           />
         </div>
-        {w.layout.workbenchVisible &&
-          (previewShown || w.layout.inspectorVisible) && (
-            <DockDivider
-              left="workbench"
-              right={previewShown ? "preview" : "inspector"}
-              widths={widths}
-              onResize={setDragWidths}
-              onCommit={commitWidths}
-            />
-          )}
+        {workbenchShown && (previewShown || inspectorShown) && (
+          <DockDivider
+            left="workbench"
+            right={previewShown ? "preview" : "inspector"}
+            widths={widths}
+            onResize={setDragWidths}
+            onCommit={commitWidths}
+          />
+        )}
         <div
           className={
             "dock-pane dock-preview " + (!previewShown ? "pane-hidden" : "")
@@ -1597,7 +1726,7 @@ export default function App() {
             </footer>
           </main>
         </div>
-        {previewShown && w.layout.inspectorVisible && (
+        {previewShown && inspectorShown && (
           <DockDivider
             left="preview"
             right="inspector"
@@ -1608,8 +1737,7 @@ export default function App() {
         )}
         <div
           className={
-            "dock-pane dock-inspector " +
-            (!w.layout.inspectorVisible ? "pane-hidden" : "")
+            "dock-pane dock-inspector " + (!inspectorShown ? "pane-hidden" : "")
           }
           data-pane="inspector"
           style={{ flexGrow: widths.inspector }}
@@ -1618,6 +1746,7 @@ export default function App() {
             w={w}
             navigation={navigation}
             onCompare={() => setCompareSection(w.selectedSectionId)}
+            openWork={openWork}
           />
         </div>
       </div>

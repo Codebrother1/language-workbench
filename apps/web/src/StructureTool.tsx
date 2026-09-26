@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   compositionKnowledge,
   getRelationship,
@@ -11,7 +11,13 @@ import {
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Field, Select } from "./ui";
-export function StructureTool({ w }: { w: Workspace }) {
+export function StructureTool({
+  w,
+  open = false,
+}: {
+  w: Workspace;
+  open?: boolean;
+}) {
   const d = w.structure,
     rel = getRelationship(d.relationship),
     scaffolds = scaffoldsFor(d.relationship, d.register),
@@ -36,6 +42,10 @@ export function StructureTool({ w }: { w: Workspace }) {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.preference;
   const connectors = connectorsFor(d.relationship, d.register);
   const [showAvoid, setShowAvoid] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (open && detailsRef.current) detailsRef.current.open = true;
+  }, [open]);
   const shown = connectors.filter(
     (c) => showAvoid || preference(c.text) !== "avoid",
   );
@@ -84,7 +94,7 @@ export function StructureTool({ w }: { w: Workspace }) {
       .catch((e) => w.setError(e.message));
   };
   return (
-    <details className="structure-tool">
+    <details ref={detailsRef} className="structure-tool">
       <summary>Structure · assemble a thought</summary>
       <p className="small muted">
         Start with your meaning. Choose a relationship, then a shape. Nothing

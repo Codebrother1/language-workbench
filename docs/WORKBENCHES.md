@@ -1,6 +1,6 @@
 # Section workbenches, model choices, and Word/Phrase Lens
 
-A workbench holds the experiments around a piece of writing. It is not a second editor that silently takes over the document. **Generating, inspecting, comparing, editing a candidate, or choosing a model never makes that candidate canonical.** In the assistance workflow, only explicit Replace/Accept/Activate changes the selected prose. You can still edit the main document directly.
+A workbench holds the experiments around a piece of writing. It is not a second editor that silently takes over the document. **Generating, inspecting, comparing, editing a candidate, or choosing a model never makes that candidate canonical.** In the assistance workflow, only explicit Replace/Accept/Activate changes the selected prose. You can still edit the main document directly. The first Lab view puts the current target, your direction and a primary action before secondary model/options controls. An offline note beside each action explains the deterministic operation before it runs; unsupported creative directions receive no invented answer. Cards with saved work link back to their existing variants, Structure draft or run history.
 
 For installation, commands, backup and security, see [README.md](../README.md). Implementation boundaries and API routes are in [ARCHITECTURE.md](ARCHITECTURE.md).
 

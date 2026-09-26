@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import {
   labFor,
+  resolveModel,
   writingActions,
   structuralMechanisms,
   sectionText,
@@ -29,10 +30,16 @@ export function WritingLabShell({
   w,
   navigation,
   onCompare,
+  openWork,
 }: {
   w: Workspace;
   navigation: Wayfinding;
   onCompare?: () => void;
+  openWork?: {
+    sectionId: string;
+    kind: "variants" | "structure" | "history";
+    token: number;
+  } | null;
 }) {
   const { target, response, responseTarget } = w;
   const section = w.doc.sections.find((s) => s.id === target?.sectionId);
@@ -44,6 +51,17 @@ export function WritingLabShell({
     (Boolean(target?.text.trim()) || w.canCoachTarget || sectionIntent) &&
     target?.scope !== "document";
   const hasWriting = w.doc.sections.some((s) => sectionText(s).trim());
+  const offlineCritique =
+    resolveModel({
+      oneOff: w.doc.workbench?.oneOffModel,
+      task: "critique",
+      documentDefault: w.doc.defaultModel,
+      preferences: w.settings.routing,
+      applicationDefault: w.catalog?.applicationDefault ?? {
+        providerId: "mock",
+        modelId: "conservative",
+      },
+    }).model.providerId === "mock";
   const isWholeAnalysis = Boolean(
     response && responseTarget?.scope === "document",
   );
@@ -67,6 +85,7 @@ export function WritingLabShell({
     w.activeRun?.action === "words" && Boolean(w.activeRun?.lens);
   const [compare, setCompare] = useState<string | null>(null);
   const responseRef = useRef<HTMLElement>(null);
+  const variantsRef = useRef<HTMLDetailsElement>(null);
   const wasBusy = useRef(false);
   useEffect(() => {
     // Scroll only the Inspector on completion; never focus or scroll the document.
@@ -84,6 +103,22 @@ export function WritingLabShell({
     }
     wasBusy.current = w.busy;
   }, [w.busy]);
+  useEffect(() => {
+    if (!openWork || openWork.sectionId !== target?.sectionId) return;
+    if (openWork.kind === "variants" && variantsRef.current)
+      variantsRef.current.open = true;
+    const selector = {
+      variants: ".variants",
+      structure: ".structure-tool",
+      history: ".local-history",
+    }[openWork.kind];
+    requestAnimationFrame(() =>
+      document
+        .querySelector(".inspector")
+        ?.querySelector(selector)
+        ?.scrollIntoView({ block: "nearest" }),
+    );
+  }, [openWork, target?.sectionId]);
   const fullCopy = response
     ? [
         responseTarget?.scope !== "document" && responseTarget?.text
@@ -183,22 +218,6 @@ export function WritingLabShell({
               : "Start writing. When you want a second look, place the cursor in a sentence or select a word or passage."}
         </p>
       </div>
-      {hasWriting && !isWholeAnalysis && (
-        <>
-          <NextSteps w={w} onCommand={navigation.runCommand} />
-          <ContextHelp w={w} onCommand={navigation.runCommand} />
-        </>
-      )}
-      {(hasTarget || isWholeAnalysis) && (
-        <ModelControls
-          key={
-            isWholeAnalysis
-              ? "document"
-              : `${target?.sectionId}:${target?.scope}`
-          }
-          w={w}
-        />
-      )}
       {isWholeAnalysis && (
         <section className="document-analysis-controls">
           <Field label="Whole-piece direction">
@@ -270,11 +289,21 @@ export function WritingLabShell({
               )}
             </div>
           </div>
-          <QuickSave w={w} text={target.text} />
           {w.isLensTarget ? (
             <WordLensControls w={w} />
           ) : (
             <>
+              <Field
+                label="Your direction"
+                hint="Your experience and intent lead. AI should ask, not invent."
+              >
+                <GrowingTextarea
+                  rows={4}
+                  placeholder="What feels off? What must stay?"
+                  value={w.instruction}
+                  onChange={(e) => w.setInstruction(e.target.value)}
+                />
+              </Field>
               <Field label={`What should this ${targetLabel} do?`}>
                 <Select
                   aria-label="Writing action"
@@ -293,73 +322,14 @@ export function WritingLabShell({
                   )}
                 </Select>
               </Field>
-              <details className="control-details all-actions">
-                <summary>
-                  All actions <ChevronDown size={14} />
-                </summary>
-                <Field label="Explore another approach">
-                  <Select
-                    aria-label="All writing actions"
-                    value={w.action}
-                    onChange={(e) =>
-                      w.setAction(e.target.value as WritingAction)
-                    }
-                  >
-                    <optgroup label={`For this ${targetLabel}`}>
-                      {lab.actions.map((a) => (
-                        <option key={a} value={a}>
-                          {a.replaceAll("_", " ")}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Other local approaches">
-                      {writingActions
-                        .filter(
-                          (a) =>
-                            !lab.actions.includes(a) &&
-                            a !== "critique" &&
-                            a !== "break_template" &&
-                            a !== "structure",
-                        )
-                        .map((a) => (
-                          <option key={a} value={a}>
-                            {a.replaceAll("_", " ")}
-                          </option>
-                        ))}
-                    </optgroup>
-                  </Select>
-                </Field>
-              </details>
-              <Field
-                label="Your direction"
-                hint="Your experience and intent lead. AI should ask, not invent."
-              >
-                <GrowingTextarea
-                  rows={4}
-                  placeholder="What feels off? What must stay?"
-                  value={w.instruction}
-                  onChange={(e) => w.setInstruction(e.target.value)}
-                />
-              </Field>
-              <details className="control-details">
-                <summary>
-                  Fine-tune the approach <ChevronDown size={14} />
-                </summary>
-                <div>
-                  {lab.controls.map((c) => (
-                    <Range
-                      key={c.key}
-                      label={c.label}
-                      low={c.low}
-                      high={c.high}
-                      value={Number(w.controls[c.key] ?? 50)}
-                      onChange={(v) =>
-                        w.setControls({ ...w.controls, [c.key]: v })
-                      }
-                    />
-                  ))}
-                </div>
-              </details>
+              {w.effectiveModel.model.providerId === "mock" && (
+                <p className="offline-capability">
+                  Offline diagnosis gives deterministic structural guidance, not
+                  a model-quality rewrite. A later proposal can trim a few
+                  listed phrases or stage wording you supply; it cannot invent a
+                  nuanced answer to your direction.
+                </p>
+              )}
               <Button
                 className="primary full"
                 disabled={w.busy || !w.canCoachTarget || !w.ready}
@@ -372,9 +342,93 @@ export function WritingLabShell({
           )}
         </>
       )}
+      {(hasTarget || isWholeAnalysis) && (
+        <div className="lab-secondary">
+          {hasTarget && !w.isLensTarget && (
+            <details className="control-details all-actions">
+              <summary>
+                More approaches <ChevronDown size={14} />
+              </summary>
+              <Field label="Explore another approach">
+                <Select
+                  aria-label="All writing actions"
+                  value={w.action}
+                  onChange={(e) => w.setAction(e.target.value as WritingAction)}
+                >
+                  <optgroup label={`For this ${targetLabel}`}>
+                    {lab.actions.map((a) => (
+                      <option key={a} value={a}>
+                        {a.replaceAll("_", " ")}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Other local approaches">
+                    {writingActions
+                      .filter(
+                        (a) =>
+                          !lab.actions.includes(a) &&
+                          !["critique", "break_template", "structure"].includes(
+                            a,
+                          ),
+                      )
+                      .map((a) => (
+                        <option key={a} value={a}>
+                          {a.replaceAll("_", " ")}
+                        </option>
+                      ))}
+                  </optgroup>
+                </Select>
+              </Field>
+            </details>
+          )}
+          <ModelControls
+            key={
+              isWholeAnalysis
+                ? "document"
+                : `${target?.sectionId}:${target?.scope}`
+            }
+            w={w}
+          />
+          {hasTarget && !w.isLensTarget && (
+            <details className="control-details">
+              <summary>
+                Fine-tune the approach <ChevronDown size={14} />
+              </summary>
+              <div>
+                {lab.controls.map((c) => (
+                  <Range
+                    key={c.key}
+                    label={c.label}
+                    low={c.low}
+                    high={c.high}
+                    value={Number(w.controls[c.key] ?? 50)}
+                    onChange={(v) =>
+                      w.setControls({ ...w.controls, [c.key]: v })
+                    }
+                  />
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+      {hasTarget && target && <QuickSave w={w} text={target.text} />}
+      {hasWriting && !isWholeAnalysis && (
+        <>
+          <NextSteps w={w} onCommand={navigation.runCommand} />
+          <ContextHelp w={w} onCommand={navigation.runCommand} />
+        </>
+      )}
       {!isWholeAnalysis && (
         <>
-          <StructureTool w={w} />
+          <StructureTool
+            key={openWork?.kind === "structure" ? openWork.token : "structure"}
+            w={w}
+            open={
+              openWork?.sectionId === section?.id &&
+              openWork?.kind === "structure"
+            }
+          />
           {hasTarget && (
             <>
               <ContextLibrary w={w} />
@@ -499,6 +553,13 @@ export function WritingLabShell({
                     placeholder="Add the detail only you know…"
                   />
                 </Field>
+                {w.effectiveModel.model.providerId === "mock" && (
+                  <p className="offline-capability">
+                    Offline proposals can stage your supplied passage or apply a
+                    few fixed trims. Directions alone cannot produce a
+                    model-quality rewrite; configure a model for that.
+                  </p>
+                )}
                 <Button
                   className="primary full"
                   disabled={
@@ -580,9 +641,17 @@ export function WritingLabShell({
           ))}
         </section>
       )}
-      {(hasTarget || isWholeAnalysis) && <WorkbenchHistory w={w} />}
+      {(hasTarget || isWholeAnalysis) && (
+        <WorkbenchHistory
+          key={openWork?.kind === "history" ? openWork.token : "history"}
+          w={w}
+          open={
+            openWork?.sectionId === section?.id && openWork?.kind === "history"
+          }
+        />
+      )}
       {(hasTarget || explicitVariants) && section && !isWholeAnalysis && (
-        <details className="variants">
+        <details ref={variantsRef} className="variants">
           <summary>
             Variants <span className="count">{section.variants.length}</span>
           </summary>
@@ -703,6 +772,12 @@ export function WritingLabShell({
       <div className="whole-piece">
         <span className="eyebrow">STEP BACK</span>
         <p>Look at the structure without rewriting it.</p>
+        {offlineCritique && (
+          <p className="offline-capability">
+            Offline whole-piece critique checks limited deterministic patterns;
+            it cannot assess your argument or invent new analysis.
+          </p>
+        )}
         <Button
           className="full"
           disabled={w.busy || !w.ready || !hasWriting}

@@ -179,6 +179,35 @@ test("dock resizing, pane visibility, presets and reload preserve one document",
   );
 });
 
+test("Preview focus temporarily expands and restores the exact saved pane arrangement", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  const settings = await (await request.get("/api/settings")).json();
+  settings.layout = {
+    paneWidths: { workbench: 55, preview: 30, inspector: 15 },
+  };
+  await request.put("/api/settings", { data: settings });
+  await page.goto("/");
+  const workbench = page.locator('[data-pane="workbench"]');
+  const preview = page.locator('[data-pane="preview"]');
+  const inspector = page.locator('[data-pane="inspector"]');
+  await expect(workbench).toBeVisible();
+  const before = (await preview.boundingBox())!.width;
+  await page.getByRole("button", { name: "Focus preview" }).click();
+  await expect(workbench).toBeHidden();
+  await expect(inspector).toBeHidden();
+  expect((await preview.boundingBox())!.width).toBeGreaterThan(before * 2);
+  await page.getByRole("button", { name: "Restore panes" }).click();
+  await expect(workbench).toBeVisible();
+  await expect(inspector).toBeVisible();
+  expect((await preview.boundingBox())!.width).toBeCloseTo(before, 0);
+  expect(
+    (await (await request.get("/api/settings")).json()).layout.paneWidths,
+  ).toEqual(settings.layout.paneWidths);
+});
+
 test("parked navigation, editing, reinclusion and narrow writing keep the single editor", async ({
   page,
   request,

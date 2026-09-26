@@ -113,6 +113,123 @@ async function undoRedo(
   await identity(page, doc);
 }
 
+test("heading toggles on the first and last paragraphs of a card without boundary warnings", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  const id = doc.sections[3].id;
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  const card = page.locator(`[data-section-id="${id}"]`);
+  const prompt = card.getByTestId("card-writing").getByRole("button");
+  if (await prompt.count()) await prompt.press("Enter");
+  const section = page.locator(`[id="${id}"]`);
+  await section.locator("p").click();
+  await page.getByRole("button", { name: "Heading", exact: true }).click();
+  await expect(section.locator("h2")).toHaveText(firstParagraph);
+  await expect(
+    page.getByText("Section boundaries are protected.", { exact: false }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Heading", exact: true }).click();
+  await expect(section.locator("p")).toHaveText(firstParagraph);
+  await identity(page, doc);
+});
+
+test("first and last paragraphs format locally while cross-section formatting is refused", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.sections[3].content = newSection(
+    "Reveal",
+    "First line.\nMiddle line.\nLast line.",
+  ).content;
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  const id = doc.sections[3].id;
+  const card = page.locator(`[data-section-id="${id}"]`);
+  await card.locator(".section-focus").click();
+  const prompt = card.getByTestId("card-writing").getByRole("button");
+  if (await prompt.count()) await prompt.press("Enter");
+  const section = page.locator(`[id="${id}"]`);
+  for (const index of [0, 2]) {
+    await section
+      .locator("p")
+      .nth(index === 0 ? 0 : -1)
+      .click();
+    await page.getByRole("button", { name: "Heading", exact: true }).click();
+    await expect(section.locator("h2")).toHaveCount(index === 0 ? 1 : 2);
+  }
+  await section.locator("h2").first().click();
+  await page.getByRole("button", { name: "Heading", exact: true }).click();
+  await expect(section.locator("p").first()).toHaveText("First line.");
+  await identity(page, doc);
+  await page
+    .getByRole("button", { name: "Document View", exact: true })
+    .click();
+  await page.getByTestId("writing-editor").focus();
+  await page.evaluate(
+    ([firstId, secondId]) => {
+      const first = document
+        .getElementById(firstId)!
+        .querySelector("h2")!.firstChild!;
+      const second = document
+        .getElementById(secondId)!
+        .querySelector("p")!.firstChild!;
+      window.getSelection()!.setBaseAndExtent(first, 0, second, 6);
+      document.dispatchEvent(new Event("selectionchange"));
+    },
+    [id, doc.sections[4].id],
+  );
+  await page.getByRole("button", { name: "Heading", exact: true }).click();
+  await expect(
+    page.getByText("Section boundaries are protected.", { exact: false }),
+  ).toBeVisible();
+  await expect(page.locator(`[id="${doc.sections[4].id}"] p`)).toHaveText(
+    "Section 5 stays intact.",
+  );
+  await identity(page, doc);
+});
+
+test("heading clamps a neighboring wrapper edge to the intended section", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page
+    .getByRole("button", { name: "Document View", exact: true })
+    .click();
+  await page.getByTestId("writing-editor").focus();
+  await page.evaluate(
+    ([previousId, nextId]) => {
+      const previous = document
+        .getElementById(previousId)!
+        .querySelector("p")!.firstChild!;
+      const next = document
+        .getElementById(nextId)!
+        .querySelector("p")!.firstChild!;
+      window
+        .getSelection()!
+        .setBaseAndExtent(previous, previous.textContent!.length, next, 7);
+      document.dispatchEvent(new Event("selectionchange"));
+    },
+    [doc.sections[2].id, doc.sections[3].id],
+  );
+  await page.getByRole("button", { name: "Heading", exact: true }).click();
+  await expect(page.locator(`[id="${doc.sections[3].id}"] h2`)).toHaveText(
+    firstParagraph,
+  );
+  await expect(page.locator(`[id="${doc.sections[2].id}"] p`)).toHaveText(
+    "Section 3 stays intact.",
+  );
+  await expect(
+    page.getByText("Section boundaries are protected.", { exact: false }),
+  ).toHaveCount(0);
+  await identity(page, doc);
+});
+
 test("native first sentence and last paragraph replacement preserve six section identities through undo/redo", async ({
   page,
   request,

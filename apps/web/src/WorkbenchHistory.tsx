@@ -1,10 +1,21 @@
+import { useEffect, useRef } from "react";
 import type { Workspace } from "./useWorkspace";
 import { Button } from "./ui";
 import { modelLabel } from "./ModelControls";
-export function WorkbenchHistory({ w }: { w: Workspace }) {
+export function WorkbenchHistory({
+  w,
+  open = false,
+}: {
+  w: Workspace;
+  open?: boolean;
+}) {
   const recent = [...w.localHistory].reverse();
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (open && detailsRef.current) detailsRef.current.open = true;
+  }, [open]);
   return (
-    <details className="local-history">
+    <details ref={detailsRef} className="local-history">
       <summary>
         Workbench history <span className="count">{recent.length}</span>
       </summary>

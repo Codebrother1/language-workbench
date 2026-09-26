@@ -6,6 +6,13 @@ const schema = new Schema({
     doc: { content: "writingSection+" },
     writingSection: { content: "block+" },
     paragraph: { group: "block", content: "inline*" },
+    bulletList: { group: "block", content: "listItem+" },
+    orderedList: {
+      group: "block",
+      content: "listItem+",
+      attrs: { start: { default: 1 } },
+    },
+    listItem: { content: "paragraph+" },
     text: { group: "inline" },
     hardBreak: { inline: true, group: "inline" },
   },
@@ -44,6 +51,20 @@ describe("native clipboard serializer for section wrappers", () => {
       0,
     );
     expect(clipboardPlainText(slice)).toBe("A\nB\n\nC");
+  });
+  it("copies bullets and numbered items with readable list markers", () => {
+    const item = (text: string) => schema.node("listItem", null, p(text));
+    const slice = new Slice(
+      Fragment.from(
+        schema.node("writingSection", null, [
+          schema.node("bulletList", null, [item("A"), item("B")]),
+          schema.node("orderedList", { start: 3 }, [item("C"), item("D")]),
+        ]),
+      ),
+      0,
+      0,
+    );
+    expect(clipboardPlainText(slice)).toBe("- A\n- B\n3. C\n4. D");
   });
   it("does not separate adjacent inline text marks, but keeps real hard breaks", () => {
     const slice = new Slice(

@@ -559,6 +559,41 @@ describe("removeSection", () => {
   });
 });
 
+describe("list exports", () => {
+  it("renders numbered and bullet items with their markers while excluding parked lists", () => {
+    const doc = newDocument("Lists");
+    doc.sections[0].content = [
+      {
+        type: "orderedList",
+        attrs: { start: 3 },
+        content: ["First", "Second"].map((text) => ({
+          type: "listItem",
+          content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+        })),
+      },
+      {
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "Note" }] },
+            ],
+          },
+        ],
+      },
+    ];
+    const parked = newSection("Freeform", "Private item");
+    parked.placement = "parked";
+    doc.sections.push(parked);
+    expect(sectionText(doc.sections[0])).toBe("First\nSecond\nNote");
+    expect(documentText(doc)).toBe("3. First\n4. Second\n- Note");
+    expect(toMarkdown(doc)).toBe("3. First\n4. Second\n\n- Note");
+    expect(toMarkdown(doc)).not.toContain("Private item");
+    expect(documentSchema.parse(doc)).toEqual(doc);
+  });
+});
+
 describe("draft and parked placement", () => {
   it("defaults legacy sections to draft without changing the schema version", () => {
     const legacy = newDocument("Legacy", "Old prose");

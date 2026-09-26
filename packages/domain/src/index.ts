@@ -454,7 +454,25 @@ export function parkedSections(
   return doc.sections.filter((section) => section.placement === "parked");
 }
 export function documentText(doc: Document): string {
-  return draftSections(doc).map(sectionText).join("\n\n");
+  const readable = (node: RichNode): string => {
+    if (node.type === "bulletList" || node.type === "orderedList")
+      return (node.content ?? [])
+        .map((item, index) => {
+          const marker =
+            node.type === "bulletList"
+              ? "- "
+              : `${Number(node.attrs?.start ?? 1) + index}. `;
+          return (
+            marker +
+            (item.content ?? []).map(readable).join("\n").replace(/\n/g, "\n  ")
+          );
+        })
+        .join("\n");
+    return inlineText(node);
+  };
+  return draftSections(doc)
+    .map((section) => section.content.map(readable).join("\n"))
+    .join("\n\n");
 }
 export function newSection(
   kind: WritingSection["kind"] = "Freeform",
@@ -582,12 +600,20 @@ export function toMarkdown(doc: Document): string {
       return t;
     }
     if (n.type === "hardBreak") return "  \n";
-    const t = (n.content ?? [])
-      .map(render)
-      .join(n.type === "bulletList" || n.type === "orderedList" ? "\n" : "");
+    if (n.type === "bulletList" || n.type === "orderedList")
+      return (n.content ?? [])
+        .map((item, index) => {
+          const text = (item.content ?? []).map(render).join("\n");
+          const marker =
+            n.type === "bulletList"
+              ? "- "
+              : `${Number(n.attrs?.start ?? 1) + index}. `;
+          return marker + text.replace(/\n/g, "\n  ");
+        })
+        .join("\n");
+    const t = (n.content ?? []).map(render).join("");
     if (n.type === "heading")
       return "#".repeat(Number(n.attrs?.level ?? 2)) + " " + t;
-    if (n.type === "listItem") return "- " + t;
     if (n.type === "blockquote") return "> " + t;
     return t;
   };

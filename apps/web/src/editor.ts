@@ -310,6 +310,17 @@ export function clipboardPlainText(slice: Slice): string {
   const render = (node: PMNode): string => {
     if (node.isText) return node.text ?? "";
     if (node.type.name === "hardBreak") return "\n";
+    if (node.type.name === "bulletList" || node.type.name === "orderedList") {
+      const items: string[] = [];
+      node.forEach((item, _offset, index) => {
+        const marker =
+          node.type.name === "bulletList"
+            ? "- "
+            : `${Number(node.attrs.start ?? 1) + index}. `;
+        items.push(marker + render(item).replace(/\n/g, "\n  "));
+      });
+      return items.join("\n");
+    }
     const children: string[] = [];
     node.forEach((child) => children.push(render(child)));
     return children.join(node.isTextblock ? "" : "\n");

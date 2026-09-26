@@ -603,7 +603,7 @@ test("paragraph and list paste keep readable context and exact local targets", a
     .getByRole("button", { name: "Copy plain text", exact: true })
     .click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
-    "One item.\nI utilize tools.",
+    "- One item.\n- I utilize tools.",
   );
 });
 test("repeat model calls create independent iteration records and unchanged anchors survive autosave", async ({

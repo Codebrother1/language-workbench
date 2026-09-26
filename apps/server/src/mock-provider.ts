@@ -223,6 +223,17 @@ function replaceTerms(
     ),
   );
 }
+function isOfflineDirection(answer: string): boolean {
+  const text = answer.replace(/^material:\s*/i, "").trim();
+  return (
+    !/^material:\s*/i.test(answer) &&
+    (/^(please\s+)?(make|rewrite|change|improve|shorten|expand|explain|find|show|tell|keep|use|add|remove|can you|how|why)\b/i.test(
+      text,
+    ) ||
+      text.endsWith("?"))
+  );
+}
+
 function offlineEdit(
   request: AIRequest,
 ): { text: string; explanation: string; label: string } | undefined {
@@ -286,6 +297,7 @@ function offlineEdit(
   // No fictional creativity: a supplied answer is offered explicitly as human wording, never disguised as model authorship.
   if (
     request.answer.trim() &&
+    !isOfflineDirection(request.answer) &&
     !["critique", "break_template", "words"].includes(request.action)
   ) {
     const material = request.answer.replace(/^material:\s*/i, "").trim();
@@ -397,6 +409,12 @@ export class MockProvider implements LLMProvider {
           request.action,
         )
       ) {
+        if (isOfflineDirection(request.answer)) {
+          output.missingIngredients.push(
+            "Offline cannot answer this direction or invent a bridge. Supply actual bridge lines, or configure a model for a contextual rewrite.",
+          );
+          return validateProviderResponse(request, output, "mock");
+        }
         const material = request.answer.replace(/^material:\s*/i, "").trim();
         const trimmed = offlineEdit({
           ...request,
@@ -531,6 +549,15 @@ export class MockProvider implements LLMProvider {
       !["critique", "break_template"].includes(request.action) &&
       (request.stage === "propose" || request.action === "spellcheck");
     if (allowed) {
+      if (
+        isOfflineDirection(request.answer) &&
+        !["spellcheck", "simplify", "shorten"].includes(request.action)
+      ) {
+        output.missingIngredients.push(
+          "Offline cannot answer this direction or invent a nuanced rewrite. Supply the actual passage as Material:, or configure a model for contextual proposals.",
+        );
+        return validateProviderResponse(request, output, "mock");
+      }
       const edit = offlineEdit(request);
       if (edit && edit.text !== request.editTarget.text) {
         const problem = proposalViolation(request, edit.text);

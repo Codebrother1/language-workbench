@@ -459,6 +459,19 @@ describe("human-first AI boundaries", () => {
     ).json();
     expect(simple.proposals[0].text).toBe("We use many tools.");
   });
+  it("does not stage a direction as authored prose when offline cannot answer it", async () => {
+    const ai = await fixture("The room was quiet.");
+    const output = await (
+      await request("/api/ai", "POST", {
+        ...ai,
+        action: "emotion",
+        stage: "propose",
+        answer: "Please make this more nuanced and less sentimental.",
+      })
+    ).json();
+    expect(output.proposals).toEqual([]);
+    expect(output.missingIngredients[0]).toContain("configure a model");
+  });
   it("creative offline output explicitly uses human wording, never fabricated observations", async () => {
     const ai = await fixture("The room was quiet.");
     const human = "Material: Even the fridge stopped humming.";
