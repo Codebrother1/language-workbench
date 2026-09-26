@@ -180,6 +180,35 @@ describe("provider catalog, environment boundary and persistence", () => {
     ).toEqual(["Offline conservative", "Offline plain"]);
     expect(calls).toEqual([]);
   });
+  it("replaces offline startup status with the configured server default after restart without discovery", async () => {
+    await stop();
+    await start({});
+    registry.addModel("openai", "previously-cached-model");
+    expect(
+      (await (await api("/api/providers")).json()).applicationDefault,
+    ).toEqual(mock);
+    await stop();
+    await start({ OPENAI_API_KEY: key, OPENAI_MODEL: "gpt-6-luna" });
+    const catalog = await (await api("/api/providers")).json();
+    expect(catalog.applicationDefault).toEqual({
+      providerId: "openai",
+      modelId: "gpt-6-luna",
+    });
+    expect(
+      catalog.providers.find((p: { id: string }) => p.id === "openai"),
+    ).toMatchObject({
+      configured: true,
+      enabled: true,
+      status: "Ready",
+    });
+    expect(
+      catalog.providers.find((p: { id: string }) => p.id === "openai").models,
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "gpt-6-luna" })]),
+    );
+    expect(JSON.stringify(catalog)).not.toContain(key);
+    expect(calls).toEqual([]);
+  });
   it("discovers with the official SDK, keeps unknown capabilities unknown, and persists cache/manual IDs/disable over restart", async () => {
     const refreshed = await (
       await api("/api/providers/openai/models/refresh", "POST", {})
@@ -401,6 +430,24 @@ describe("one authoritative routing algorithm and immutable comparison", () => {
     registry.setEnabled("mock", false);
     expect((await api("/api/ai", "POST", input)).status).toBe(400);
     expect(calls).toEqual([]);
+  });
+  it("diagnoses with live and offline providers without writing the document", async () => {
+    const document = repository.create(
+      "Unchanged",
+      "Only the writer changes prose.",
+    );
+    const input = fixture();
+    input.readContext.document = document;
+    input.editTarget = targetFor(document, document.sections[0].id);
+    const before = repository.get(document.id);
+    const liveResponse = await (await api("/api/ai", "POST", input)).json();
+    expect(liveResponse.model).toEqual(openai);
+    expect(liveResponse.routeSource).toBe("application");
+    expect(repository.get(document.id)).toEqual(before);
+    input.modelOverride = mock;
+    const offlineResponse = await (await api("/api/ai", "POST", input)).json();
+    expect(offlineResponse.model).toEqual(mock);
+    expect(repository.get(document.id)).toEqual(before);
   });
   it("compares equivalent contexts and controls with partial errors, no canonical writes and bounded distinct choices", async () => {
     registry.addModel("openai", "failing-model");

@@ -94,7 +94,11 @@ export function ModelControls({ w }: { w: Workspace }) {
   return (
     <details className="model-controls">
       <summary aria-label="Model controls">
-        <span>{modelLabel(w.catalog, w.effectiveModel.model)}</span>
+        <span>
+          {w.catalog
+            ? modelLabel(w.catalog, w.effectiveModel.model)
+            : "Provider status unavailable"}
+        </span>
         <ChevronDown size={14} />
       </summary>
       <div className="model-controls-body">

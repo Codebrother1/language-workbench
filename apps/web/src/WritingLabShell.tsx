@@ -191,11 +191,13 @@ export function WritingLabShell({
       <div className="inspector-top">
         <span className="eyebrow">WRITING LAB</span>
         <span className="provider" title="Provider for the current model route">
-          {w.effectiveModel.model.providerId === "mock"
-            ? "Mock · local"
-            : (w.catalog?.providers.find(
-                (p) => p.id === w.effectiveModel.model.providerId,
-              )?.displayName ?? w.effectiveModel.model.providerId)}
+          {!w.catalog
+            ? "Provider status unavailable"
+            : w.effectiveModel.model.providerId === "mock"
+              ? "Mock · local"
+              : (w.catalog.providers.find(
+                  (p) => p.id === w.effectiveModel.model.providerId,
+                )?.displayName ?? w.effectiveModel.model.providerId)}
         </span>
       </div>
       <div className="lab-head">
@@ -322,7 +324,7 @@ export function WritingLabShell({
                   )}
                 </Select>
               </Field>
-              {w.effectiveModel.model.providerId === "mock" && (
+              {w.catalog && w.effectiveModel.model.providerId === "mock" && (
                 <p className="offline-capability">
                   Offline diagnosis gives deterministic structural guidance, not
                   a model-quality rewrite. A later proposal can trim a few
@@ -553,7 +555,7 @@ export function WritingLabShell({
                     placeholder="Add the detail only you know…"
                   />
                 </Field>
-                {w.effectiveModel.model.providerId === "mock" && (
+                {w.catalog && w.effectiveModel.model.providerId === "mock" && (
                   <p className="offline-capability">
                     Offline proposals can stage your supplied passage or apply a
                     few fixed trims. Directions alone cannot produce a
@@ -772,7 +774,7 @@ export function WritingLabShell({
       <div className="whole-piece">
         <span className="eyebrow">STEP BACK</span>
         <p>Look at the structure without rewriting it.</p>
-        {offlineCritique && (
+        {w.catalog && offlineCritique && (
           <p className="offline-capability">
             Offline whole-piece critique checks limited deterministic patterns;
             it cannot assess your argument or invent new analysis.

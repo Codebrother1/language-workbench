@@ -94,17 +94,12 @@ export class ProviderRegistry {
             model("conservative", id, "Offline conservative", "built-in"),
             model("plain", id, "Offline plain", "built-in"),
           ]
-        : (cached?.models ??
-          (id === "openai"
-            ? [
-                model(
-                  this.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
-                  id,
-                  undefined,
-                  "environment default",
-                ),
-              ]
-            : []));
+        : [...(cached?.models ?? [])];
+    if (id === "openai") {
+      const defaultId = this.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
+      if (!models.some((entry) => entry.id === defaultId))
+        models.unshift(model(defaultId, id, defaultId, "environment default"));
+    }
     const enabled = implemented && (cached?.enabled ?? true);
     return {
       id,

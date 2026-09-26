@@ -108,6 +108,94 @@ async function replacements(page: Page) {
   await expect(page.getByTestId("proposal").first()).toBeVisible();
 }
 
+test("Lab refreshes a restarted server's configured provider before a routed run", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await section(page, "Segue");
+  await expect(page.locator(".inspector-top .provider")).toHaveText(
+    "Mock · local",
+  );
+  const baseline = await (await request.get("/api/providers")).json();
+  const live = { providerId: "openai", modelId: "gpt-6-luna" };
+  const catalog = {
+    ...baseline,
+    applicationDefault: live,
+    providers: baseline.providers.map(
+      (provider: { id: string; models: { id: string }[] }) =>
+        provider.id === "openai"
+          ? {
+              ...provider,
+              configured: true,
+              enabled: true,
+              status: "Ready",
+              credentialSuffix: null,
+              models: [
+                ...provider.models.filter(
+                  (entry: { id: string }) => entry.id !== live.modelId,
+                ),
+                {
+                  id: live.modelId,
+                  providerId: "openai",
+                  displayName: live.modelId,
+                  capabilities: {},
+                  metadata: { source: "environment default" },
+                },
+              ],
+            }
+          : provider,
+    ),
+  };
+  await page.route("**/api/providers", (route) =>
+    route.fulfill({ json: catalog }),
+  );
+  await page.route("**/api/health", (route) =>
+    route.fulfill({
+      json: { ok: true, provider: "openai", webResearch: false },
+    }),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.locator(".inspector-top .provider")).toHaveText(
+    "OpenAI Direct",
+  );
+  await expect(page.locator(".model-controls > summary")).toContainText(
+    "gpt-6-luna · OpenAI Direct",
+  );
+  await models(page);
+  await expect(
+    page
+      .getByLabel("Run with", { exact: true })
+      .locator("option")
+      .filter({ hasText: "gpt-6-luna · OpenAI Direct" }),
+  ).toBeEnabled();
+  await page.route("**/api/ai", (route) =>
+    route.fulfill({
+      json: {
+        provider: "openai",
+        diagnosis: "Synthetic live-provider diagnosis.",
+        mechanism: "Fixture only.",
+        question: "What matters next?",
+        missingIngredients: [],
+        proposals: [],
+        findings: [],
+        lexical: [],
+        model: live,
+        routeSource: "application",
+      },
+    }),
+  );
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-model")).toContainText(
+    "gpt-6-luna · OpenAI Direct · application",
+  );
+  await save(page);
+  const after = await stored(request, doc.id);
+  expect(after.sections[1].workbench.runs[0].model).toEqual(live);
+  expect(documentText(after)).toBe(documentText(doc));
+});
+
 test("Hook and Segue preserve separate drafts, questions and runs across focus and reload", async ({
   page,
   request,

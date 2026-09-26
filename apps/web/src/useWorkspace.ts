@@ -121,7 +121,7 @@ export async function api<T>(
       const e = await response.json();
       message = typeof e.error === "string" ? e.error : (e.message ?? message);
     } catch {}
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: response.status });
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
@@ -161,10 +161,24 @@ function forkDocument(doc: Document, title = doc.title): Document {
     })),
   };
 }
+function sameSavedContentExceptFocus(a: Document, b: Document): boolean {
+  const withoutFocus = (doc: Document) =>
+    JSON.stringify(
+      documentSchema.parse({
+        ...doc,
+        revision: 0,
+        updatedAt: "",
+        focusTarget: null,
+      }),
+    );
+  return withoutFocus(a) === withoutFocus(b);
+}
+
 export function useWorkspace() {
   const initial = useRef(newDocument());
   const [doc, setDoc] = useState(initial.current);
   const current = useRef(doc);
+  const persisted = useRef(doc);
   // Preserve section metadata when rich-editor undo resurrects a removed/reordered node.
   const sectionMetadata = useRef(new Map(doc.sections.map((s) => [s.id, s])));
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -204,10 +218,23 @@ export function useWorkspace() {
   const navigating = useRef(false);
   const [documentWorkbench, setDocumentWorkbench] = useState(false);
   const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
+  const latestCatalogRequest = useRef(0);
   const refreshCatalog = useCallback(async () => {
-    const next = await api<ProviderCatalog>("/providers");
-    setCatalog(next);
-    return next;
+    const requestId = ++latestCatalogRequest.current;
+    try {
+      const [next, status] = await Promise.all([
+        api<ProviderCatalog>("/providers"),
+        api<typeof health>("/health"),
+      ]);
+      if (requestId === latestCatalogRequest.current) {
+        setCatalog(next);
+        setHealth(status);
+      }
+      return next;
+    } catch (error) {
+      if (requestId === latestCatalogRequest.current) setCatalog(null);
+      throw error;
+    }
   }, []);
   const updateRef = useRef<(fn: (d: Document) => Document) => void>(() => {});
   const selectRef = useRef<() => void>(() => {});
@@ -270,6 +297,7 @@ export function useWorkspace() {
       return;
     }
     const run = async () => {
+      let rebases = 0;
       while (dirty.current > saved.current) {
         const version = dirty.current,
           snapshot = {
@@ -284,6 +312,7 @@ export function useWorkspace() {
             snapshot,
           );
           if (current.current.id === snapshot.id) {
+            persisted.current = result;
             const merged = {
               ...withFocusTarget(current.current, targetRef.current),
               revision: result.revision,
@@ -297,6 +326,34 @@ export function useWorkspace() {
           }
           saved.current = version;
         } catch (e) {
+          if (
+            (e as Error & { status?: number }).status === 409 &&
+            rebases < 2
+          ) {
+            const latest = await api<Document>(
+              "/documents/" + snapshot.id,
+            ).catch(() => null);
+            if (
+              latest &&
+              current.current.id === snapshot.id &&
+              persisted.current.id === snapshot.id &&
+              sameSavedContentExceptFocus(latest, persisted.current)
+            ) {
+              rebases++;
+              persisted.current = latest;
+              const rebased = {
+                ...current.current,
+                revision: latest.revision,
+                updatedAt: latest.updatedAt,
+              };
+              current.current = rebased;
+              setDoc(rebased);
+              setDocuments((ds) =>
+                ds.map((d) => (d.id === rebased.id ? rebased : d)),
+              );
+              continue;
+            }
+          }
           setSaveState("Not saved");
           setError(
             (e as Error).message +
@@ -446,6 +503,7 @@ export function useWorkspace() {
         if (dirty.current === 0 && ds.length) active = ds[0];
         else {
           const created = await api<Document>("/documents", "POST", {});
+          persisted.current = created;
           // Keep anything typed during boot, including stable section IDs.
           active = {
             ...current.current,
@@ -458,6 +516,7 @@ export function useWorkspace() {
         }
         if (!alive) return;
         current.current = active;
+        if (dirty.current === 0) persisted.current = active;
         sectionMetadata.current = new Map(
           active.sections.map((s) => [s.id, s]),
         );
@@ -489,6 +548,21 @@ export function useWorkspace() {
       alive = false;
     };
   }, [editor, flush]);
+  useEffect(() => {
+    if (!ready) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible")
+        void refreshCatalog().catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const interval = window.setInterval(refresh, 15_000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      window.clearInterval(interval);
+    };
+  }, [ready, refreshCatalog]);
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
       if (
@@ -666,6 +740,7 @@ export function useWorkspace() {
     setInsertion(null);
     sectionMetadata.current = new Map(next.sections.map((s) => [s.id, s]));
     current.current = next;
+    persisted.current = next;
     setDoc(next);
     dirty.current = 0;
     saved.current = 0;
@@ -1346,6 +1421,16 @@ export function useWorkspace() {
     structureInput?: StructureRequest,
   ) => {
     if (requestBusy.current || navigating.current) return;
+    let activeCatalog: ProviderCatalog;
+    try {
+      activeCatalog = await refreshCatalog();
+    } catch {
+      setError(
+        "Provider status is unavailable. Reconnect to the server before running the Lab.",
+      );
+      return;
+    }
+    if (requestBusy.current || navigating.current) return;
     const chosen = structureInput
       ? "structure"
       : lensMode
@@ -1388,10 +1473,7 @@ export function useWorkspace() {
       task: chosen,
       documentDefault: current.current.defaultModel,
       preferences: settingsRef.current.routing,
-      applicationDefault: catalog?.applicationDefault ?? {
-        providerId: "mock",
-        modelId: "conservative",
-      },
+      applicationDefault: activeCatalog.applicationDefault,
     });
     const capture: RunCapture = {
       ...(chosen === "words"
@@ -1415,7 +1497,7 @@ export function useWorkspace() {
           : draft.answer,
       ...(structureInput ? { structure: structureInput } : {}),
       controls: { ...wb.controls },
-      model: catalog ? route.model : null,
+      model: route.model,
       question:
         wb.runs.find((r) => r.id === wb.activeRunId)?.response.question ?? "",
     };

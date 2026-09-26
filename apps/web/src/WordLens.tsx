@@ -138,7 +138,7 @@ export function WordLensControls({ w }: { w: Workspace }) {
           model must state uncertainty; current usage requires cited research.
         </p>
       </details>
-      {w.effectiveModel.model.providerId === "mock" && (
+      {w.catalog && w.effectiveModel.model.providerId === "mock" && (
         <p className="offline-capability">
           Offline Word Lens has curated entries only. It cannot search for or
           verify a new nuance; configure a model for broader suggestions.

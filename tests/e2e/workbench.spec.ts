@@ -9,6 +9,8 @@ import {
   newSection,
   defaultSettings,
   documentText,
+  targetFor,
+  paragraphs,
 } from "../../packages/domain/src/index";
 async function seed(
   request: APIRequestContext,
@@ -452,6 +454,66 @@ test("section copy and whole-document copy are exact; cross-section AI is disabl
     0,
   );
 });
+test("Diagnose rebases an external focus-only revision without changing prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "01 Opening" }).click();
+  await page
+    .getByLabel("Writing action", { exact: true })
+    .selectOption("shorten");
+  await save(page);
+  const before = await (await request.get(`/api/documents/${doc.id}`)).json();
+  const outside = await request.put(`/api/documents/${doc.id}`, {
+    data: { ...before, focusTarget: targetFor(before, before.sections[1].id) },
+  });
+  expect(outside.ok()).toBe(true);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.locator(".diagnosis")).toContainText("OFFLINE");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  const after = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(after.sections.map((s: { content: unknown }) => s.content)).toEqual(
+    before.sections.map((s: { content: unknown }) => s.content),
+  );
+  expect(after.sections[0].workbench.runs).toHaveLength(1);
+  expect(after.revision).toBeGreaterThan(before.revision + 1);
+});
+
+test("Diagnose preserves a genuine concurrent prose conflict", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "01 Opening" }).click();
+  await page
+    .getByLabel("Writing action", { exact: true })
+    .selectOption("shorten");
+  await save(page);
+  const before = await (await request.get(`/api/documents/${doc.id}`)).json();
+  const external = await request.put(`/api/documents/${doc.id}`, {
+    data: {
+      ...before,
+      sections: before.sections.map((section: { id: string }) =>
+        section.id === before.sections[0].id
+          ? { ...section, content: paragraphs("External writer changed this.") }
+          : section,
+      ),
+    },
+  });
+  expect(external.ok()).toBe(true);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("save-state")).toHaveText("Not saved");
+  await expect(page.getByRole("alert")).toContainText(
+    "Document changed. Reload before saving.",
+  );
+  const after = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(documentText(after)).toContain("External writer changed this.");
+  expect(after.sections[0].workbench?.runs ?? []).toHaveLength(0);
+});
+
 test("typing during a delayed save is retained and navigation waits for saving", async ({
   page,
   request,
