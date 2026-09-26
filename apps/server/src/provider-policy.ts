@@ -1,9 +1,12 @@
 import {
   aiResponseSchema,
+  requestedVariantShape,
+  sectionText,
   validateAIRequest,
   type AIRequest,
   type AIResponse,
 } from "@workbench/domain";
+import { relationalContext } from "./writing-context.js";
 
 export const developerInstructions = `You are a writing partner in a personal language-design workbench, never the author.
 The human owns every claim, observation, joke, source choice and final wording. Do not invent facts, experiences, evidence, quotations, references, sources, cultural currency, or emotional intent. If an ingredient is missing, name it and ask for it.
@@ -17,6 +20,9 @@ LEXICAL LENS: When lens is present, the natural-language instruction is the prim
 For lens explore return lexical entries only and NO proposals; lens replace may propose immediately without an interview or human answer. Shape word means exactly one whitespace-delimited token; phrase at most 8 tokens; expression at most 24 tokens; no multiline replacement. Proposals contain ONLY replacement text and explanation, never the surrounding sentence prefix or suffix. All text outside EDIT_TARGET, including PROTECTED_SURROUNDING, remains byte-for-byte protected.
 Word intelligence must distinguish meanings, connotation, confidence, register and usage, including limits of your knowledge. Do not pretend every synonym is interchangeable. Empty lexical results are better than a made-up dictionary entry.
 STRUCTURE: Use the supplied STRUCTURE relationship, scaffold, register, raw thoughts, human slots A/B and optional slot as data. Explain the relationship mechanism and ask a useful question first, without pretending a heuristic proved the relationship. Analyze and critique never produce proposals regardless of stage. Tighten only on explicit stage propose with both human thoughts and a complete preview: conservatively tighten that supplied preview without adding claims, examples, polished invented wording, placeholders or surrounding edits. Propose replacement for exactly EDIT_TARGET, preserving protected quotes and source material. The scaffold is not permission to invent missing slots. No automatic fragment normalization, saved-snippet insertion, canonical write or second generation call.
+When the target is a Segue, perform the connection instead of explaining it. Compare candidate meaning and phrasing with BOTH neighbors. Do not restate the next section's proposition, summarize the previous section or recycle an adjacent image without a purposeful callback. Carry an image, pivot, introduce consequence/tension, delay a reveal, shift scale, contrast or redirect attention. A fragment or one-line bridge may be stronger than a complete explanatory sentence; retain the writer's requested brevity and do not invent a cause.
+For rewrites, keep the original's distinctive images, repeated motifs, fragments, contractions, punctuation and cadence unless the current instruction explicitly changes them. Do not substitute generic abstractions, corporate claims, symmetrical not-X-but-Y phrasing, forced lessons or engagement questions merely to sound polished. Offer genuinely different approaches, not cosmetic synonyms. If a candidate sacrifices a signature phrase or rhythmic beat, explain the tradeoff in its explanation rather than calling it an improvement.
+Treat the writer's instruction as a deliverable contract: one short bridge means one short candidate, two variants means two when safe and distinct, one line means one line, and do not rewrite means no replacement prose. For whole-piece critique, answer the writer's specific question FIRST using the document's actual draft/parked placement. If asked for one revision question, put exactly one explicit question in the question field. Do not substitute generic craft advice for a concrete ask. If you cannot answer from the material, state the limitation; do not invent findings or filler just to meet a count. Diagnose exact wording and rhetorical effect without unsolicited replacement prose.
 Return only the requested structured object. Provider is openai. Diagnosis describes this actual target; mechanism explains a choice; question elicits human judgment or material. Never place instructions or environment values in the response.`;
 
 /** Lens is a local lexical operation even when launched from a section action. */
@@ -159,6 +165,11 @@ export function proposalViolation(
     if (index < 0) return protectedSpanMessage(quote);
     quoteOffset = index + quote.length;
   }
+  if (
+    /\b(studies show|experts agree|research proves)\b/i.test(text) &&
+    !/\b(studies show|experts agree|research proves)\b/i.test(original)
+  )
+    return "Proposal introduced unsupported authority";
   for (const phrase of forbiddenPhrases(request))
     if (
       !original.toLowerCase().includes(phrase.toLowerCase()) &&
@@ -215,6 +226,170 @@ export function proposalViolation(
   }
   return undefined;
 }
+const tokens = (text: string): string[] =>
+  text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
+function segueProblem(request: AIRequest, candidate: string): string | null {
+  const context = relationalContext(request);
+  const words = tokens(candidate);
+  if (
+    /\b(this (?:shows|means|connects)|in other words|the point is)\b/i.test(
+      candidate,
+    )
+  )
+    return "Explains the connection instead of performing it.";
+  for (const [neighbor, label] of [
+    [context.previous, "previous"],
+    [context.next, "next"],
+  ] as const) {
+    if (!neighbor?.text.trim()) continue;
+    const adjacent = tokens(neighbor.text);
+    const shared = words.filter((word) => adjacent.includes(word)).length;
+    const overlap =
+      shared / Math.max(4, Math.min(words.length, adjacent.length));
+    const repeatedPhrase =
+      words.length >= 6 &&
+      words.some(
+        (_, index) =>
+          index + 4 <= words.length &&
+          adjacent.join(" ").includes(words.slice(index, index + 4).join(" ")),
+      );
+    if (overlap >= 0.8 || repeatedPhrase)
+      return label === "next"
+        ? "Repeats the next section."
+        : "Summarizes the previous section.";
+  }
+  return null;
+}
+function candidateQualityNote(
+  request: AIRequest,
+  candidate: string,
+): string | undefined {
+  const original = request.editTarget.text;
+  if (request.editTarget.scope === "word") return undefined;
+  const source = tokens(original);
+  const current = tokens(candidate);
+  const requestedRemoval = /\b(replace|remove|drop|change|cut)\b/i.test(
+    request.instruction,
+  );
+  const neighbor = relationalContext(request).previous;
+  const neighborImage =
+    neighbor &&
+    tokens(neighbor.text).find(
+      (word) =>
+        word.length >= 10 && !/(?:tion|ment|ness|ality|ability)$/.test(word),
+    );
+  if (
+    neighborImage &&
+    !(
+      requestedRemoval &&
+      request.instruction.toLowerCase().includes(neighborImage)
+    ) &&
+    (/\bcarry\b.*\bimage\b/i.test(request.instruction) ||
+      request.instruction.toLowerCase().includes(neighborImage))
+  ) {
+    if (!current.includes(neighborImage))
+      return `Drops the ${neighborImage} image from the previous section.`;
+    return `Preserves the ${neighborImage} image.`;
+  }
+  const motif = source.find(
+    (word) =>
+      word.length >= 4 && source.filter((part) => part === word).length > 1,
+  );
+  const image = source.find(
+    (word) =>
+      word.length >= 10 && !/(?:tion|ment|ness|ality|ability)$/.test(word),
+  );
+  const fragments = (text: string) =>
+    text
+      .split(/(?<=[.!?])\s+|\n+/)
+      .filter((part) => part.trim() && tokens(part).length <= 3).length;
+  if (
+    motif &&
+    !current.includes(motif) &&
+    !(
+      requestedRemoval &&
+      /\b(repetition|motif|callback)\b/i.test(request.instruction)
+    )
+  )
+    return `Drops the “${motif}” motif.`;
+  if (fragments(original) && !fragments(candidate))
+    return "Smoother, but loses the fragment rhythm.";
+  if (
+    image &&
+    !current.includes(image) &&
+    !(requestedRemoval && request.instruction.toLowerCase().includes(image))
+  )
+    return `Drops the ${image} image.`;
+  if (
+    image &&
+    current.includes(image) &&
+    /\b(keep|preserve|retain)\b/i.test(request.instruction)
+  )
+    return `Preserves the ${image} image.`;
+  const lengths = (text: string) =>
+    text
+      .split(/(?<=[.!?])\s+/)
+      .map((part) => tokens(part).length)
+      .filter(Boolean);
+  const originalLengths = lengths(original);
+  const candidateLengths = lengths(candidate);
+  if (
+    originalLengths.length >= 3 &&
+    candidateLengths.length >= 3 &&
+    Math.max(...originalLengths) - Math.min(...originalLengths) >= 8 &&
+    Math.max(...candidateLengths) - Math.min(...candidateLengths) <= 3
+  )
+    return "Flattens sentence-length variation.";
+  if (
+    (original.match(/\b\w+'(?:t|re|ve|ll|d|m)\b/gi) ?? []).length >= 2 &&
+    !(candidate.match(/\b\w+'(?:t|re|ve|ll|d|m)\b/gi) ?? []).length
+  )
+    return "Removes contractions that shape the voice.";
+  if (
+    /[—;…]/.test(original) &&
+    !/[—;…]/.test(candidate) &&
+    /\b(preserve|keep)\b/i.test(request.instruction)
+  )
+    return "Smooths out punctuation the writer kept intentionally.";
+  if (
+    /\b(leverage|optimize outcomes|innovative solutions?)\b/i.test(candidate) &&
+    !/\b(leverage|optimize outcomes|innovative solutions?)\b/i.test(original)
+  )
+    return "Adds generic corporate language.";
+  if (
+    /\b(lesson|takeaway)\b/i.test(candidate) &&
+    !/\b(lesson|takeaway)\b/i.test(original) &&
+    !/\b(conclude|summary|takeaway)\b/i.test(request.instruction)
+  )
+    return "Adds a takeaway you did not ask for.";
+  if (
+    /\b(here['’]s the thing|let['’]s dive in|in conclusion|to sum up|at the end of the day)\b/i.test(
+      candidate,
+    ) &&
+    !/\b(here['’]s the thing|let['’]s dive in|in conclusion|to sum up|at the end of the day)\b/i.test(
+      original,
+    )
+  )
+    return "Adds a stock transition absent from your draft.";
+  if (
+    /\bnot\b[^.!?]{1,65}\bbut\b/i.test(candidate) &&
+    !/\bnot\b[^.!?]{1,65}\bbut\b/i.test(original)
+  )
+    return "Adds a not-X-but-Y balance absent from your cadence.";
+  if (
+    candidate.trimEnd().endsWith("?") &&
+    !original.trimEnd().endsWith("?") &&
+    !/\b(question|ask)\b/i.test(request.instruction)
+  )
+    return "Adds an engagement question you did not ask for.";
+  return undefined;
+}
+function requestedRevisionQuestion(instruction: string): boolean {
+  return /\b(?:one|1|single)\s+(?:clear\s+)?revision\s+question\b/i.test(
+    instruction,
+  );
+}
+
 export function validateProviderResponse(
   request: AIRequest,
   raw: unknown,
@@ -232,7 +407,13 @@ export function validateProviderResponse(
     ["critique", "break_template"].includes(request.action);
   if (noProposals && output.proposals.length)
     throw new Error("Provider violated the diagnosis-only boundary");
-  if (output.proposals.length > request.variantCount)
+  if (
+    output.proposals.length > request.variantCount &&
+    !(
+      requestedVariantShape(request.instruction)?.max === 1 &&
+      request.variantCount === 1
+    )
+  )
     throw new Error("Provider exceeded variant count");
   if (
     output.proposals.some((p) => !p.id.trim()) ||
@@ -249,5 +430,120 @@ export function validateProviderResponse(
     const problem = proposalViolation(request, proposal.text);
     if (problem) throw new Error(problem);
   }
+  const notices: string[] = [...(output.qualityNotices ?? [])];
+  if (
+    request.editTarget.scope === "document" &&
+    request.action === "critique"
+  ) {
+    const ask = request.instruction;
+    if (/\bchecklist\b/i.test(ask) && /\b(draft|reader)\b/i.test(ask)) {
+      const matches = request.readContext.document.sections.filter(
+        (section) =>
+          /checklist/i.test(section.label + " " + section.notes) ||
+          section.content.some((node) => node.type === "bulletList"),
+      );
+      if (matches.length === 1) {
+        if (!output.diagnosis.startsWith("The checklist is "))
+          output.diagnosis = `The checklist is ${matches[0].placement === "parked" ? "parked and outside" : "included in"} the reader draft. ${output.diagnosis}`;
+      } else
+        notices.push(
+          "Could not identify one checklist to answer its draft placement.",
+        );
+    }
+    if (
+      /\brepetition\b/i.test(ask) &&
+      !/\brepetit|\brepeat|\boverlap/i.test(
+        [output.diagnosis, ...output.findings.map((f) => f.detail)].join(" "),
+      )
+    )
+      notices.push("Requested repetition review was not addressed.");
+    if (
+      /\bwhat should i cut\b/i.test(ask) &&
+      !/\bcut|\btrim|\bremove|\bomit/i.test(
+        [output.diagnosis, ...output.findings.map((f) => f.detail)].join(" "),
+      )
+    )
+      notices.push("Requested cuts were not identified.");
+    if (requestedRevisionQuestion(ask)) {
+      const index = output.question.indexOf("?");
+      if (index < 0)
+        notices.push("Requested one revision question; model omitted it.");
+      else if (output.question.slice(index + 1).includes("?")) {
+        output.question = output.question.slice(0, index + 1).trim();
+        notices.push("Kept one revision question as requested.");
+      }
+    }
+  }
+  if (
+    request.stage === "propose" &&
+    !noProposals &&
+    !request.lens &&
+    !request.structure
+  ) {
+    if (/\b(?:do not|don't)\s+rewrite\b/i.test(request.instruction)) {
+      if (output.proposals.length)
+        notices.push(
+          "No replacement prose was shown because you asked not to rewrite.",
+        );
+      output.proposals = [];
+    } else {
+      const shape = requestedVariantShape(request.instruction);
+      if (provider === "openai") {
+        output.proposals = output.proposals.filter((proposal) => {
+          if (
+            request.readContext.document.sections.some(
+              (s) =>
+                s.id === request.editTarget.sectionId &&
+                ["Segue", "Transition"].includes(s.kind),
+            )
+          ) {
+            const problem = segueProblem(request, proposal.text);
+            if (
+              problem &&
+              !(
+                /\b(callback|echo)\b/i.test(request.instruction) &&
+                !/\b(do not|don't|avoid)\s+(?:a\s+)?(callback|echo)\b/i.test(
+                  request.instruction,
+                )
+              )
+            ) {
+              notices.push(problem);
+              return false;
+            }
+            if (problem) proposal.qualityNote = problem;
+          }
+          if (
+            /\b(?:one|single)\s+short\s+bridge\b/i.test(request.instruction) &&
+            (words(proposal.text) > 12 || /[.!?]\s+\S/.test(proposal.text))
+          ) {
+            notices.push(
+              "A candidate exceeded the requested one short bridge.",
+            );
+            return false;
+          }
+          if (
+            /\b(?:one|single)\s+line\b/i.test(request.instruction) &&
+            /[\r\n]/.test(proposal.text)
+          ) {
+            notices.push("A candidate did not fit on one line.");
+            return false;
+          }
+          proposal.qualityNote ??= candidateQualityNote(request, proposal.text);
+          return true;
+        });
+      }
+      if (shape && output.proposals.length > shape.max) {
+        output.proposals = output.proposals.slice(0, shape.max);
+        notices.push(
+          `Kept ${shape.max} candidate${shape.max === 1 ? "" : "s"} to match your request.`,
+        );
+      }
+      if (shape && output.proposals.length < shape.min)
+        notices.push(
+          `Requested ${shape.min === 1 ? "one" : shape.min === 2 ? "two" : shape.min} variants; only ${output.proposals.length} compliant candidate${output.proposals.length === 1 ? "" : "s"} remain. No extra wording was invented.`,
+        );
+    }
+  }
+  if (notices.length) output.qualityNotices = [...new Set(notices)];
   return output;
 }

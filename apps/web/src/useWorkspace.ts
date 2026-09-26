@@ -43,6 +43,7 @@ import {
   type ProviderCatalog,
   type LensOptions,
   type AIRequest,
+  requestedVariantShape,
   resolveModel,
   routingPreferencesSchema,
   emptyLibrary,
@@ -1539,7 +1540,7 @@ export function useWorkspace() {
         instruction: capture.instruction,
         answer: capture.answer,
         controls: capture.controls,
-        variantCount: 2,
+        variantCount: requestedVariantShape(capture.instruction)?.min ?? 2,
         modelOverride: comparing ? null : wb.oneOffModel,
         ...(chosen === "words"
           ? {

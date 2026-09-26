@@ -30,7 +30,7 @@ A pending operation blocks switching documents with an explicit message. You may
 
 A run captures its original target, offsets and section snapshot. Accept/Replace/Activate rechecks that anchor against the current document. If the source section changed, make a fresh selection and request rather than expecting automatic relocation. Editing an unrelated section need not invalidate the original target. Section merges retain prior runs, but stale anchors still fail closed. Run inspection never refreshes an obsolete anchor into permission to overwrite new text.
 
-Original variants are text snapshots, not full rich-format backups. Section-wide replacement rebuilds paragraphs and can lose formatting. Whole-piece analysis and cross-section selections do not authorize whole-document rewriting.
+Original variants are text snapshots, not full rich-format backups. Section-wide replacement rebuilds paragraphs and can lose formatting. Whole-piece analysis and cross-section selections do not authorize whole-document rewriting. Live candidates are checked after generation against explicit count/line/short-bridge requests and nearby Segue prose; clear neighbor restatements are omitted, while lightweight cadence, motif and stock-prose mismatches receive brief quality notes. When a safe distinct option is missing, an output check says so instead of inventing one. This is a lexical heuristic, not reliable semantic understanding or a promise that every subtle paraphrase will be caught. No automatic extra model call is made to fill a missing variant. Whole-piece critique shows the requested revision question separately and flags missing deliverables.
 
 ## Choose models without changing text
 
@@ -51,7 +51,7 @@ Word/Phrase Lens uses task **`words`** with exactly this priority. It does not b
 
 **Diagnosis counts as the next operation.** If Run with is set before diagnosing, it is consumed by that diagnosis; the later proposal uses normal routing unless you set another one-off. Once dispatched, even a failed request consumes that one-off. A persistent section override is different and stays until cleared. Compare has explicit model references of its own and does not consume Run with.
 
-In **AI provider settings**, choose a document default and, optionally, application, section-type or task defaults. Clearing an override restores inheritance. Unknown/disabled/unconfigured choices are not silently replaced by another model; a request reports the problem.
+In **AI provider settings**, choose a document default and, optionally, application, section-type or task defaults. Clearing an override restores inheritance. Unknown/disabled/unconfigured choices are not silently replaced by another model; a request reports the problem. This pass leaves the configured application default (Luna in the reported setup) untouched. If a writer prefers Sol for structural critique after a matched comparison, they can explicitly set a critique task default or use a one-off **Run with**; this pass does not change routing or silently add a higher-cost call.
 
 ## Compare models
 
@@ -64,6 +64,10 @@ In **AI provider settings**, choose a document default and, optionally, applicat
 Comparison never overwrites a draft or automatically chooses a winner. Each provider outcome is independent; successful runs remain available when another model fails. Errors are shown rather than replaced with mock success. With live models, expect a request and possible charges per selected model.
 
 The UI shows a busy state, errors, completed runs, and proposal outcomes. It is not a token-streaming/per-provider progress console. Recent-output review is vertical and limited to a small recent set, not a full comparison canvas. There is no favorites/recent-model picker UI, although history records the actual models used.
+
+### Matched live generation check — 2026-09-25
+
+With explicit approval, sent the same synthetic three-section Segue request through OpenAI Direct once to `gpt-6-luna` and once to `gpt-6-sol`. The previous section placed refrigerator light on an empty floor; the next stated that a repair bill meant the house could not be kept. The instruction requested **one short, one-line bridge**, carrying the refrigerator image without restating the bill; the supplied human material was “The refrigerator hummed after the voices stopped.” Both runs returned exactly that one line, with no repeated bill proposition, invented claim, extra sentence or quality warning. Luna described the visual-to-sound pivot; Sol more explicitly identified the repeated light in the existing bridge and avoided attributing a cause to the stopped voices. In this single matched task Sol's diagnosis was marginally more pointed, but the generated wording was identical human-supplied material, so this does **not** establish that either model generates better alternatives. Neither candidate was accepted or stored in a document; the isolated test store had zero persisted documents afterward. Additional live writing samples are needed to evaluate cadence preservation, endings and long-form critique. No automatic routing change was made.
 
 ## Word/Phrase Lens
 

@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import {
-  aiResponseSchema,
+  modelResponseSchema,
   radarItemSchema,
   uid,
   type AIRequest,
@@ -106,7 +106,7 @@ export class OpenAIProvider implements LLMProvider {
           }),
         },
       ],
-      text: { format: zodTextFormat(aiResponseSchema, "writing_response") },
+      text: { format: zodTextFormat(modelResponseSchema, "writing_response") },
     });
     if (!response.output_parsed)
       throw new Error("No valid structured response");

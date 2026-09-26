@@ -8,6 +8,7 @@ import {
   newDocument,
   newSection,
   defaultSettings,
+  emptyWorkbench,
   documentText,
   modelKey,
 } from "../../packages/domain/src/index";
@@ -619,6 +620,88 @@ test("Word Lens dark mode stays readable and canonical preview remains distinct 
   ).toBe(true);
   await save(page);
   expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+});
+
+test("shared-piece quality notes and a requested revision question remain review-only", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument(
+    "Shared piece",
+    "The refrigerator light pooled on the floor.",
+  );
+  doc.sections.push(newSection("Segue", "The light stayed on."));
+  doc.sections.push(
+    newSection("Point", "The repair bill meant we could not keep the house."),
+  );
+  doc.workbench = {
+    ...emptyWorkbench(),
+    instruction: "Give me one revision question.",
+  };
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  await page.route("**/api/ai", (route) => {
+    const input = route.request().postDataJSON();
+    const base = {
+      provider: "openai",
+      diagnosis: "The image and the bill carry different weights.",
+      mechanism: "Move from the light toward consequence.",
+      question: "Which image should carry forward?",
+      missingIngredients: [],
+      findings: [],
+      lexical: [],
+      proposals: [],
+    };
+    return route.fulfill({
+      json:
+        input.action === "critique"
+          ? { ...base, question: "Which repeated light image should you cut?" }
+          : input.stage === "propose"
+            ? {
+                ...base,
+                qualityNotices: ["Repeats the next section."],
+                proposals: [
+                  {
+                    id: "pivot",
+                    label: "Pivot",
+                    text: "The refrigerator hummed after the voices stopped.",
+                    explanation: "Carries the image without naming the bill.",
+                    qualityNote: "Preserves the refrigerator image.",
+                  },
+                ],
+              }
+            : base,
+    });
+  });
+  await open(page);
+  await section(page, "Segue");
+  await page
+    .getByLabel("Your direction", { exact: true })
+    .fill("One short bridge.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await page
+    .getByLabel("Your material", { exact: true })
+    .fill("Material: The light outlasted us.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("proposal")).toHaveCount(1);
+  await expect(page.getByTestId("quality-note")).toContainText(
+    "refrigerator image",
+  );
+  await expect(page.locator(".quality-notices")).toContainText(
+    "Repeats the next section",
+  );
+  await page.getByRole("button", { name: "Whole-piece critique" }).click();
+  await expect(page.getByTestId("revision-question")).toContainText(
+    "Which repeated light image should you cut?",
+  );
+  await save(page);
+  expect(documentText(await stored(request, imported.id))).toBe(
+    documentText(imported),
+  );
 });
 
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({

@@ -883,6 +883,25 @@ hr {
 .response p.small {
   color: var(--muted);
 }
+.quality-notices,
+.revision-question {
+  margin: 12px 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-light);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.quality-notices p,
+.revision-question p {
+  margin: 4px 0 0;
+}
+.quality-note {
+  color: var(--muted);
+  font-size: 12px;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}
 .ingredients {
   font-size: 12px;
   line-height: 1.75;

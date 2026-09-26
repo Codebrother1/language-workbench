@@ -382,6 +382,26 @@ export const aiContextSchema = z.object({
   approvedLanguage: z.array(radarItemSchema),
 });
 export type AIContext = z.infer<typeof aiContextSchema>;
+export function requestedVariantShape(
+  instruction: string,
+): { min: number; max: number } | null {
+  const count = (value: string) =>
+    ({ one: 1, two: 2, three: 3, four: 4, five: 5 })[
+      value.toLowerCase() as "one" | "two" | "three" | "four" | "five"
+    ];
+  const range = instruction.match(
+    /\b(one|two|three|four|five)\s+or\s+(one|two|three|four|five)\s+(?:short\s+)?(?:bridges?|variants?|options?|alternatives?)\b/i,
+  );
+  if (range)
+    return {
+      min: Math.min(count(range[1]), count(range[2])),
+      max: Math.max(count(range[1]), count(range[2])),
+    };
+  const exact = instruction.match(
+    /\b(one|two|three|four|five)\s+(?:short\s+)?(?:bridges?|variants?|options?|alternatives?)\b/i,
+  );
+  return exact ? { min: count(exact[1]), max: count(exact[1]) } : null;
+}
 export const aiRequestSchema = z.object({
   structure: structureRequestSchema.optional(),
   readContext: aiContextSchema,

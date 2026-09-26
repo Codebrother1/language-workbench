@@ -14,6 +14,7 @@ import { MockProvider } from "../apps/server/src/mock-provider";
 import {
   aiRequestSchema,
   defaultSettings,
+  documentTarget,
   newDocument,
   targetFor,
   resolveModel,
@@ -391,6 +392,17 @@ describe("one authoritative routing algorithm and immutable comparison", () => {
     expect(response.model).toEqual(mock);
     expect(response.routeSource).toBe("application");
     expect(calls).toEqual([]);
+  });
+  it("reports a missing requested revision question once through the routed API", async () => {
+    const input = fixture();
+    input.action = "critique";
+    input.editTarget = documentTarget(input.readContext.document);
+    input.instruction = "Give me one revision question.";
+    const result = await (await api("/api/ai", "POST", input)).json();
+    expect(result.qualityNotices).toEqual([
+      "Requested one revision question; model omitted it.",
+    ]);
+    expect(result.proposals).toEqual([]);
   });
   it("routes words/lens, critique, and culture tasks; unsupported web search fails explicitly", async () => {
     const settings = repository.getSettings();

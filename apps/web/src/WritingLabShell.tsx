@@ -127,11 +127,14 @@ export function WritingLabShell({
         response.diagnosis,
         response.mechanism,
         response.question,
+        ...(response.qualityNotices ?? []),
         ...response.missingIngredients,
         ...response.findings.map((f) => f.title + "\n" + f.detail),
         ...response.lexical.map((l) => Object.values(l).join("\n")),
-        ...response.proposals.map(
-          (p) => p.label + "\n" + p.text + "\n" + p.explanation,
+        ...response.proposals.map((p) =>
+          [p.label, p.text, p.explanation, p.qualityNote]
+            .filter(Boolean)
+            .join("\n"),
         ),
       ]
         .filter(Boolean)
@@ -488,6 +491,20 @@ export function WritingLabShell({
           )}
           <p className="diagnosis">{response.diagnosis}</p>
           {response.mechanism && <p className="small">{response.mechanism}</p>}
+          {responseTarget?.scope === "document" && response.question && (
+            <div className="revision-question" data-testid="revision-question">
+              <b>Revision question</b>
+              <p>{response.question}</p>
+            </div>
+          )}
+          {!!response.qualityNotices?.length && (
+            <div className="quality-notices" role="status">
+              <b>Output check</b>
+              {response.qualityNotices.map((note) => (
+                <p key={note}>{note}</p>
+              ))}
+            </div>
+          )}
           {response.missingIngredients.length > 0 && (
             <div className="ingredients">
               <b>Bring your material</b>
@@ -605,6 +622,11 @@ export function WritingLabShell({
                 onChange={(e) => w.proposalText(p.id, e.target.value)}
               />
               <p>{p.explanation}</p>
+              {p.qualityNote && (
+                <p className="quality-note" data-testid="quality-note">
+                  {p.qualityNote}
+                </p>
+              )}
               <QuickSave w={w} text={p.text} origin="candidate" />
               {isLexicalRun && (
                 <CandidatePreview w={w} text={p.text} open={i === 0} />

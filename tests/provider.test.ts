@@ -5,6 +5,8 @@ import {
   defaultSettings,
   documentTarget,
   newDocument,
+  newSection,
+  requestedVariantShape,
   targetFor,
   type AIRequest,
   type AIResponse,
@@ -15,6 +17,7 @@ import { MockProvider } from "../apps/server/src/mock-provider";
 import {
   forbiddenPhrases,
   proposalViolation,
+  validateProviderResponse,
 } from "../apps/server/src/provider-policy";
 
 // Resolve the official SDK from its owning workspace, not an undeclared root dependency.
@@ -353,6 +356,299 @@ describe("official OpenAI Responses SDK contract (injected offline transport)", 
     await expect(
       harness(wire(output("make use of"))).provider.run(word),
     ).rejects.toThrow("Word target");
+  });
+});
+
+describe("shared-piece generation contracts", () => {
+  function piece() {
+    const ai = request();
+    const doc = ai.readContext.document;
+    doc.sections = [
+      newSection("Point", "The refrigerator light pooled on the empty floor."),
+      newSection("Segue", "The light stayed on."),
+      newSection("Point", "The repair bill meant we could not keep the house."),
+    ];
+    ai.editTarget = targetFor(doc, doc.sections[1].id);
+    ai.action = "coach";
+    ai.answer = "The light outlasted the conversation.";
+    ai.instruction =
+      "One short bridge. Carry the image, do not repeat the next section.";
+    return ai;
+  }
+  it("reads explicit candidate counts without confusing revision questions with variants", () => {
+    expect(requestedVariantShape("One short bridge.")).toEqual({
+      min: 1,
+      max: 1,
+    });
+    expect(requestedVariantShape("Two variants.")).toEqual({ min: 2, max: 2 });
+    expect(requestedVariantShape("Two or three variants.")).toEqual({
+      min: 2,
+      max: 3,
+    });
+    expect(requestedVariantShape("Give me one revision question.")).toBeNull();
+  });
+  it("rejects a Segue that only restates the next section without losing a valid pivot", async () => {
+    const ai = piece();
+    const repeated = {
+      ...output(),
+      proposals: [
+        {
+          id: "repeat",
+          label: "Repeat",
+          text: "The repair bill meant we could not keep the house.",
+          explanation: "",
+        },
+        {
+          id: "pivot",
+          label: "Pivot",
+          text: "The light stayed on after the voices stopped.",
+          explanation: "",
+        },
+      ],
+    };
+    const result = await harness(wire(repeated)).provider.run(ai);
+    expect(result.proposals.map((p) => p.text)).toEqual([
+      "The light stayed on after the voices stopped.",
+    ]);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("Repeats the next section"),
+    );
+  });
+  it("applies the neighbor guard to a Segue shorten action, not just coach", async () => {
+    const ai = piece();
+    ai.action = "shorten";
+    ai.readContext.document.sections[2].content = newSection(
+      "Point",
+      "The bill came due.",
+    ).content;
+    const result = await harness(
+      wire(output("The bill came due.")),
+    ).provider.run(ai);
+    expect(result.proposals).toEqual([]);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("Repeats the next section"),
+    );
+  });
+  it("notes when a Segue drops a requested neighboring image without confusing context for edit permission", async () => {
+    const ai = piece();
+    const lost = await harness(
+      wire(output("Only silence remained.")),
+    ).provider.run(ai);
+    expect(lost.proposals[0].qualityNote).toContain("refrigerator image");
+    const carried = await harness(
+      wire(output("The refrigerator hummed after the voices stopped.")),
+    ).provider.run(ai);
+    expect(carried.proposals[0].qualityNote).toContain(
+      "Preserves the refrigerator image",
+    );
+    expect(ai.readContext.document.sections[0].content).toEqual(
+      newSection("Point", "The refrigerator light pooled on the empty floor.")
+        .content,
+    );
+  });
+  it("keeps one valid short bridge when the model returned extra options", async () => {
+    const ai = piece();
+    ai.variantCount = 1;
+    const result = await harness(
+      wire({
+        ...output(),
+        proposals: [
+          {
+            id: "repeat",
+            label: "Repeat",
+            text: "The repair bill meant we could not keep the house.",
+            explanation: "",
+          },
+          {
+            id: "pivot",
+            label: "Pivot",
+            text: "The refrigerator hummed after the voices stopped.",
+            explanation: "",
+          },
+        ],
+      }),
+    ).provider.run(ai);
+    expect(result.proposals.map((p) => p.id)).toEqual(["pivot"]);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("Repeats the next section"),
+    );
+  });
+  it("keeps exactly two distinct ending options and flags a stock phrase mismatch", async () => {
+    const ai = request("A hush. Then the refrigerator rattled again.");
+    ai.instruction = "Two variants. Keep the refrigerator image.";
+    const result = await harness(
+      wire({
+        ...output(),
+        proposals: [
+          {
+            id: "a",
+            label: "A",
+            text: "A hush. The refrigerator rattled again.",
+            explanation: "",
+          },
+          {
+            id: "b",
+            label: "B",
+            text: "In conclusion, the refrigerator rattled again.",
+            explanation: "",
+          },
+        ],
+      }),
+    ).provider.run(ai);
+    expect(result.proposals).toHaveLength(2);
+    expect(result.proposals[0].qualityNote).toContain("refrigerator");
+    expect(result.proposals[1].qualityNote).toMatch(/stock|fragment/i);
+    expect(result.qualityNotices).toBeUndefined();
+  });
+  it("does not protect a motif the writer explicitly asked to remove", async () => {
+    const ai = request("Again. The refrigerator hummed again.");
+    ai.instruction =
+      "Remove the repetition and replace the refrigerator image. Two variants.";
+    const result = await harness(
+      wire({
+        ...output(),
+        proposals: [
+          {
+            id: "a",
+            label: "A",
+            text: "The kitchen fell quiet.",
+            explanation: "",
+          },
+          {
+            id: "b",
+            label: "B",
+            text: "Only the kitchen remained.",
+            explanation: "",
+          },
+        ],
+      }),
+    ).provider.run(ai);
+    expect(
+      result.proposals.every(
+        (p) => !/motif|refrigerator image/i.test(p.qualityNote ?? ""),
+      ),
+    ).toBe(true);
+  });
+  it("flags unmet variant count and detects cadence flattening without inventing a second ending", async () => {
+    const ai = request("The refrigerator coughed. Again. Then silence. Again.");
+    ai.instruction =
+      "Two variants. Preserve the refrigerator and the repeated Again motif.";
+    const result = await harness(
+      wire(
+        output(
+          "The appliance ceased operating, leaving us with a sense of closure.",
+        ),
+      ),
+    ).provider.run(ai);
+    expect(result.proposals).toHaveLength(1);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("two variants"),
+    );
+    expect(result.proposals[0].qualityNote).toMatch(
+      /fragment|motif|refrigerator/i,
+    );
+  });
+  it("refuses unsupported authority and notes an unrequested generic takeaway", async () => {
+    const ai = request("I kept the refrigerator door open.");
+    await expect(
+      harness(
+        wire(output("Studies show we should leave it open.")),
+      ).provider.run(ai),
+    ).rejects.toThrow("unsupported authority");
+    const result = await harness(
+      wire(
+        output("I kept the refrigerator door open. The takeaway is growth."),
+      ),
+    ).provider.run(ai);
+    expect(result.proposals[0].qualityNote).toMatch(/takeaway|image/i);
+  });
+  it("flags a curly-apostrophe stock opener when it is absent from the draft", async () => {
+    const ai = request("The room was quiet.");
+    const result = await harness(
+      wire(output("Here’s the thing: the room was quiet.")),
+    ).provider.run(ai);
+    expect(result.proposals[0].qualityNote).toContain("stock transition");
+  });
+  it("flags a multiline candidate instead of presenting it as a requested one-line bridge", async () => {
+    const ai = request("The lights went out.");
+    ai.instruction = "One line. One variant.";
+    const result = await harness(
+      wire(output("The lights went out.\nWe went home.")),
+    ).provider.run(ai);
+    expect(result.proposals).toEqual([]);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("one line"),
+    );
+  });
+  it("refuses replacement prose when a proposal-stage instruction says do not rewrite", async () => {
+    const ai = request();
+    ai.instruction = "Do not rewrite; tell me what to revise.";
+    const result = await harness(wire(output("We use tools."))).provider.run(
+      ai,
+    );
+    expect(result.proposals).toEqual([]);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("not to rewrite"),
+    );
+  });
+  it("answers a parked checklist placement question from canonical section placement", async () => {
+    const ai = request();
+    ai.action = "critique";
+    ai.stage = "diagnose";
+    ai.instruction = "Is this checklist part of the draft?";
+    const checklist = newSection("Freeform", "Revise the opening.");
+    checklist.label = "Revision checklist";
+    checklist.placement = "parked";
+    ai.readContext.document.sections.push(checklist);
+    ai.editTarget = documentTarget(ai.readContext.document);
+    const result = await harness(wire(output())).provider.run(ai);
+    expect(result.diagnosis).toContain(
+      "checklist is parked and outside the reader draft",
+    );
+    expect(result.proposals).toEqual([]);
+    const secondPass = validateProviderResponse(ai, result, "openai");
+    expect(secondPass.diagnosis).toBe(result.diagnosis);
+    expect(secondPass.qualityNotices).toBeUndefined();
+  });
+  it("surfaces a missing revision question on analysis rather than pretending it answered", async () => {
+    const ai = request();
+    ai.action = "critique";
+    ai.stage = "diagnose";
+    ai.editTarget = documentTarget(ai.readContext.document);
+    ai.instruction =
+      "Where is repetition hurting this? Give me one revision question.";
+    const result = await harness(
+      wire({ ...output(), question: "", diagnosis: "The prose is clear." }),
+    ).provider.run(ai);
+    expect(result.proposals).toEqual([]);
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("one revision question"),
+    );
+  });
+  it("keeps only one explicit revision question when critique returns two", async () => {
+    const ai = request();
+    ai.action = "critique";
+    ai.stage = "diagnose";
+    ai.editTarget = documentTarget(ai.readContext.document);
+    ai.instruction = "Give me one revision question.";
+    const result = await harness(
+      wire({ ...output(), question: "What should stay? What should go?" }),
+    ).provider.run(ai);
+    expect(result.question).toBe("What should stay?");
+    expect(result.qualityNotices).toContainEqual(
+      expect.stringContaining("one revision question"),
+    );
+  });
+  it("keeps diagnose with do-not-rewrite analysis-only", async () => {
+    const ai = piece();
+    ai.stage = "diagnose";
+    ai.instruction = "Do not rewrite. Diagnose the gap.";
+    expect((await harness(wire(output())).provider.run(ai)).proposals).toEqual(
+      [],
+    );
+    await expect(
+      harness(wire(output("Replacement"))).provider.run(ai),
+    ).rejects.toThrow("diagnosis-only");
   });
 });
 
