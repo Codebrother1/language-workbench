@@ -80,6 +80,27 @@ export const commands: CommandDefinition[] = [
     group: "Work on language",
   },
   {
+    id: "delivery",
+    label: "Delivery Lens",
+    description:
+      "Explore delivery in the existing Word/Phrase Lens for selected wording.",
+    keywords: [
+      "punctuation",
+      "pause",
+      "cadence",
+      "rhythm",
+      "delivery",
+      "timing",
+      "semicolon",
+      "dash",
+      "ellipsis",
+      "exclamation",
+      "capitalization",
+      "casing",
+    ],
+    group: "Work on language",
+  },
+  {
     id: "thoughts",
     label: "Break into thoughts",
     description:

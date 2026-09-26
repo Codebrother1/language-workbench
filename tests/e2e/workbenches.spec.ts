@@ -667,6 +667,103 @@ test("Delivery Lens explains exact punctuation without changing canonical sectio
   );
 });
 
+test("quoted-turn target stays distinct from a sentence and remains historical after an edit", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument(
+    "Dialogue turns",
+    '"Yeah. I\'m good." Another voice said "Sure."',
+  );
+  doc.sections.push(
+    newSection(
+      "Freeform",
+      'She said, "No—nothing bad. Just call." Then “Wait. Really?”',
+    ),
+  );
+  doc.sections.push(newSection("Freeform", 'She said, "Unfinished dialogue.'));
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  const [first, second, third] = imported.sections.map(
+    (s: { id: string }) => s.id,
+  );
+  const caret = async (id: string, word: string) =>
+    page.getByTestId("writing-editor").evaluate(
+      (root, { id, word }) => {
+        const section = Array.from(root.children).find(
+          (node) => (node as HTMLElement).id === id,
+        )!;
+        const walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const index = (node.textContent ?? "").indexOf(word);
+          if (index < 0) continue;
+          window
+            .getSelection()
+            ?.setBaseAndExtent(node, index + 2, node, index + 2);
+          (root as HTMLElement).focus();
+          document.dispatchEvent(new Event("selectionchange"));
+          return;
+        }
+        throw new Error("Missing dialogue word");
+      },
+      { id, word },
+    );
+  await open(page);
+  await caret(first, "good");
+  await expect(page.locator(".target-box")).toContainText("I'm good.");
+  await expect(page.locator(".target-box")).not.toContainText("Yeah.");
+  await page.getByRole("button", { name: "Quoted turn" }).click();
+  await expect(page.locator(".target-box")).toContainText('"Yeah. I\'m good."');
+  await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await page.getByRole("button", { name: "Explore delivery" }).click();
+  await expect(page.getByTestId("delivery-result")).toBeVisible();
+  await save(page);
+  let storedDoc = await stored(request, imported.id);
+  expect(storedDoc.sections[0].workbench.runs[0].target).toMatchObject({
+    unit: "quoted_turn",
+    text: '"Yeah. I\'m good."',
+    sectionId: first,
+  });
+  await select(page, "Yeah.");
+  await page.keyboard.insertText("Nope.");
+  await save(page);
+  await page.locator(`[data-section-id="${second}"] .section-focus`).click();
+  await caret(second, "Just call");
+  await page.getByRole("button", { name: "Quoted turn" }).click();
+  await expect(page.locator(".target-box")).toContainText(
+    '"No—nothing bad. Just call."',
+  );
+  await expect(page.locator(".target-box")).not.toContainText("She said,");
+  await caret(second, "Really");
+  await page.getByRole("button", { name: "Quoted turn" }).click();
+  await expect(page.locator(".target-box")).toContainText("“Wait. Really?”");
+  await caret(third, "Unfinished");
+  await expect(page.getByRole("button", { name: "Quoted turn" })).toHaveCount(
+    0,
+  );
+  await page.locator(`[data-section-id="${first}"] .section-focus`).click();
+  await page.locator(".local-history > summary").click();
+  await page.getByRole("button", { name: "Inspect this run" }).click();
+  await expect(page.locator(".response-original")).toContainText(
+    '"Yeah. I\'m good."',
+  );
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    /Target changed|located reliably/,
+  );
+  expect(
+    (
+      await page.locator(`[id="${first}"] .target-highlight`).allTextContents()
+    ).join(" "),
+  ).not.toContain("Sure");
+  storedDoc = await stored(request, imported.id);
+  expect(documentText(storedDoc)).toContain('"Nope. I\'m good."');
+});
+
 test("shared-piece quality notes and a requested revision question remain review-only", async ({
   page,
   request,

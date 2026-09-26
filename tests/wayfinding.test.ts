@@ -19,6 +19,13 @@ describe("one discovery catalog over existing capabilities", () => {
   for (const [query, id] of [
     ["synonyms", "word"],
     ["replace word", "word"],
+    ["punctuation", "delivery"],
+    ["pause", "delivery"],
+    ["rhythm", "delivery"],
+    ["cadence", "delivery"],
+    ["ellipsis", "delivery"],
+    ["semicolon", "delivery"],
+    ["capitalization", "delivery"],
     ["save this", "save"],
     ["my hooks", "library-hooks"],
     ["add segue", "insert:Segue"],

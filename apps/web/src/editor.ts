@@ -354,7 +354,11 @@ function selectionInfo(state: EditorState) {
 export function cursorTarget(editor: Editor, doc: Document): EditTarget | null {
   const info = selectionInfo(editor.state);
   if (!info || !doc.sections.some((s) => s.id === info.id)) return null;
-  return targetFor(doc, info.id, info.scope, info.start, info.end);
+  const target = targetFor(doc, info.id, info.scope, info.start, info.end);
+  return {
+    ...target,
+    unit: editor.state.selection.empty ? "sentence" : "selection",
+  };
 }
 
 /** Native ProseMirror clipboard serialization without wrapper-generated leading breaks.

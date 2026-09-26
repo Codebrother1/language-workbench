@@ -298,6 +298,46 @@ test("command palette keyboard navigation discovers existing tools without gener
   expect(calls).toEqual([]);
   expect(await canonical(request, doc.id)).toBe("A sentence about language.");
 });
+test("hidden Inspector routes explicit Lab input safely without changing selected prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request, "Dre, please. Another sentence stays here.");
+  await open(page);
+  await page.getByRole("button", { name: "Hide Inspector" }).click();
+  await select(page, "Dre, please.");
+  await command(page, "work this sentence");
+  const direction = page.getByLabel("Your direction", { exact: true });
+  await expect(page.locator('[data-pane="inspector"]')).toBeVisible();
+  await page.keyboard.insertText("What does the quiet ending do?");
+  await expect(direction).toBeFocused();
+  await expect(direction).toHaveValue("What does the quiet ending do?");
+  expect(await canonical(request, doc.id)).toBe(
+    "Dre, please. Another sentence stays here.",
+  );
+  await page.getByRole("button", { name: "Hide Inspector" }).click();
+  await select(page, "Dre, please.");
+  await command(page, "punctuation", "Delivery Lens");
+  const question = page.getByLabel("Delivery question");
+  await expect(page.locator('[data-pane="inspector"]')).toBeVisible();
+  await page.keyboard.insertText("What changes if this ends louder?");
+  await expect(question).toBeFocused();
+  await expect(question).toHaveValue(/What changes if this ends louder\?/);
+  expect(await canonical(request, doc.id)).toBe(
+    "Dre, please. Another sentence stays here.",
+  );
+  await page.getByRole("button", { name: "Hide Inspector" }).click();
+  await select(page, "Dre, please.");
+  await page.getByRole("button", { name: "Show Inspector" }).click();
+  await expect(question).not.toBeFocused();
+  await page.getByRole("button", { name: "Focus preview" }).click();
+  await page.getByRole("button", { name: "Restore panes" }).click();
+  await expect(question).not.toBeFocused();
+  expect(await canonical(request, doc.id)).toBe(
+    "Dre, please. Another sentence stays here.",
+  );
+});
+
 test("thought discovery copies into existing builder without rewriting or reorganizing the page", async ({
   page,
   request,

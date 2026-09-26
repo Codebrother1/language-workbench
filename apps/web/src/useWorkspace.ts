@@ -106,6 +106,7 @@ import {
   patchTargetDraft,
   restoreFocusTarget,
   resolveHistoricalTarget,
+  rhetoricalTargetChoices,
   withFocusTarget,
   sameFocusTarget,
   type TargetResolution,
@@ -1167,7 +1168,6 @@ export function useWorkspace() {
     editor.commands.setTextSelection(editor.state.selection.from);
     setTarget(cursorTarget(editor, current.current));
     setDocumentWorkbench(false);
-    editor.commands.focus();
   };
   const duplicateSection = (id: string) => {
     try {
@@ -1299,6 +1299,25 @@ export function useWorkspace() {
     !documentWorkbench &&
     detectsLensTarget(target, !!editor && !editor.state.selection.empty);
   const isDeliveryTarget = !documentWorkbench && detectsDeliveryTarget(target);
+  const rhetoricalTargets = (() => {
+    if (!editor || !target?.sectionId) return [];
+    const found = sectionLocation(editor, target.sectionId);
+    const pos = editor.state.selection.from;
+    if (
+      !found ||
+      pos < found.pos + 1 ||
+      pos > found.pos + found.node.nodeSize - 1
+    )
+      return [];
+    const map = positionMap(found.node, found.pos);
+    const caret = map.starts.findIndex((value) => value >= pos);
+    return rhetoricalTargetChoices(
+      doc,
+      target,
+      caret < 0 ? map.text.length : caret,
+      !editor.state.selection.empty,
+    );
+  })();
   // Word targeting is a view of the saved action, not a destructive change to it.
   const action = (
     isLensTarget ? "words" : currentWorkbench.action
@@ -2350,6 +2369,13 @@ export function useWorkspace() {
     setLens,
     isLensTarget,
     isDeliveryTarget,
+    rhetoricalTargets,
+    selectRhetoricalTarget: (
+      kind: (typeof rhetoricalTargets)[number]["kind"],
+    ) => {
+      const choice = rhetoricalTargets.find((item) => item.kind === kind);
+      if (choice) selectExactTarget(choice.target);
+    },
     askLens,
     askAboutCandidate,
     documents,

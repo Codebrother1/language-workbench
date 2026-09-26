@@ -1018,6 +1018,13 @@ hr {
   margin: 12px 0;
   font-size: 13px;
 }
+.target-scope {
+  gap: 4px;
+}
+.target-scope .button {
+  min-height: 27px;
+  font-size: 11px;
+}
 .lens-view {
   margin: 10px 0;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   sectionKinds,
   sectionText,
@@ -14,6 +14,7 @@ export type ToolDestination =
   | "variants"
   | "save"
   | "word"
+  | "delivery"
   | "sentence"
   | "help"
   | "sections"
@@ -32,7 +33,8 @@ const selectorFor: Record<ToolDestination, string> = {
   variants: ".variants",
   save: ".inspector > .quick-save",
   word: ".word-lens",
-  sentence: ".lab-head",
+  delivery: ".word-lens",
+  sentence: ".inspector",
   help: ".context-help",
   sections: ".structure",
   technical: ".all-actions",
@@ -108,19 +110,42 @@ export function useWayfinding(w: Workspace) {
         });
       else if (panel)
         element.scrollIntoView({ block: "start", behavior: "smooth" });
-      const field = toolNavigation.focus
-        ? element.querySelector<HTMLElement>(toolNavigation.focus)
-        : null;
-      field?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
   }, [toolNavigation]);
+  const focusedToken = useRef(0);
+  useLayoutEffect(() => {
+    if (!toolNavigation?.focus || focusedToken.current === toolNavigation.token)
+      return;
+    let frame = 0;
+    const focusField = (retries: number) => {
+      const pane = document.querySelector<HTMLElement>(
+        '[data-pane="inspector"]',
+      );
+      const field = pane?.querySelector<HTMLElement>(toolNavigation.focus!);
+      if (pane?.getClientRects().length && field?.getClientRects().length) {
+        field.focus({ preventScroll: true });
+        if (document.activeElement === field) {
+          focusedToken.current = toolNavigation.token;
+          return;
+        }
+      }
+      if (retries > 0)
+        frame = requestAnimationFrame(() => focusField(retries - 1));
+      else focusedToken.current = toolNavigation.token;
+    };
+    focusField(2);
+    return () => cancelAnimationFrame(frame);
+  }, [toolNavigation]);
   const showTool = (tool: ToolDestination, focus?: string) => {
+    if (focus && w.editor?.view.dom === document.activeElement)
+      w.editor.view.dom.blur();
     w.setPanel(null);
     if (tool !== "sections") void w.setInspectorVisible(true);
     if (
       [
         "word",
+        "delivery",
         "variants",
         "save",
         "structure",
@@ -215,11 +240,22 @@ export function useWayfinding(w: Workspace) {
         return;
       case "sentence":
         w.focusSentence();
-        showTool("sentence");
+        showTool("sentence", "[data-lab-direction]");
         return;
       case "section":
         if (section) w.focusSection(section.id);
-        showTool("sentence");
+        showTool("sentence", "[data-lab-direction]");
+        return;
+      case "delivery":
+        if (!w.isDeliveryTarget) {
+          showTool("delivery", "[data-delivery-question]");
+          w.setNotice(
+            "Select punctuation, a short phrase, a sentence or a quoted turn first.",
+          );
+          return;
+        }
+        w.setLens((lens) => ({ ...lens, view: "delivery", mode: "explore" }));
+        showTool("delivery", "[data-delivery-question]");
         return;
       case "word":
         showTool("word");

@@ -132,13 +132,15 @@ export function WritingLabShell({
     response && responseTarget?.scope === "document",
   );
   const targetLabel =
-    target?.scope === "word"
-      ? "word"
-      : target?.scope === "selection" && w.editor?.state.selection.empty
-        ? "sentence"
-        : target?.scope === "section"
-          ? "section"
-          : "passage";
+    target?.unit === "quoted_turn"
+      ? "quoted turn"
+      : target?.scope === "word"
+        ? "word"
+        : target?.scope === "selection" && w.editor?.state.selection.empty
+          ? "sentence"
+          : target?.scope === "section"
+            ? "section"
+            : "passage";
   const relevantActions = lab.actions.slice(0, 5);
   const responseSection = w.doc.sections.find(
     (s) => s.id === responseTarget?.sectionId,
@@ -508,9 +510,11 @@ export function WritingLabShell({
                   ? "CURRENT SENTENCE"
                   : targetLabel === "section"
                     ? "WHOLE SECTION"
-                    : targetLabel === "word"
-                      ? "SELECTED WORD"
-                      : "SELECTED PASSAGE"}
+                    : targetLabel === "quoted turn"
+                      ? "QUOTED TURN"
+                      : targetLabel === "word"
+                        ? "SELECTED WORD"
+                        : "SELECTED PASSAGE"}
               </span>
               {section && (
                 <span className="muted small" title={section.label}>
@@ -536,13 +540,30 @@ export function WritingLabShell({
                 <Copy size={14} />
                 Copy target
               </Button>
-              {target.scope !== "section" && target.sectionId && (
-                <Button
-                  className="text-button"
-                  onClick={() => w.focusSection(target.sectionId!)}
+              {w.rhetoricalTargets.length > 0 && (
+                <div
+                  className="row wrap target-scope"
+                  role="group"
+                  aria-label="Target scope"
                 >
-                  Whole section <ArrowUpRight size={14} />
-                </Button>
+                  {w.rhetoricalTargets.map((choice) => (
+                    <Button
+                      key={choice.kind}
+                      className="text-button"
+                      aria-pressed={
+                        choice.kind === "section"
+                          ? target.scope === "section"
+                          : target.unit === choice.kind
+                      }
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => w.selectRhetoricalTarget(choice.kind)}
+                    >
+                      {choice.kind === "section"
+                        ? "Whole section"
+                        : choice.label}
+                    </Button>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -585,6 +606,7 @@ export function WritingLabShell({
               >
                 <GrowingTextarea
                   rows={4}
+                  data-lab-direction
                   placeholder="What feels off? What must stay?"
                   value={w.instruction}
                   onChange={(e) => w.setInstruction(e.target.value)}

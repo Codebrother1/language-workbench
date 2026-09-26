@@ -31,8 +31,8 @@ export function resolveHistoricalTarget(
   const old = target.sectionSnapshot;
   if (!target.text || old.slice(target.start, target.end) !== target.text)
     return unresolved;
-  const currentTarget = (start: number, end: number): EditTarget =>
-    targetFor(
+  const currentTarget = (start: number, end: number): EditTarget => ({
+    ...targetFor(
       doc,
       section.id,
       target.scope === "word" && /\s/.test(text.slice(start, end))
@@ -40,7 +40,9 @@ export function resolveHistoricalTarget(
         : target.scope,
       start,
       end,
-    );
+    ),
+    ...(target.unit ? { unit: target.unit } : {}),
+  });
   if (text.slice(target.start, target.end) === target.text)
     return {
       status: "exact",
@@ -92,6 +94,97 @@ export function resolveHistoricalTarget(
   )
     return unresolved;
   return { status: "changed", current: currentTarget(start, end) };
+}
+
+export type RhetoricalTargetChoice = {
+  kind: "selection" | "sentence" | "quoted_turn" | "section";
+  label: string;
+  target: EditTarget;
+};
+
+export function quotedTurnRange(
+  text: string,
+  start: number,
+  end = start,
+): { start: number; end: number } | null {
+  const spans: { start: number; end: number }[] = [];
+  let open: { start: number; close: string } | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const mark = text[i];
+    if (!open && (mark === '"' || mark === "“"))
+      open = { start: i, close: mark === '"' ? '"' : "”" };
+    else if (open && (mark === '"' || mark === "”")) {
+      if (mark !== open.close) return null;
+      spans.push({ start: open.start, end: i + 1 });
+      open = null;
+    } else if ((open && mark === "“") || (!open && mark === "”")) return null;
+  }
+  if (open || start < 0 || end < start) return null;
+  return spans.find((span) => start >= span.start && end <= span.end) ?? null;
+}
+
+export function rhetoricalTargetChoices(
+  doc: Document,
+  target: EditTarget,
+  caret: number,
+  hasSelection: boolean,
+): RhetoricalTargetChoice[] {
+  const section = doc.sections.find((item) => item.id === target.sectionId);
+  if (!section) return [];
+  const text = sectionText(section);
+  const choices: RhetoricalTargetChoice[] = [];
+  if (hasSelection && (target.scope === "word" || target.scope === "selection"))
+    choices.push({
+      kind: "selection",
+      label: "Selection",
+      target: { ...target, unit: "selection" },
+    });
+  const sentence = hasSelection
+    ? [
+        ...new Intl.Segmenter(undefined, { granularity: "sentence" }).segment(
+          text,
+        ),
+      ].find(
+        (part) =>
+          caret >= part.index && caret < part.index + part.segment.length,
+      )
+    : null;
+  const start = sentence
+    ? sentence.index +
+      (sentence.segment.length - sentence.segment.trimStart().length)
+    : target.start;
+  const end = sentence
+    ? sentence.index + sentence.segment.trimEnd().length
+    : target.end;
+  if (start < end && (!hasSelection || sentence))
+    choices.push({
+      kind: "sentence",
+      label: "Current sentence",
+      target: {
+        ...targetFor(doc, section.id, "selection", start, end),
+        unit: "sentence",
+      },
+    });
+  const quote = quotedTurnRange(
+    text,
+    hasSelection ? target.start : caret,
+    hasSelection ? target.end : caret,
+  );
+  if (quote)
+    choices.push({
+      kind: "quoted_turn",
+      label: "Quoted turn",
+      target: {
+        ...targetFor(doc, section.id, "selection", quote.start, quote.end),
+        unit: "quoted_turn",
+      },
+    });
+  choices.push({
+    kind: "section",
+    label: "Section",
+    target: targetFor(doc, section.id),
+  });
+  return choices;
 }
 
 export type TargetDraft = { instruction: string; answer: string };
@@ -175,6 +268,7 @@ export function sameFocusTarget(
     a.documentId === b.documentId &&
     a.sectionId === b.sectionId &&
     a.sectionSnapshot === b.sectionSnapshot &&
+    a.unit === b.unit &&
     targetDraftKey(a) === targetDraftKey(b)
   );
 }

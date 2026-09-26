@@ -15,6 +15,8 @@ import {
   patchTargetDraft,
   restoreFocusTarget,
   resolveHistoricalTarget,
+  quotedTurnRange,
+  rhetoricalTargetChoices,
   sameFocusTarget,
   targetDraftKey,
   withFocusTarget,
@@ -31,7 +33,101 @@ function fixture() {
   return { doc, section, sentence, word, repeated };
 }
 
+describe("quoted-turn rhetorical targeting", () => {
+  it("offers the full straight-quoted turn beside the local sentence without replacing a manual choice", () => {
+    const text = '"Yeah. I\'m good."';
+    const doc = newDocument("Dialogue", text);
+    const caret = text.indexOf("good");
+    const sentence = targetFor(
+      doc,
+      doc.sections[0].id,
+      "selection",
+      text.indexOf("I'm"),
+      text.length,
+    );
+    const choices = rhetoricalTargetChoices(
+      doc,
+      { ...sentence, unit: "sentence" },
+      caret,
+      false,
+    );
+    expect(choices.map((choice) => choice.kind)).toEqual([
+      "sentence",
+      "quoted_turn",
+      "section",
+    ]);
+    expect(choices[0].target.text).toContain("I'm good.");
+    expect(choices[1].target).toMatchObject({
+      unit: "quoted_turn",
+      text,
+      start: 0,
+      end: text.length,
+    });
+    const selected = targetFor(
+      doc,
+      doc.sections[0].id,
+      "selection",
+      text.indexOf("good"),
+      text.indexOf("good") + 4,
+    );
+    expect(
+      rhetoricalTargetChoices(doc, selected, caret, true)[0],
+    ).toMatchObject({ kind: "selection", target: { text: "good" } });
+  });
+  it("excludes narration, handles curly turns and separates adjacent quotes", () => {
+    const text = 'She said, "No—nothing bad. Just call." Then “Wait. Really?”';
+    const first = quotedTurnRange(text, text.indexOf("Just call"));
+    const second = quotedTurnRange(text, text.indexOf("Really"));
+    expect(text.slice(first!.start, first!.end)).toBe(
+      '"No—nothing bad. Just call."',
+    );
+    expect(text.slice(second!.start, second!.end)).toBe("“Wait. Really?”");
+    expect(quotedTurnRange(text, text.indexOf("She said"))).toBeNull();
+    expect(quotedTurnRange(text, first!.start, second!.end)).toBeNull();
+  });
+  it("does not guess when quotes are unmatched or nested", () => {
+    expect(
+      quotedTurnRange('She said, "No—nothing bad. Just call.', 29),
+    ).toBeNull();
+    expect(quotedTurnRange('“One "nested" voice.”', 5)).toBeNull();
+  });
+});
+
 describe("historical run target resolution", () => {
+  it("keeps a quoted turn historical after its first sentence changes", () => {
+    const original =
+      'She said, "No—nothing bad. Just call." She left without a word.';
+    const doc = newDocument("Dialogue", original);
+    const range = quotedTurnRange(original, original.indexOf("Just call"))!;
+    const target = {
+      ...targetFor(
+        doc,
+        doc.sections[0].id,
+        "selection",
+        range.start,
+        range.end,
+      ),
+      unit: "quoted_turn" as const,
+    };
+    expect(resolveHistoricalTarget(doc, target)).toMatchObject({
+      status: "exact",
+      current: { text: target.text, unit: "quoted_turn" },
+    });
+    doc.sections[0].content = paragraphs(
+      original.replace("No—nothing bad.", "Yeah, nothing bad."),
+    );
+    expect(resolveHistoricalTarget(doc, target)).toMatchObject({
+      status: "changed",
+      current: { text: '"Yeah, nothing bad. Just call."', unit: "quoted_turn" },
+    });
+    doc.sections[0].content = paragraphs(
+      'Different narration, "Yeah, nothing bad. Just call." A different ending.',
+    );
+    expect(resolveHistoricalTarget(doc, target)).toEqual({
+      status: "unresolved",
+      current: null,
+    });
+  });
   it("retains exact ranges and maps only uniquely bracketed replacements", () => {
     const original =
       "Before stayed stable. Sentence A carried the point. After stayed stable. Unrelated C stays.";

@@ -106,6 +106,7 @@ export const richNodeSchema: z.ZodType<RichNode> = z.lazy(() =>
 );
 export const editTargetSchema = z.object({
   scope: z.enum(["document", "section", "selection", "word"]),
+  unit: z.enum(["selection", "sentence", "quoted_turn"]).optional(),
   sectionId: z.string().nullable(),
   start: z.number().int().min(0),
   end: z.number().int().min(0),

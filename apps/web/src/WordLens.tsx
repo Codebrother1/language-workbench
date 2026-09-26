@@ -59,6 +59,7 @@ export function WordLensControls({ w }: { w: Workspace }) {
           >
             <GrowingTextarea
               rows={3}
+              data-delivery-question
               value={w.instruction}
               onChange={(event) => w.setInstruction(event.target.value)}
               placeholder="What does the period do here?"
