@@ -954,6 +954,26 @@ hr {
   min-height: 28px;
   font-size: 12px;
 }
+.finding-return,
+.analysis-age {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+  padding: 9px 11px;
+  background: var(--accent-light);
+  border-radius: 5px;
+  font-size: 12px;
+}
+.finding-return .button,
+.analysis-age .button {
+  justify-self: start;
+  min-height: 28px;
+  padding: 3px 6px;
+}
+.analysis-state {
+  color: var(--muted);
+  font-size: 11px;
+}
 .related-draft-uses,
 .lens-more-analysis {
   margin: 12px 0;

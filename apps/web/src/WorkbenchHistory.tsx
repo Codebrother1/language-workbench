@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Workspace } from "./useWorkspace";
 import { Button } from "./ui";
 import { modelLabel } from "./ModelControls";
-import { sectionMentions } from "./workspace-helpers";
+import { sectionMentions, runDraftState } from "./workspace-helpers";
 export function WorkbenchHistory({
   w,
   open = false,
@@ -45,6 +45,7 @@ export function WorkbenchHistory({
             </time>
           </div>
           <p className="small">{modelLabel(w.catalog, run.model)}</p>
+          <span className="draft-state">{runDraftState(w.doc, run)}</span>
           <p>
             {run.instruction ||
               display(run.response.question || run.response.diagnosis)}
@@ -67,6 +68,9 @@ export function WorkbenchHistory({
               .map((run) => (
                 <article key={run.id}>
                   <b>{modelLabel(w.catalog, run.model)}</b>
+                  <span className="draft-state">
+                    {runDraftState(w.doc, run)}
+                  </span>
                   {run.response.proposals.map((p) => (
                     <div key={p.id}>
                       <p>{display(p.text)}</p>

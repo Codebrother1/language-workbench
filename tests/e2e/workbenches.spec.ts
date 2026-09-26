@@ -859,6 +859,127 @@ test("nine-section navigation resolves findings, names cards and layers Phrase L
   expect(after.sections[10].parkedGroupId).toBe("side-roads");
 });
 
+test("finding edit return restores the same critique and explicitly analyzes the revised draft", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90000);
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument("Revision loop", "An opening stays.");
+  for (let i = 1; i < 8; i++)
+    doc.sections.push(
+      newSection("Freeform", `Section ${i + 1} continues the thought.`),
+    );
+  doc.sections[4].label = "The earlier delay";
+  doc.sections[7].label = "What waiting did";
+  doc.sections[7].content = newSection(
+    "Freeform",
+    "Sentence to cut. Keep this line.",
+  ).content;
+  doc.workbench = {
+    ...emptyWorkbench(),
+    instruction: "Where is repetition hurting this?",
+  };
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  const ids: string[] = imported.sections.map((s: { id: string }) => s.id);
+  let calls = 0;
+  await page.route("**/api/ai", (route) => {
+    calls++;
+    return route.fulfill({
+      json: {
+        provider: "mock",
+        diagnosis: "Repetition between sections 5 and 8 weakens the delay.",
+        mechanism: "The recurrence is visible in the draft.",
+        question: "Which delay still earns its space?",
+        missingIngredients: [],
+        proposals: [],
+        lexical: [],
+        findings: [
+          {
+            sectionId: ids[7],
+            title:
+              calls === 1
+                ? "Sections 5 and 8 repeat the same move."
+                : "The revision leaves one useful delay.",
+            detail: `Compare ${ids[4]} with ${ids[7]}.`,
+            severity: "consider",
+          },
+        ],
+      },
+    });
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Whole-piece critique" }).click();
+  await expect(page.locator(".finding")).toContainText(
+    "The earlier delay and What waiting did repeat",
+  );
+  await expect(page.getByTestId("analysis-state")).toHaveText("Current draft");
+  await page
+    .locator(".finding-references .button")
+    .filter({ hasText: "What waiting did" })
+    .click();
+  await expect(page.locator(`[data-section-id="${ids[7]}"]`)).toHaveClass(
+    /active/,
+  );
+  await expect(
+    page.getByRole("button", { name: /Return to finding/ }),
+  ).toBeVisible();
+  await select(page, "Sentence to cut.");
+  await page.keyboard.press("Backspace");
+  await expect(page.getByTestId("finding-return")).toContainText(
+    "Based on an earlier draft",
+  );
+  await save(page);
+  expect(
+    sectionText((await stored(request, imported.id)).sections[7]),
+  ).not.toContain("Sentence to cut.");
+  await page.getByRole("button", { name: /Return to finding/ }).click();
+  await expect(page.locator(".finding")).toContainText(
+    "The earlier delay and What waiting did repeat",
+  );
+  await expect(page.getByTestId("analysis-state")).toHaveText(
+    "Based on an earlier draft",
+  );
+  await expect(page.locator(".finding-references .button")).toHaveCount(2);
+  expect(calls).toBe(1);
+  await save(page);
+  await page.reload();
+  await page.getByRole("button", { name: /Review saved critique/ }).click();
+  await expect(page.getByTestId("analysis-state")).toHaveText(
+    "Based on an earlier draft",
+  );
+  expect(calls).toBe(1);
+  await page.getByRole("button", { name: "Analyze revised draft" }).click();
+  await expect(page.locator(".finding")).toContainText(
+    "The revision leaves one useful delay",
+  );
+  await expect(page.getByTestId("analysis-state")).toHaveText("Current draft");
+  expect(calls).toBe(2);
+  await page.locator(".local-history > summary").click();
+  await expect(page.locator(".local-history .run-entry")).toHaveCount(2);
+  await expect(page.locator(".local-history .run-entry").first()).toContainText(
+    "Current draft",
+  );
+  await expect(page.locator(".local-history .run-entry").last()).toContainText(
+    "Earlier draft",
+  );
+  await save(page);
+  await page.reload();
+  await page.getByRole("button", { name: /Review saved critique/ }).click();
+  await page.locator(".local-history > summary").click();
+  await expect(page.locator(".local-history .run-entry").last()).toContainText(
+    "Earlier draft",
+  );
+  expect(calls).toBe(2);
+  expect(
+    sectionText((await stored(request, imported.id)).sections[7]),
+  ).not.toContain("Sentence to cut.");
+});
+
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({
   page,
   request,

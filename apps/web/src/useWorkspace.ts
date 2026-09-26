@@ -1228,11 +1228,20 @@ export function useWorkspace() {
   const setOneOffModel = (v: ModelRef | null) => setField("oneOffModel", v);
   const setCompareModels = (v: SetStateAction<ModelRef[]>) =>
     setField("compareModels", v);
+  const inspectDocumentRun = (id: string) => {
+    const run = getWorkbench(current.current, null).runs.find(
+      (item) => item.id === id,
+    );
+    if (!run) return setError("That saved critique is no longer available.");
+    update((d) => updateWorkbench(d, null, (wb) => inspectRun(wb, id)));
+    selectExactTarget(documentTarget(current.current));
+  };
   const selectRun = (id: string) => {
     const run = getWorkbench(current.current, sectionId).runs.find(
       (r) => r.id === id,
     );
     if (!run) return;
+    if (run.target.scope === "document") return inspectDocumentRun(id);
     patchWorkbench((wb) => inspectRun(wb, id));
     // Historical targets remain inspectable even when stale. Apply still validates.
     selectExactTarget(run.target);
@@ -2126,6 +2135,7 @@ export function useWorkspace() {
     localHistory,
     activeRun,
     selectRun,
+    inspectDocumentRun,
     lens,
     setLens,
     isLensTarget,

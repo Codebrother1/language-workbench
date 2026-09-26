@@ -60,7 +60,7 @@ import { Button, Select, Field, Dialog, GrowingTextarea, download } from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
-import { customSectionLabel } from "./workspace-helpers";
+import { customSectionLabel, sectionMentions } from "./workspace-helpers";
 
 function draftPositionLabel(section: WritingSection, index: number): string {
   const opening = sectionText(section).replace(/\s+/g, " ").trim();
@@ -1232,6 +1232,20 @@ export default function App() {
   >(null);
   const [compareSection, setCompareSection] = useState<string | null>(null);
   const [pendingJump, setPendingJump] = useState<string | null>(null);
+  const [findingVisit, setFindingVisit] = useState<{
+    documentId: string;
+    runId: string;
+    findingIndex: number;
+    findingId: string;
+    referencedSectionIds: string[];
+    inspectorScrollTop: number;
+  } | null>(null);
+  const [restoreFinding, setRestoreFinding] = useState<{
+    runId: string;
+    findingIndex: number;
+    inspectorScrollTop: number;
+    token: number;
+  } | null>(null);
   const [openWork, setOpenWork] = useState<{
     sectionId: string;
     kind: SavedWorkKind;
@@ -1268,9 +1282,36 @@ export default function App() {
     setPreviewFocused(false);
     void w.applyLayoutPreset(name);
   };
-  const jumpToSection = (id: string) => {
+  const jumpToSection = (
+    id: string,
+    anchor?: { runId: string; findingIndex: number },
+  ) => {
     const section = w.doc.sections.find((item) => item.id === id);
     if (!section) return;
+    const run = w.doc.workbench?.runs.find((item) => item.id === anchor?.runId);
+    const finding = run?.response.findings[anchor?.findingIndex ?? -1];
+    if (run && finding && anchor) {
+      const referencedSectionIds = [
+        ...new Set([
+          finding.sectionId,
+          ...sectionMentions(w.doc, finding.title + " " + finding.detail).map(
+            (part) => part.sectionId,
+          ),
+        ]),
+      ].filter(
+        (value): value is string =>
+          !!value && w.doc.sections.some((s) => s.id === value),
+      );
+      setFindingVisit({
+        documentId: w.doc.id,
+        runId: run.id,
+        findingIndex: anchor.findingIndex,
+        findingId: `${run.id}:${anchor.findingIndex}`,
+        referencedSectionIds,
+        inspectorScrollTop:
+          document.querySelector<HTMLElement>(".inspector")?.scrollTop ?? 0,
+      });
+    }
     if (section.parkedGroupId)
       w.setParkedGroupCollapsed(section.parkedGroupId, false);
     if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
@@ -1279,6 +1320,16 @@ export default function App() {
     setPreviewFocused(false);
     w.focusSection(id);
     setPendingJump(id);
+  };
+  const returnToFinding = () => {
+    if (!findingVisit || findingVisit.documentId !== w.doc.id) return;
+    w.inspectDocumentRun(findingVisit.runId);
+    setRestoreFinding({
+      runId: findingVisit.runId,
+      findingIndex: findingVisit.findingIndex,
+      inspectorScrollTop: findingVisit.inspectorScrollTop,
+      token: Date.now(),
+    });
   };
   useLayoutEffect(() => {
     if (!pendingJump || !workbenchShown || w.layout.primaryView !== "workbench")
@@ -1857,6 +1908,11 @@ export default function App() {
             navigation={navigation}
             onCompare={() => setCompareSection(w.selectedSectionId)}
             onJumpSection={jumpToSection}
+            findingVisit={
+              findingVisit?.documentId === w.doc.id ? findingVisit : null
+            }
+            restoreFinding={restoreFinding}
+            onReturnFinding={returnToFinding}
             openWork={openWork}
           />
         </div>

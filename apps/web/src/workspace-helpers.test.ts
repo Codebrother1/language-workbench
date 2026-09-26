@@ -19,6 +19,7 @@ import {
   isLensTarget,
   sectionReference,
   sectionMentions,
+  runDraftState,
   type RunCapture,
 } from "./workspace-helpers";
 
@@ -75,6 +76,28 @@ describe("writer-facing section references", () => {
     expect(rendered).toContain("Callback · Section 8");
     expect(rendered).toContain(unknown);
     expect(rendered).not.toContain(doc.sections[7].id);
+  });
+});
+
+describe("analysis draft state", () => {
+  it("ignores metadata revisions but marks a run earlier immediately after prose changes", () => {
+    const { doc, capture, response } = fixture();
+    const run = makeRun({ ...capture, target: documentTarget(doc) }, response);
+    expect(runDraftState(doc, run)).toBe("Current draft");
+    const metadataOnly = {
+      ...doc,
+      revision: doc.revision + 1,
+      title: "New title",
+    };
+    expect(runDraftState(metadataOnly, run)).toBe("Current draft");
+    const changed = structuredClone(metadataOnly);
+    changed.sections[1].content = newSection(
+      "Hook",
+      "This prose changed.",
+    ).content;
+    expect(runDraftState(changed, run)).toBe("Earlier draft");
+    expect(run.target.documentRevision).toBe(doc.revision);
+    expect(runDraftState(doc, run)).toBe("Current draft");
   });
 });
 

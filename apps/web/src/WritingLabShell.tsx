@@ -27,7 +27,11 @@ import {
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Field, Select, Range, GrowingTextarea } from "./ui";
-import { sectionMentions, sectionReference } from "./workspace-helpers";
+import {
+  sectionMentions,
+  sectionReference,
+  runDraftState,
+} from "./workspace-helpers";
 
 function ReferencedText({
   w,
@@ -65,11 +69,31 @@ export function WritingLabShell({
   onCompare,
   openWork,
   onJumpSection,
+  findingVisit,
+  restoreFinding,
+  onReturnFinding,
 }: {
   w: Workspace;
   navigation: Wayfinding;
   onCompare?: () => void;
-  onJumpSection: (id: string) => void;
+  onJumpSection: (
+    id: string,
+    anchor?: { runId: string; findingIndex: number },
+  ) => void;
+  findingVisit?: {
+    runId: string;
+    findingIndex: number;
+    findingId: string;
+    referencedSectionIds: string[];
+    inspectorScrollTop: number;
+  } | null;
+  restoreFinding?: {
+    runId: string;
+    findingIndex: number;
+    inspectorScrollTop: number;
+    token: number;
+  } | null;
+  onReturnFinding: () => void;
   openWork?: {
     sectionId: string;
     kind: "variants" | "structure" | "history";
@@ -126,6 +150,16 @@ export function WritingLabShell({
     sectionMentions(w.doc, text)
       .map((part) => part.text)
       .join("");
+  const documentRuns = (w.doc.workbench?.runs ?? []).filter(
+    (run) => run.action === "critique",
+  );
+  const savedCritique =
+    documentRuns.find((run) => run.id === w.doc.workbench?.activeRunId) ??
+    documentRuns.at(-1);
+  const visitedRun = documentRuns.find((run) => run.id === findingVisit?.runId);
+  const visitedFinding =
+    visitedRun?.response.findings[findingVisit?.findingIndex ?? -1];
+  const analysisState = w.activeRun ? runDraftState(w.doc, w.activeRun) : null;
   const findingIds = (finding: AIResponse["findings"][number]) =>
     [
       ...new Set([
@@ -190,6 +224,33 @@ export function WritingLabShell({
         ?.scrollIntoView({ block: "nearest" }),
     );
   }, [openWork, target?.sectionId]);
+  useEffect(() => {
+    if (
+      !restoreFinding ||
+      w.activeRun?.id !== restoreFinding.runId ||
+      responseTarget?.scope !== "document"
+    )
+      return;
+    const frame = requestAnimationFrame(() => {
+      const pane = responseRef.current?.closest<HTMLElement>(".inspector");
+      const finding = Array.from(
+        responseRef.current?.querySelectorAll<HTMLElement>(
+          "[data-finding-index]",
+        ) ?? [],
+      ).find(
+        (element) =>
+          element.dataset.findingIndex === String(restoreFinding.findingIndex),
+      );
+      if (!pane || !finding) return;
+      pane.scrollTop = restoreFinding.inspectorScrollTop;
+      const top =
+        finding.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      if (top < 0 || top > pane.clientHeight - finding.clientHeight)
+        pane.scrollTop += top - 70;
+      finding.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [restoreFinding, w.activeRun?.id, responseTarget?.scope]);
   const fullCopy = response
     ? [
         responseTarget?.scope !== "document" && responseTarget?.text
@@ -214,17 +275,36 @@ export function WritingLabShell({
         .filter(Boolean)
         .join("\n\n")
     : "";
+  const jumpFromFinding = (
+    id: string,
+    finding: AIResponse["findings"][number],
+  ) =>
+    onJumpSection(
+      id,
+      w.activeRun?.target.scope === "document"
+        ? {
+            runId: w.activeRun.id,
+            findingIndex: response?.findings.indexOf(finding) ?? -1,
+          }
+        : undefined,
+    );
   const renderFinding = (
     finding: AIResponse["findings"][number],
     index: number,
   ) => (
-    <article className="finding" key={index}>
+    <article
+      className="finding"
+      key={index}
+      data-finding-index={response?.findings.indexOf(finding)}
+      tabIndex={-1}
+      aria-label={displayText(finding.title)}
+    >
       <div className="row between">
         <b>
           <ReferencedText
             w={w}
             text={finding.title}
-            onJumpSection={onJumpSection}
+            onJumpSection={(id) => jumpFromFinding(id, finding)}
           />
         </b>
         <span className="tag">{finding.severity}</span>
@@ -233,7 +313,7 @@ export function WritingLabShell({
         <ReferencedText
           w={w}
           text={finding.detail}
-          onJumpSection={onJumpSection}
+          onJumpSection={(id) => jumpFromFinding(id, finding)}
         />
       </p>
       {findingIds(finding).length > 0 && (
@@ -245,7 +325,7 @@ export function WritingLabShell({
             <Button
               key={id}
               className="text-button"
-              onClick={() => onJumpSection(id)}
+              onClick={() => jumpFromFinding(id, finding)}
             >
               {sectionReference(w.doc, id)} <ArrowUpRight size={13} />
             </Button>
@@ -317,6 +397,26 @@ export function WritingLabShell({
                 )?.displayName ?? w.effectiveModel.model.providerId)}
         </span>
       </div>
+      {findingVisit &&
+        visitedRun &&
+        visitedFinding &&
+        target?.scope !== "document" && (
+          <div className="finding-return" data-testid="finding-return">
+            <Button
+              onClick={onReturnFinding}
+              title={`Whole-piece ${visitedRun.action} · ${new Date(visitedRun.createdAt).toLocaleString()}`}
+            >
+              ← Return to finding ·{" "}
+              {displayText(visitedFinding.title).slice(0, 55)}
+            </Button>
+            <span className="small muted">
+              {findingVisit.referencedSectionIds.length} referenced sections ·{" "}
+              {runDraftState(w.doc, visitedRun) === "Earlier draft"
+                ? "Based on an earlier draft"
+                : "Current draft"}
+            </span>
+          </div>
+        )}
       <div className="lab-head">
         <h2>
           {isWholeAnalysis
@@ -564,6 +664,13 @@ export function WritingLabShell({
                 ? "WHOLE-PIECE ANALYSIS"
                 : "DIAGNOSIS"}
             </span>
+            {responseTarget?.scope === "document" && (
+              <span className="analysis-state" data-testid="analysis-state">
+                {analysisState === "Earlier draft"
+                  ? "Based on an earlier draft"
+                  : "Current draft"}
+              </span>
+            )}
             <Button
               className="icon"
               aria-label="Copy all AI output"
@@ -578,6 +685,21 @@ export function WritingLabShell({
               ? "Mock output — not a live model"
               : response.provider}
           </span>
+          {responseTarget?.scope === "document" &&
+            analysisState === "Earlier draft" && (
+              <div className="analysis-age" role="status">
+                <span>
+                  Based on an earlier draft. The finding is kept for review, not
+                  refreshed.
+                </span>
+                <Button
+                  disabled={w.busy || !w.ready}
+                  onClick={() => w.ask("diagnose", "critique")}
+                >
+                  Analyze revised draft
+                </Button>
+              </div>
+            )}
           {responseTarget && responseTarget.scope !== "document" && (
             <div className="response-original">
               <div className="row between">
@@ -1022,6 +1144,14 @@ export function WritingLabShell({
       <div className="whole-piece">
         <span className="eyebrow">STEP BACK</span>
         <p>Look at the structure without rewriting it.</p>
+        {savedCritique && (
+          <Button
+            className="full"
+            onClick={() => w.inspectDocumentRun(savedCritique.id)}
+          >
+            Review saved critique · {documentRuns.length}
+          </Button>
+        )}
         {w.catalog && offlineCritique && (
           <p className="offline-capability">
             Offline whole-piece critique checks limited deterministic patterns;

@@ -1,5 +1,7 @@
 import {
   emptyWorkbench,
+  documentText,
+  sectionText,
   structuralMechanisms,
   uid,
   type Document,
@@ -61,6 +63,17 @@ export function sectionMentions(
   }
   if (offset < text.length) parts.push({ text: text.slice(offset) });
   return parts.length ? parts : [{ text }];
+}
+
+export function runDraftState(doc: Document, run: WorkbenchRun): string {
+  if (run.target.scope === "document")
+    return run.target.text === documentText(doc)
+      ? "Current draft"
+      : "Earlier draft";
+  const section = doc.sections.find((item) => item.id === run.target.sectionId);
+  return section && sectionText(section) === run.target.sectionSnapshot
+    ? "Current section"
+    : "Earlier section";
 }
 
 export function getWorkbench(
