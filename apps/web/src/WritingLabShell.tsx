@@ -74,6 +74,7 @@ export function WritingLabShell({
   onReturnFinding,
   labOrigin,
   onReturnToLab,
+  onOpenTrailFinding,
 }: {
   w: Workspace;
   navigation: Wayfinding;
@@ -99,6 +100,7 @@ export function WritingLabShell({
   onReturnFinding: () => void;
   labOrigin?: { documentId: string; sectionId: string; runId: string } | null;
   onReturnToLab: (sectionId: string, runId: string) => void;
+  onOpenTrailFinding: (runId: string, findingIndex: number) => void;
   openWork?: {
     sectionId: string;
     kind: "variants" | "structure" | "history";
@@ -164,6 +166,15 @@ export function WritingLabShell({
   const visitedRun = documentRuns.find((run) => run.id === findingVisit?.runId);
   const visitedFinding =
     visitedRun?.response.findings[findingVisit?.findingIndex ?? -1];
+  const labContextLost =
+    labOrigin &&
+    (labOrigin.sectionId !== target?.sectionId ||
+      w.activeRun?.id !== labOrigin.runId ||
+      !w.activeRun ||
+      target?.scope !== w.activeRun.target.scope ||
+      target?.start !== w.activeRun.target.start ||
+      target?.text !== w.activeRun.target.text ||
+      runDraftState(w.doc, w.activeRun) === "Target changed");
   const analysisState = w.activeRun ? runDraftState(w.doc, w.activeRun) : null;
   const findingIds = (finding: AIResponse["findings"][number]) =>
     [
@@ -425,7 +436,7 @@ export function WritingLabShell({
         )}
       {!(findingVisit && findingVisit.sectionId === target?.sectionId) &&
         labOrigin &&
-        labOrigin.sectionId !== target?.sectionId &&
+        labContextLost &&
         target?.scope !== "document" &&
         w.doc.sections.some((s) => s.id === labOrigin.sectionId) && (
           <div className="finding-return" data-testid="lab-return">
@@ -741,26 +752,78 @@ export function WritingLabShell({
                 </Button>
               </div>
               <p>{responseTarget.text}</p>
+              {w.inspectedTarget && (
+                <div
+                  className="target-resolution"
+                  data-testid="target-resolution"
+                  role="status"
+                >
+                  {w.inspectedTarget.resolution.status === "changed" ? (
+                    <>
+                      <b>Target changed since this run</b>
+                      <p>
+                        Current passage:{" "}
+                        {w.inspectedTarget.resolution.current.text}
+                      </p>
+                      {w.inspectedTarget.confirmed ? (
+                        <small>
+                          Current passage selected. A new run will use this
+                          wording, not the original.
+                        </small>
+                      ) : (
+                        <div className="row wrap">
+                          <Button onClick={w.returnToCurrentPassage}>
+                            Return to current passage
+                          </Button>
+                          <Button onClick={w.useCurrentPassage}>
+                            Use current passage for a new run
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  ) : w.inspectedTarget.resolution.status === "unresolved" ? (
+                    <b>
+                      Original target changed and can’t be located reliably.
+                      Select a new target in the editor.
+                    </b>
+                  ) : (
+                    <Button
+                      onClick={() =>
+                        w.inspectSectionRun(
+                          responseTarget.sectionId!,
+                          w.activeRun!.id,
+                        )
+                      }
+                    >
+                      Restore exact selection
+                    </Button>
+                  )}
+                </div>
+              )}
               <small>
                 These options belong to this original, even if your cursor
                 moves.
               </small>
-              {w.activeRun?.id && responseTarget.sectionId && (
-                <Button
-                  className="text-button"
-                  onClick={() =>
-                    onReturnToLab(responseTarget.sectionId!, w.activeRun!.id)
-                  }
-                >
-                  {w.doc.sections.find((s) => s.id === responseTarget.sectionId)
-                    ?.placement === "parked"
-                    ? "Return to parked thought"
-                    : responseTarget.scope === "word" ||
-                        responseTarget.scope === "selection"
-                      ? "Return to selection"
-                      : "Return to section"}
-                </Button>
-              )}
+              {w.activeRun?.id &&
+                responseTarget.sectionId &&
+                (!w.inspectedTarget ||
+                  w.inspectedTarget.resolution.status === "exact") && (
+                  <Button
+                    className="text-button"
+                    onClick={() =>
+                      onReturnToLab(responseTarget.sectionId!, w.activeRun!.id)
+                    }
+                  >
+                    {w.doc.sections.find(
+                      (s) => s.id === responseTarget.sectionId,
+                    )?.placement === "parked"
+                      ? "Return to parked thought"
+                      : responseTarget.scope === "word" ||
+                          responseTarget.scope === "selection"
+                        ? "Return to selection"
+                        : "Return to section"}
+                  </Button>
+                )}
             </div>
           )}
           <p className="diagnosis">
@@ -1084,9 +1147,41 @@ export function WritingLabShell({
                       "Whole-piece finding");
                 return (
                   <li key={entry.id}>
-                    <b>{displayText(title)}</b> → edited{" "}
-                    {sectionReference(w.doc, entry.sectionId) ??
-                      "a section no longer in the draft"}
+                    {run ? (
+                      <Button
+                        className="text-button"
+                        onClick={() =>
+                          entry.findingIndex === null
+                            ? onReturnToLab(entry.sectionId, run.id)
+                            : onOpenTrailFinding(run.id, entry.findingIndex)
+                        }
+                      >
+                        Open saved run · {displayText(title)}
+                      </Button>
+                    ) : (
+                      <b>{displayText(title)}</b>
+                    )}
+                    {" → edited "}
+                    {sectionReference(w.doc, entry.sectionId) ? (
+                      <Button
+                        className="text-button"
+                        onClick={() =>
+                          onJumpSection(
+                            entry.sectionId,
+                            entry.findingIndex === null
+                              ? undefined
+                              : {
+                                  runId: entry.runId,
+                                  findingIndex: entry.findingIndex!,
+                                },
+                          )
+                        }
+                      >
+                        {sectionReference(w.doc, entry.sectionId)}
+                      </Button>
+                    ) : (
+                      "a section no longer in the draft"
+                    )}
                     <small>
                       Viewed before edit ·{" "}
                       {entry.savedRevision === null

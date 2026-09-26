@@ -980,6 +980,125 @@ test("finding edit return restores the same critique and explicitly analyzes the
   ).not.toContain("Sentence to cut.");
 });
 
+test("saved sentence run never highlights another sentence after its target is replaced", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument("Historical sentence", "Start with the first room.");
+  for (let i = 1; i < 8; i++)
+    doc.sections.push(newSection("Freeform", `Room ${i + 1} stays here.`));
+  doc.sections[7].label = "Ending";
+  const before = "Before stayed stable. ";
+  const original = "Sentence A carried the point.";
+  const replacement = "Sentence B now carries the point.";
+  const after = " After stayed stable. Unrelated C should never be the target.";
+  doc.sections[7].content = newSection(
+    "Freeform",
+    before + original + after,
+  ).content;
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  const id = imported.sections[7].id;
+  let requests = 0;
+  await page.route("**/api/ai", (route) => {
+    requests++;
+    return route.fulfill({
+      json: {
+        provider: "mock",
+        diagnosis: "The original sentence holds the point.",
+        mechanism: "It delays the next image.",
+        question: "What should change?",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      },
+    });
+  });
+  await open(page);
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await select(page, original);
+  await page
+    .getByLabel("Your direction", { exact: true })
+    .fill("Diagnose this exact sentence.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.locator(".response-original")).toContainText(original);
+  expect(requests).toBe(1);
+  await page.getByRole("button", { name: "Return to selection" }).click();
+  await select(page, original);
+  await page.keyboard.insertText(replacement);
+  await save(page);
+  await page
+    .locator(`[data-section-id="${imported.sections[6].id}"] .section-focus`)
+    .click();
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await page.locator(".local-history > summary").click();
+  await page.getByRole("button", { name: "Inspect this run" }).click();
+  await expect(page.locator(".response-original")).toContainText(original);
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    "Target changed since this run",
+  );
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    replacement,
+  );
+  await expect(page.locator(".local-history .run-entry")).not.toContainText(
+    "Earlier section",
+  );
+  await expect(page.locator(`[id="${id}"] .target-highlight`)).toHaveCount(0);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  expect(requests).toBe(1);
+  await expect(page.getByRole("alert")).toContainText("Select a new target");
+  await expect(page.getByTestId("lab-return")).toBeVisible();
+  await page.getByRole("button", { name: "Return to current passage" }).click();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+  expect(requests).toBe(1);
+  await page.locator(".revision-trail > summary").click();
+  await page.locator(".revision-trail li .button").last().click();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+  expect(requests).toBe(1);
+  await page.getByRole("button", { name: /Open saved run/ }).click();
+  await expect(page.locator(".response-original")).toContainText(original);
+  await page.getByRole("button", { name: /Use current passage/ }).click();
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    "Current passage selected",
+  );
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect.poll(() => requests).toBe(2);
+  await save(page);
+  expect(
+    sectionText((await stored(request, imported.id)).sections[7]),
+  ).toContain(replacement);
+  await select(page, "Before stayed stable.");
+  await page.keyboard.insertText("Different opening.");
+  await select(page, "After stayed stable.");
+  await page.keyboard.insertText("Different ending.");
+  await save(page);
+  const history = page.locator(".local-history");
+  if (!(await history.evaluate((node) => node.hasAttribute("open"))))
+    await history.locator("> summary").click();
+  await history
+    .locator(".run-entry")
+    .last()
+    .getByRole("button", { name: "Inspect this run" })
+    .click();
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    "can’t be located reliably",
+  );
+  await expect(
+    page.getByRole("button", { name: "Return to current passage" }),
+  ).toHaveCount(0);
+  await expect(page.locator(`[id="${id}"] .target-highlight`)).toHaveCount(0);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  expect(requests).toBe(2);
+  await select(page, "Unrelated C should never be the target.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect.poll(() => requests).toBe(3);
+});
+
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({
   page,
   request,

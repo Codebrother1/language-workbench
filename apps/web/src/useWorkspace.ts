@@ -25,6 +25,7 @@ import {
   removeSection as removeSectionInstance,
   type Settings,
   type EditTarget,
+  type WorkbenchRun,
   type AIResponse,
   type WritingAction,
   type Variant,
@@ -103,8 +104,10 @@ import {
   getTargetDraft,
   patchTargetDraft,
   restoreFocusTarget,
+  resolveHistoricalTarget,
   withFocusTarget,
   sameFocusTarget,
+  type TargetResolution,
   canCoachTarget as hasCoachContext,
 } from "./target-drafts";
 
@@ -214,6 +217,17 @@ export function useWorkspace() {
   const [notice, setNotice] = useState("");
   const [target, setTargetState] = useState<EditTarget | null>(null);
   const targetRef = useRef<EditTarget | null>(null);
+  const [inspectedTarget, setInspectedTarget] = useState<{
+    runId: string;
+    sectionId: string;
+    resolution: TargetResolution;
+    confirmed: boolean;
+  } | null>(null);
+  const inspectionRef = useRef<typeof inspectedTarget>(null);
+  const changeInspection = (value: typeof inspectedTarget) => {
+    inspectionRef.current = value;
+    setInspectedTarget(value);
+  };
   const selectingExplicitTarget = useRef(false);
   const pendingRevisionContext = useRef<{
     documentId: string;
@@ -452,6 +466,11 @@ export function useWorkspace() {
     sectionSnapshot: string;
   } | null>(null);
   const selectExactTarget = (next: EditTarget | null, selectRange = true) => {
+    if (
+      inspectionRef.current &&
+      next?.sectionId !== inspectionRef.current.sectionId
+    )
+      changeInspection(null);
     selectingExplicitTarget.current = true;
     try {
       if (editor && next?.sectionId) {
@@ -482,6 +501,35 @@ export function useWorkspace() {
       setTarget(next);
       setDocumentWorkbench(next?.scope === "document");
       if (editor) highlight(editor, next);
+    } finally {
+      selectingExplicitTarget.current = false;
+    }
+  };
+  const inspectHistoricalTarget = (run: WorkbenchRun) => {
+    const resolution = resolveHistoricalTarget(current.current, run.target);
+    if (resolution.status === "exact") {
+      changeInspection(null);
+      selectExactTarget(resolution.current);
+      return;
+    }
+    const owner = current.current.sections.some(
+      (section) => section.id === run.target.sectionId,
+    )
+      ? run.target.sectionId!
+      : (targetRef.current?.sectionId ?? current.current.sections[0]?.id);
+    if (!owner) return;
+    changeInspection({
+      runId: run.id,
+      sectionId: owner,
+      resolution,
+      confirmed: false,
+    });
+    selectingExplicitTarget.current = true;
+    try {
+      explicitAnchor.current = null;
+      setTarget(targetFor(current.current, owner));
+      setDocumentWorkbench(false);
+      if (editor) highlight(editor, null, true);
     } finally {
       selectingExplicitTarget.current = false;
     }
@@ -522,6 +570,18 @@ export function useWorkspace() {
       return;
     explicitAnchor.current = null;
     const t = cursorTarget(editor, current.current);
+    if (
+      inspectionRef.current &&
+      !editor.state.selection.empty &&
+      t?.sectionId === inspectionRef.current.sectionId &&
+      (t.scope === "selection" || t.scope === "word") &&
+      current.current.sections.some(
+        (section) =>
+          section.id === t.sectionId &&
+          sectionText(section) === t.sectionSnapshot,
+      )
+    )
+      changeInspection(null);
     setTarget(
       t?.sectionId && !t.sectionSnapshot
         ? targetFor(current.current, t.sectionId)
@@ -793,6 +853,7 @@ export function useWorkspace() {
   const load = (next: Document) => {
     setInsertion(null);
     pendingRevisionContext.current = null;
+    changeInspection(null);
     sectionMetadata.current = new Map(next.sections.map((s) => [s.id, s]));
     current.current = next;
     persisted.current = next;
@@ -1218,6 +1279,13 @@ export function useWorkspace() {
     localHistory.find((run) => run.id === currentWorkbench.activeRunId) ?? null;
   const response = activeRun?.response ?? null;
   const responseTarget = activeRun?.target ?? null;
+  const inspectedRunTarget =
+    inspectedTarget && activeRun?.id === inspectedTarget.runId
+      ? {
+          ...inspectedTarget,
+          resolution: resolveHistoricalTarget(doc, activeRun.target),
+        }
+      : null;
   const { controls, lens, oneOffModel, compareModels, proposalStates } =
     currentWorkbench;
   const draftTarget = documentWorkbench ? null : target;
@@ -1304,7 +1372,36 @@ export function useWorkspace() {
     );
     if (!run || run.target.documentId !== current.current.id) return;
     update((d) => updateWorkbench(d, sectionId, (wb) => inspectRun(wb, runId)));
-    selectExactTarget(run.target);
+    inspectHistoricalTarget(run);
+  };
+  const useCurrentPassage = () => {
+    const inspection = inspectionRef.current;
+    if (!inspection) return;
+    const run = getWorkbench(current.current, inspection.sectionId).runs.find(
+      (item) => item.id === inspection.runId,
+    );
+    if (!run) return;
+    const resolution = resolveHistoricalTarget(current.current, run.target);
+    if (resolution.status !== "changed") {
+      changeInspection({ ...inspection, resolution, confirmed: false });
+      return;
+    }
+    selectExactTarget(resolution.current);
+    changeInspection({ ...inspection, resolution, confirmed: true });
+    scrollPreviewToSection(inspection.sectionId);
+  };
+  const returnToCurrentPassage = () => {
+    const inspection = inspectionRef.current;
+    if (!inspection) return;
+    const run = getWorkbench(current.current, inspection.sectionId).runs.find(
+      (item) => item.id === inspection.runId,
+    );
+    if (!run) return;
+    const resolution = resolveHistoricalTarget(current.current, run.target);
+    changeInspection({ ...inspection, resolution, confirmed: false });
+    if (resolution.status !== "changed") return;
+    selectExactTarget(resolution.current);
+    scrollPreviewToSection(inspection.sectionId);
   };
   const selectRun = (id: string) => {
     const run = getWorkbench(current.current, sectionId).runs.find(
@@ -1314,7 +1411,7 @@ export function useWorkspace() {
     if (run.target.scope === "document") return inspectDocumentRun(id);
     patchWorkbench((wb) => inspectRun(wb, id));
     // Historical targets remain inspectable even when stale. Apply still validates.
-    selectExactTarget(run.target);
+    inspectHistoricalTarget(run);
   };
   const structure = currentWorkbench.structure ?? emptyStructure();
   const setStructure = (value: SetStateAction<StructureDraft>) =>
@@ -1501,6 +1598,36 @@ export function useWorkspace() {
     structureInput?: StructureRequest,
   ) => {
     if (requestBusy.current || navigating.current) return;
+    const historical =
+      activeRun?.target.sectionId === targetRef.current?.sectionId &&
+      (activeRun?.target.scope === "selection" ||
+        activeRun?.target.scope === "word")
+        ? resolveHistoricalTarget(current.current, activeRun.target)
+        : null;
+    if (!override && historical && historical.status !== "exact") {
+      const fresh =
+        targetRef.current &&
+        editor &&
+        !editor.state.selection.empty &&
+        (targetRef.current.scope === "word" ||
+          targetRef.current.scope === "selection") &&
+        current.current.sections.some(
+          (section) =>
+            section.id === targetRef.current?.sectionId &&
+            sectionText(section) === targetRef.current?.sectionSnapshot,
+        );
+      if (
+        (stage === "propose" && !lensMode) ||
+        (!inspectionRef.current?.confirmed && !fresh)
+      ) {
+        setError(
+          stage === "propose" && !lensMode
+            ? "Diagnose a freshly selected passage before proposing changes."
+            : "Select a new target or choose Use current passage before running the Lab.",
+        );
+        return;
+      }
+    }
     let activeCatalog: ProviderCatalog;
     try {
       activeCatalog = await refreshCatalog();
@@ -2204,6 +2331,9 @@ export function useWorkspace() {
     currentWorkbench,
     localHistory,
     activeRun,
+    inspectedTarget: inspectedRunTarget,
+    useCurrentPassage,
+    returnToCurrentPassage,
     selectRun,
     inspectSectionRun,
     inspectDocumentRun,

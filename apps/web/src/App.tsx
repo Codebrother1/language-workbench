@@ -797,6 +797,7 @@ function Structure({
                           </Button>
                           <Button
                             onClick={() => onEditPreview(s.id)}
+                            aria-label="Edit in preview"
                             title="Places the cursor at the start of this section in the assembled preview. Select text to replace it."
                           >
                             Edit in preview
@@ -1424,6 +1425,16 @@ export default function App() {
     w.focusSection(id);
     setPendingJump(id);
   };
+  const openTrailFinding = (runId: string, findingIndex: number) => {
+    w.inspectDocumentRun(runId);
+    setRestoreFinding({
+      runId,
+      findingIndex,
+      inspectorScrollTop:
+        document.querySelector<HTMLElement>(".inspector")?.scrollTop ?? 0,
+      token: Date.now(),
+    });
+  };
   const returnToLab = (sectionId: string, runId: string) => {
     if (!w.doc.sections.some((section) => section.id === sectionId)) return;
     w.noteRevisionContext(runId, sectionId);
@@ -1876,34 +1887,39 @@ export default function App() {
               <Button onClick={() => preset("reset")}>Reset layout</Button>
             </div>
           </details>
-          <Button
-            onClick={() => {
-              setPreviewFocused(false);
-              void w.setWorkbenchVisible(!w.layout.workbenchVisible);
-            }}
-            disabled={workbenchShown && paneCount === 1}
-          >
-            {w.layout.workbenchVisible ? "Hide Workbench" : "Show Workbench"}
-          </Button>
-          <Button
-            onClick={() => {
-              setDocumentPreviewOverride(null);
-              setPreviewFocused(false);
-              w.setPreviewVisible(!w.layout.previewVisible);
-            }}
-            disabled={previewShown && paneCount === 1}
-          >
-            {previewShown ? "Hide preview" : "Show preview"}
-          </Button>
-          <Button
-            onClick={() => {
-              setPreviewFocused(false);
-              void w.setInspectorVisible(!w.layout.inspectorVisible);
-            }}
-            disabled={inspectorShown && paneCount === 1}
-          >
-            {w.layout.inspectorVisible ? "Hide Inspector" : "Show Inspector"}
-          </Button>
+          {!previewFocused && (
+            <>
+              <Button
+                onClick={() =>
+                  void w.setWorkbenchVisible(!w.layout.workbenchVisible)
+                }
+                disabled={workbenchShown && paneCount === 1}
+              >
+                {w.layout.workbenchVisible
+                  ? "Hide Workbench"
+                  : "Show Workbench"}
+              </Button>
+              <Button
+                onClick={() => {
+                  setDocumentPreviewOverride(null);
+                  w.setPreviewVisible(!w.layout.previewVisible);
+                }}
+                disabled={previewShown && paneCount === 1}
+              >
+                {previewShown ? "Hide preview" : "Show preview"}
+              </Button>
+              <Button
+                onClick={() =>
+                  void w.setInspectorVisible(!w.layout.inspectorVisible)
+                }
+                disabled={inspectorShown && paneCount === 1}
+              >
+                {w.layout.inspectorVisible
+                  ? "Hide Inspector"
+                  : "Show Inspector"}
+              </Button>
+            </>
+          )}
         </div>
       </div>
       <div
@@ -2081,6 +2097,7 @@ export default function App() {
             onReturnFinding={returnToFinding}
             labOrigin={labOrigin?.documentId === w.doc.id ? labOrigin : null}
             onReturnToLab={returnToLab}
+            onOpenTrailFinding={openTrailFinding}
             openWork={openWork}
           />
         </div>

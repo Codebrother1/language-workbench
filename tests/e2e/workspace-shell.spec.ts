@@ -207,6 +207,12 @@ test("Preview focus temporarily expands and restores the exact saved pane arrang
   await page.getByRole("button", { name: "Focus preview" }).click();
   await expect(workbench).toBeHidden();
   await expect(inspector).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Hide Workbench" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Hide Inspector" }),
+  ).toHaveCount(0);
   expect((await preview.boundingBox())!.width).toBeGreaterThan(before * 2);
   await page.getByRole("button", { name: "Restore panes" }).click();
   await expect(workbench).toBeVisible();

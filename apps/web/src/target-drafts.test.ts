@@ -14,6 +14,7 @@ import {
   getTargetDraft,
   patchTargetDraft,
   restoreFocusTarget,
+  resolveHistoricalTarget,
   sameFocusTarget,
   targetDraftKey,
   withFocusTarget,
@@ -29,6 +30,65 @@ function fixture() {
   const repeated = targetFor(doc, section.sectionId!, "word", 11, 15);
   return { doc, section, sentence, word, repeated };
 }
+
+describe("historical run target resolution", () => {
+  it("retains exact ranges and maps only uniquely bracketed replacements", () => {
+    const original =
+      "Before stayed stable. Sentence A carried the point. After stayed stable. Unrelated C stays.";
+    const doc = newDocument("Target", original);
+    const start = original.indexOf("Sentence A carried the point.");
+    const target = targetFor(
+      doc,
+      doc.sections[0].id,
+      "selection",
+      start,
+      start + "Sentence A carried the point.".length,
+    );
+    expect(resolveHistoricalTarget(doc, target)).toMatchObject({
+      status: "exact",
+      current: { text: target.text, start },
+    });
+    doc.sections[0].content = paragraphs(
+      original.replace(target.text, "Sentence B now carries the point."),
+    );
+    expect(resolveHistoricalTarget(doc, target)).toMatchObject({
+      status: "changed",
+      current: { text: "Sentence B now carries the point." },
+    });
+    doc.sections[0].content = paragraphs(
+      "Different opening. Sentence B now carries the point. Another ending. Unrelated C stays.",
+    );
+    expect(resolveHistoricalTarget(doc, target)).toEqual({
+      status: "unresolved",
+      current: null,
+    });
+  });
+  it("never maps repeated or one-sided interior anchors, but accepts a uniquely surviving literal", () => {
+    const doc = newDocument(
+      "Target",
+      "A stable opening. Chosen phrase. A stable ending.",
+    );
+    const start = "A stable opening. ".length;
+    const target = targetFor(
+      doc,
+      doc.sections[0].id,
+      "selection",
+      start,
+      start + "Chosen phrase.".length,
+    );
+    doc.sections[0].content = paragraphs(
+      "New lead. A stable opening. Chosen phrase. A stable ending.",
+    );
+    expect(resolveHistoricalTarget(doc, target)).toMatchObject({
+      status: "exact",
+      current: { text: target.text, start: start + "New lead. ".length },
+    });
+    doc.sections[0].content = paragraphs(
+      "A stable opening. New phrase. A stable ending. A stable opening. New phrase. A stable ending.",
+    );
+    expect(resolveHistoricalTarget(doc, target).status).toBe("unresolved");
+  });
+});
 
 describe("target-scoped directions", () => {
   it("never copies section direction into a sentence or word and restores each exact draft", () => {

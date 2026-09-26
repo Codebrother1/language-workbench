@@ -16,7 +16,7 @@ import {
   type StructureRequest,
 } from "./domain";
 
-import { patchTargetDraft } from "./target-drafts";
+import { patchTargetDraft, resolveHistoricalTarget } from "./target-drafts";
 
 export function customSectionLabel(section: WritingSection): string | null {
   const label = section.label.trim();
@@ -71,9 +71,18 @@ export function runDraftState(doc: Document, run: WorkbenchRun): string {
       ? "Current draft"
       : "Earlier draft";
   const section = doc.sections.find((item) => item.id === run.target.sectionId);
-  return section && sectionText(section) === run.target.sectionSnapshot
-    ? "Current section"
-    : "Earlier section";
+  if (!section) return "Section no longer available";
+  if (run.target.scope === "selection" || run.target.scope === "word") {
+    const resolution = resolveHistoricalTarget(doc, run.target);
+    return resolution.status !== "exact"
+      ? "Target changed"
+      : sectionText(section) === run.target.sectionSnapshot
+        ? "Current draft"
+        : "Current target";
+  }
+  return sectionText(section) === run.target.sectionSnapshot
+    ? "Current draft"
+    : "Earlier draft";
 }
 
 export function getWorkbench(

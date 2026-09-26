@@ -104,8 +104,10 @@ export const WritingSectionNode = Node.create({
     ];
   },
 });
-type HighlightRange = { from: number; to: number };
-const highlightKey = new PluginKey<HighlightRange | null>("target-highlight");
+type HighlightRange = { from: number; to: number; section?: boolean };
+const highlightKey = new PluginKey<HighlightRange | null | false>(
+  "target-highlight",
+);
 export const TargetHighlight = Extension.create({
   name: "targetHighlight",
   addProseMirrorPlugins() {
@@ -114,9 +116,15 @@ export const TargetHighlight = Extension.create({
         key: highlightKey,
         state: {
           init: () => null,
-          apply(tr, previous) {
+          apply(tr, previous, oldState) {
             const explicit = tr.getMeta(highlightKey);
             if (explicit !== undefined) return explicit;
+            if (previous === false)
+              return tr.selectionSet &&
+                !tr.docChanged &&
+                !tr.selection.eq(oldState.selection)
+                ? null
+                : false;
             // User movement returns to sentence/selection scope. No nested dispatch
             // from selectionUpdate: that races the browser's native caret/clipboard.
             return tr.selectionSet || tr.docChanged ? null : previous;
@@ -125,18 +133,23 @@ export const TargetHighlight = Extension.create({
         props: {
           decorations(state) {
             const info = selectionInfo(state);
+            const saved = highlightKey.getState(state);
             const range =
-              highlightKey.getState(state) ??
-              (info
-                ? {
-                    from: info.map.starts[info.start] ?? info.map.empty,
-                    to: info.map.ends[info.end - 1] ?? info.map.empty,
-                  }
-                : null);
+              saved === false
+                ? null
+                : (saved ??
+                  (info
+                    ? {
+                        from: info.map.starts[info.start] ?? info.map.empty,
+                        to: info.map.ends[info.end - 1] ?? info.map.empty,
+                      }
+                    : null));
             return range && range.to > range.from
               ? DecorationSet.create(state.doc, [
                   Decoration.inline(range.from, range.to, {
-                    class: "target-highlight",
+                    class: range.section
+                      ? "target-highlight section-target"
+                      : "target-highlight",
                   }),
                 ])
               : DecorationSet.empty;
@@ -280,12 +293,20 @@ export function targetRange(editor: Editor, target: EditTarget) {
         : (map.starts[target.start] ?? map.ends.at(-1) ?? map.empty),
   };
 }
-export function highlight(editor: Editor, target: EditTarget | null) {
+export function highlight(
+  editor: Editor,
+  target: EditTarget | null,
+  suppressFallback = false,
+) {
   const range = target ? targetRange(editor, target) : null;
   editor.view.dispatch(
     editor.state.tr.setMeta(
       highlightKey,
-      range && range.to > range.from ? range : null,
+      range && range.to > range.from
+        ? { ...range, section: target?.scope === "section" }
+        : suppressFallback
+          ? false
+          : null,
     ),
   );
 }

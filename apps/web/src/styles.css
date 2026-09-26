@@ -985,6 +985,20 @@ hr {
   color: var(--muted);
   font-size: 11px;
 }
+.target-resolution {
+  margin: 10px 0;
+  padding: 10px;
+  background: var(--accent-light);
+  border-radius: 5px;
+  font-size: 12px;
+}
+.target-resolution p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.target-resolution .button {
+  min-height: 30px;
+}
 .revision-trail {
   margin: 14px 0;
   font-size: 12px;
@@ -2653,6 +2667,11 @@ summary {
   background: #4d6143;
   box-shadow: 0 2px 0 #9faf74;
   color: #f0f2e8;
+}
+.app .writing-editor .target-highlight.section-target {
+  background: color-mix(in srgb, var(--highlight) 20%, transparent);
+  box-shadow: inset 0 -1px 0 var(--accent);
+  color: inherit;
 }
 .preview-hidden .writing {
   display: none;
