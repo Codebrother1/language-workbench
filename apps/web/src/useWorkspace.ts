@@ -1018,7 +1018,7 @@ export function useWorkspace() {
   };
   const patchSection = (
     id: string,
-    patch: Partial<Document["sections"][number]>,
+    patch: Partial<Pick<WritingSection, "kind" | "label">>,
   ) => {
     update((d) => ({
       ...d,
@@ -1028,10 +1028,13 @@ export function useWorkspace() {
       const loc = sectionLocation(editor, id);
       if (loc)
         editor.view.dispatch(
-          editor.state.tr.setNodeMarkup(loc.pos, undefined, {
-            ...loc.node.attrs,
-            ...patch,
-          }),
+          allowSectionLocalEdit(
+            editor.state.tr.setNodeMarkup(loc.pos, undefined, {
+              ...loc.node.attrs,
+              ...patch,
+            }),
+            id,
+          ),
         );
     }
     setTarget((t) =>

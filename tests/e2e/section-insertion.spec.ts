@@ -74,6 +74,161 @@ async function choose(page: Page, kind: string) {
     .click();
 }
 
+test("inline labels survive a Preview edit in another section", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request, ["Point", "Freeform", "Closer"]);
+  await open(page);
+  const renamed = page.locator(`[data-section-id="${doc.sections[1].id}"]`);
+  await renamed.getByRole("button", { name: "Name section 2" }).click();
+  await page.getByLabel("Short label for section 2").fill("What waiting did");
+  await page.getByLabel("Short label for section 2").press("Enter");
+  await expect(renamed.locator(".section-focus")).toContainText(
+    "What waiting did",
+  );
+  await page
+    .locator(`[data-section-id="${doc.sections[2].id}"] .section-focus`)
+    .click();
+  await page.locator(`[id="${doc.sections[2].id}"] p`).click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" A new thought.");
+  await save(page);
+  expect((await data(request, doc.id)).sections[1].label).toBe(
+    "What waiting did",
+  );
+  await page.reload();
+  await expect(
+    page.locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`),
+  ).toContainText("What waiting did");
+});
+
+test("several inline labels and unrelated metadata remain attached after prose edits and Lab activity", async ({
+  page,
+  request,
+}) => {
+  let doc = await seed(request, ["Point", "Freeform", "Closer", "Point"]);
+  doc.sections[1].notes = "Private beat note.";
+  doc.sections[1].modelOverride = {
+    providerId: "mock",
+    modelId: "conservative",
+  };
+  doc = await (
+    await request.put(`/api/documents/${doc.id}`, { data: doc })
+  ).json();
+  await open(page);
+  const labels = ["List starts lying", "Waiting changes things", "The turn"];
+  for (let i = 1; i < 4; i++) {
+    const item = page.locator(`[data-section-id="${doc.sections[i].id}"]`);
+    await item.getByRole("button", { name: `Name section ${i + 1}` }).click();
+    await page
+      .getByLabel(`Short label for section ${i + 1}`)
+      .fill(labels[i - 1]);
+    await page.getByLabel(`Short label for section ${i + 1}`).press("Enter");
+    await expect(item.locator(".section-focus")).toContainText(labels[i - 1]);
+  }
+  await page
+    .locator(`[data-section-id="${doc.sections[0].id}"] .section-focus`)
+    .click();
+  await page.locator(`[id="${doc.sections[0].id}"] p`).click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" An additional sentence.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.locator(".diagnosis")).toBeVisible();
+  await save(page);
+  const stored = await data(request, doc.id);
+  expect(
+    stored.sections.slice(1).map((s: { label: string }) => s.label),
+  ).toEqual(labels);
+  expect(stored.sections[1]).toMatchObject({
+    id: doc.sections[1].id,
+    kind: "Freeform",
+    notes: "Private beat note.",
+    modelOverride: { providerId: "mock", modelId: "conservative" },
+    placement: "draft",
+  });
+});
+
+test("Section options label uses the same section-local metadata path", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request, ["Point", "Freeform", "Closer"]);
+  await open(page);
+  await options(page, 1);
+  await page
+    .locator(`[data-section-id="${doc.sections[1].id}"] .section-options`)
+    .getByLabel("Label")
+    .fill("An options label");
+  await page
+    .locator(`[data-section-id="${doc.sections[1].id}"] .section-options`)
+    .getByLabel("Semantic kind")
+    .selectOption("Segue");
+  await page
+    .locator(`[data-section-id="${doc.sections[2].id}"] .section-focus`)
+    .click();
+  await page.locator(`[id="${doc.sections[2].id}"] p`).click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" Still here.");
+  await save(page);
+  expect((await data(request, doc.id)).sections[1]).toMatchObject({
+    label: "An options label",
+    kind: "Segue",
+  });
+});
+
+test("inline label stays with its section through reorder, split, park and include", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request, ["Point", "Freeform", "Closer"]);
+  await open(page);
+  const id = doc.sections[1].id;
+  const item = page.locator(`[data-section-id="${id}"]`);
+  await item.getByRole("button", { name: "Name section 2" }).click();
+  await page.getByLabel("Short label for section 2").fill("A movable thought");
+  await page.getByLabel("Short label for section 2").press("Enter");
+  await item.locator(".section-focus").click();
+  await item.locator(".section-options summary").click();
+  await item.getByRole("button", { name: "Move section up" }).click();
+  await expect(page.getByTestId("structure-item").first()).toHaveAttribute(
+    "data-section-id",
+    id,
+  );
+  await item.locator(".section-focus").click();
+  await page.locator(`[id="${id}"] p`).evaluate((p) => {
+    const text = document.createTreeWalker(p, NodeFilter.SHOW_TEXT).nextNode()!;
+    window.getSelection()?.setBaseAndExtent(text, 10, text, 10);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await page.getByRole("button", { name: "Split section at cursor" }).click();
+  await expect(item.locator(".section-focus")).toContainText(
+    "A movable thought",
+  );
+  await item.locator(".section-focus").click();
+  await item.getByRole("button", { name: "Park thought" }).click();
+  await save(page);
+  let stored = await data(request, doc.id);
+  expect(
+    stored.sections.find((s: { id: string }) => s.id === id),
+  ).toMatchObject({ label: "A movable thought", placement: "parked" });
+  await item.locator(".section-focus").click();
+  await item.getByRole("button", { name: "Include in draft" }).click();
+  await item
+    .getByLabel("Draft position")
+    .selectOption({ label: "At end of draft" });
+  await item.getByRole("button", { name: "Include here" }).click();
+  await save(page);
+  stored = await data(request, doc.id);
+  expect(
+    stored.sections.find((s: { id: string }) => s.id === id),
+  ).toMatchObject({ label: "A movable thought", placement: "draft" });
+  await page.reload();
+  await expect(item.locator(".section-focus")).toContainText(
+    "A movable thought",
+  );
+});
+
 test("hover/focus boundaries insert at start, middle and end; all types stay available", async ({
   page,
   request,

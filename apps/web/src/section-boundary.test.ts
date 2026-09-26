@@ -372,6 +372,23 @@ describe("section boundary guard: stable six-section identity independent of for
 });
 
 describe("explicit local application authority", () => {
+  it("updates only an explicitly named section's metadata when the caret is elsewhere", () => {
+    const f = fixture();
+    const ranges = locations(f.view.state);
+    f.select(ranges[0].start);
+    const rename = () =>
+      f.view.state.tr.setNodeMarkup(ranges[3].pos, undefined, {
+        ...f.view.state.doc.child(3).attrs,
+        label: "The chosen thought",
+      });
+    f.view.dispatch(rename());
+    expect(f.view.state.doc.child(3).attrs.label).toBe("Point");
+    f.view.dispatch(allowSectionLocalEdit(rename(), f.ids[3]));
+    expect(f.view.state.doc.child(3).attrs.label).toBe("The chosen thought");
+    expect(f.view.state.doc.child(0).eq(f.doc.child(0))).toBe(true);
+    expect(f.view.state.doc.child(3).attrs.kind).toBe("Point");
+    expect(sectionTopology(f.view.state.doc)).toEqual(f.ids);
+  });
   it("allows an exact section-local app edit after a cross-section copy selection", () => {
     const f = fixture();
     const ranges = locations(f.view.state);
