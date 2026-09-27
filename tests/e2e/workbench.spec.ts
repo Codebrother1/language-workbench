@@ -183,6 +183,20 @@ test("sentence diagnosis reads globally but proposal, copy and acceptance stay l
   );
   await page.locator(".variants summary").click();
   await expect(page.getByLabel("Variant text")).toHaveValue(/I really utilize/);
+  await expect(page.getByLabel("Variant label")).toHaveValue("Original target");
+  await page.getByLabel("Variant label").fill("My earlier line");
+  await page
+    .getByRole("button", { name: "Compare", exact: true })
+    .last()
+    .click();
+  await expect(page.getByTestId("compare-original")).toHaveText(
+    "I really utilize tools in order to help.",
+  );
+  await expect(page.getByTestId("compare-current")).not.toHaveText(
+    "I really utilize tools in order to help.",
+  );
+  await expect(page.getByTestId("compare-take")).toHaveCount(0);
+  await expect(page.getByTestId("variant-comparison")).toHaveCount(1);
   await page
     .getByRole("button", { name: "Activate", exact: true })
     .first()
@@ -194,10 +208,30 @@ test("sentence diagnosis reads globally but proposal, copy and acceptance stay l
   const stored = await (await request.get("/api/documents/" + doc.id)).json();
   expect(stored.sources).toEqual(doc.sources);
   expect(stored.sections[0].variants.length).toBeGreaterThanOrEqual(2);
+  expect(stored.sections[0].variants[0]).toMatchObject({
+    label: "My earlier line",
+    origin: "original",
+    text: "I really utilize tools in order to help.",
+    sourceTarget: { text: "I really utilize tools in order to help." },
+  });
   expect(stored.history[0].state).toBe("accepted");
   await page.reload();
   await expect(page.getByTestId("writing-editor")).toContainText(
     "I really utilize",
+  );
+  await page.locator(".variants summary").click();
+  await expect(page.getByLabel("Variant label").first()).toHaveValue(
+    "My earlier line",
+  );
+  await page
+    .getByRole("button", { name: "Compare", exact: true })
+    .first()
+    .click();
+  await expect(page.getByTestId("compare-original")).toHaveText(
+    "I really utilize tools in order to help.",
+  );
+  await expect(page.getByTestId("compare-current")).toContainText(
+    "First sentence stays.",
   );
 });
 test("word inspection and section lab use exact targets; critique never edits", async ({

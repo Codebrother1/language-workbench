@@ -129,14 +129,14 @@ export function ModelControls({ w }: { w: Workspace }) {
         )}
         <ModelPicker
           catalog={w.catalog}
-          value={w.oneOffModel}
+          value={w.oneOffModel ?? w.chainModel}
           onChange={w.setOneOffModel}
           label="Run with"
-          inherit="Normal route · no one-off override"
+          inherit="Normal route · no pinned model"
         />
         <p className="small muted">
-          Run with is consumed by the next single-model operation only,
-          including diagnosis.
+          Run with stays with this target’s Diagnose → Propose chain. New
+          diagnosis starts a new route; Compare must include the pinned model.
         </p>
         <details>
           <summary>Compare models</summary>
@@ -179,7 +179,9 @@ export function ModelControls({ w }: { w: Workspace }) {
               (!w.isLensTarget && !w.answer.trim())
             }
           >
-            Compare selected models
+            {w.running?.label.startsWith("Comparing")
+              ? "Comparing…"
+              : "Compare selected models"}
           </Button>
           <p className="small muted">
             2–4 configured models. Live comparison can incur one request per

@@ -1643,6 +1643,21 @@ export default function App() {
             )}
             {w.saveState}
           </button>
+          {w.running && (
+            <span
+              className="model-progress"
+              role="status"
+              data-testid="model-progress"
+              title={w.running.models
+                .map((model) => modelLabel(w.catalog, model))
+                .join(" + ")}
+            >
+              {w.running.label} ·{" "}
+              {w.running.models
+                .map((model) => modelLabel(w.catalog, model))
+                .join(" + ")}
+            </span>
+          )}
         </div>
         <div className="topbar-actions">
           <Button

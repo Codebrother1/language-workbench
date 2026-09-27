@@ -271,7 +271,9 @@ test("different section models persist; one-off run overrides only one request",
     .selectOption(modelKey(plain));
   await diagnose(page);
   await expect(page.getByTestId("run-model")).toContainText("Offline plain");
-  await expect(page.getByLabel("Run with", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Run with", { exact: true })).toHaveValue(
+    modelKey(plain),
+  );
   await expect(page.getByLabel("Section model", { exact: true })).toHaveValue(
     modelKey(conservative),
   );
@@ -279,6 +281,7 @@ test("different section models persist; one-off run overrides only one request",
   await expect(page.getByTestId("run-model")).toContainText(
     "Offline conservative",
   );
+  await expect(page.getByLabel("Run with", { exact: true })).toHaveValue("");
   await save(page);
   const data = await stored(request, doc.id);
   expect(data.sections[0].modelOverride).toEqual(conservative);
@@ -294,6 +297,255 @@ test("different section models persist; one-off run overrides only one request",
     modelKey(plain),
   );
 });
+test("an Offline Run with choice stays attached to Diagnose and Propose without paid fallback", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await section(page, "Hook");
+  await models(page);
+  await page
+    .getByLabel("Run with", { exact: true })
+    .selectOption(modelKey(plain));
+  const calls: any[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/ai")) calls.push(r.postDataJSON());
+  });
+  await diagnose(page);
+  await expect(page.getByTestId("run-model")).toContainText("Offline plain");
+  await save(page);
+  await page.reload();
+  await section(page, "Hook");
+  await page
+    .getByLabel("Your material")
+    .fill("Material: This is a human supplied line.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  await expect(page.getByTestId("run-model")).toContainText("Offline plain");
+  expect(calls.map((call) => call.modelOverride)).toEqual([plain, plain]);
+  await save(page);
+  expect(
+    (await stored(request, doc.id)).sections[0].workbench.runs.map(
+      (run: any) => run.model,
+    ),
+  ).toEqual([plain, plain]);
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+  await models(page);
+  await page.locator(".model-controls details > summary").click();
+  await page.getByRole("checkbox", { name: /Offline plain/ }).check();
+  await page.getByRole("checkbox", { name: /Offline conservative/ }).check();
+  const comparison = page.waitForRequest((r) =>
+    r.url().endsWith("/api/ai/compare"),
+  );
+  await page.getByRole("button", { name: "Compare selected models" }).click();
+  expect((await comparison).postDataJSON().models).toEqual([
+    plain,
+    conservative,
+  ]);
+  await expect(page.getByTestId("run-model")).toContainText(
+    "Offline conservative",
+  );
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect.poll(() => calls.length).toBe(3);
+  expect(calls[2].modelOverride).toEqual(plain);
+  await expect(page.getByTestId("run-model")).toContainText("Offline plain");
+  await page
+    .getByLabel("Run with", { exact: true })
+    .selectOption(modelKey(conservative));
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect.poll(() => calls.length).toBe(4);
+  expect(calls[3].modelOverride).toEqual(conservative);
+  await expect(page.getByTestId("run-model")).toContainText(
+    "Offline conservative",
+  );
+  await page.locator(".local-history > summary").click();
+  await page.getByRole("button", { name: "Inspect this run" }).last().click();
+  await page.getByLabel("Your material").fill("Material: My own words again.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect.poll(() => calls.length).toBe(5);
+  expect(calls[4].modelOverride).toEqual(plain);
+  await expect(page.getByTestId("run-model")).toContainText("Offline plain");
+  await page.getByLabel("Run with", { exact: true }).selectOption("");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect.poll(() => calls.length).toBe(6);
+  expect(calls[5].modelOverride).toBeNull();
+});
+
+test("an unavailable pinned Offline capability blocks follow-up rather than falling back", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  await section(page, "Hook");
+  await models(page);
+  await page
+    .getByLabel("Run with", { exact: true })
+    .selectOption(modelKey(plain));
+  const calls: any[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/ai")) calls.push(r.postDataJSON());
+  });
+  await diagnose(page);
+  const catalog = await (await request.get("/api/providers")).json();
+  catalog.providers
+    .find((p: any) => p.id === "mock")
+    .models.find((m: any) => m.id === "plain").capabilities.structuredOutput =
+    false;
+  await page.route("**/api/providers", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(catalog),
+    }),
+  );
+  await page.getByLabel("Your material").fill("Material: Human writing only.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "cannot return structured writing results",
+  );
+  expect(calls).toHaveLength(1);
+  expect(calls[0].modelOverride).toEqual(plain);
+});
+
+test("Segue comparison separates saved original, current prose and one take per wording", async ({
+  page,
+  request,
+}) => {
+  const imported = await seed(request);
+  const doc = await stored(request, imported.id);
+  const segue = doc.sections[1];
+  const original = targetFor(doc, segue.id);
+  segue.content = newSection("Segue", "Current bridge in the draft.").content;
+  const current = targetFor(doc, segue.id);
+  segue.variants = [
+    {
+      id: "original-bridge",
+      label: "Earlier bridge",
+      text: original.text,
+      target: current,
+      sourceTarget: original,
+      origin: "original",
+      createdAt: doc.updatedAt,
+    },
+    {
+      id: "plain-take",
+      label: "A saved take",
+      text: "A different bridge.",
+      target: original,
+      origin: "ai",
+      model: plain,
+      createdAt: doc.updatedAt,
+    },
+    {
+      id: "conservative-take",
+      label: "Another saved take",
+      text: "A different bridge.",
+      target: original,
+      origin: "ai",
+      model: conservative,
+      createdAt: doc.updatedAt,
+    },
+  ];
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  await section(page, "Segue");
+  await page.getByRole("button", { name: "Compare Segue versions" }).click();
+  const compare = page.getByRole("dialog", { name: "Compare this connection" });
+  await expect(compare.getByTestId("compare-original")).toContainText(
+    original.text,
+  );
+  await expect(compare.getByTestId("compare-canonical")).toContainText(
+    "Current bridge in the draft.",
+  );
+  await expect(compare.getByTestId("compare-version")).toHaveCount(1);
+  await expect(compare.getByTestId("compare-version")).toContainText(
+    "Offline plain",
+  );
+  await expect(compare.getByTestId("compare-version")).toContainText(
+    "Offline conservative",
+  );
+  await page.reload();
+  await section(page, "Segue");
+  await page.getByRole("button", { name: "Compare Segue versions" }).click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Compare this connection" })
+      .getByTestId("compare-version"),
+  ).toHaveCount(1);
+});
+
+test("delayed model work shows honest progress and clears it after success or error", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  let calls = 0,
+    fail = false;
+  await page.route("**/api/ai", async (route) => {
+    calls++;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    if (fail)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Provider unavailable" }),
+      });
+    const propose = route.request().postDataJSON().stage === "propose";
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        diagnosis: "Synthetic analysis",
+        mechanism: "Local target only",
+        question: "What should stay?",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals: propose
+          ? [
+              {
+                id: "p",
+                label: "Synthetic",
+                text: "Human supplied wording.",
+                explanation: "No automatic change.",
+              },
+            ]
+          : [],
+      }),
+    });
+  });
+  await open(page);
+  await section(page, "Hook");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("model-progress")).toContainText("Analyzing…");
+  await expect(page.getByTestId("model-progress")).toContainText(
+    "Offline conservative",
+  );
+  await expect(page.locator(".diagnosis")).toContainText("Synthetic analysis");
+  await expect(page.getByTestId("model-progress")).toHaveCount(0);
+  await page
+    .getByLabel("Your material")
+    .fill("Material: Human supplied wording.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("model-progress")).toContainText("Proposing…");
+  await expect(page.getByRole("button", { name: "Proposing…" })).toBeDisabled();
+  await expect(page.getByTestId("proposal")).toHaveCount(1);
+  await expect(page.getByTestId("model-progress")).toHaveCount(0);
+  expect(calls).toBe(2);
+  fail = true;
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("model-progress")).toContainText("Proposing…");
+  await expect(page.getByRole("alert")).toContainText("Provider unavailable");
+  await expect(page.getByTestId("model-progress")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Propose options" }),
+  ).toBeEnabled();
+  expect(calls).toBe(3);
+});
+
 test("section-type defaults and document fallback use the same resolver", async ({
   page,
   request,

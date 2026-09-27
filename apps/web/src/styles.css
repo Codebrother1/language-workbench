@@ -198,6 +198,15 @@ hr {
 .save-state svg {
   color: var(--accent);
 }
+.model-progress {
+  max-width: min(220px, 22vw);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
 .save-error {
   color: var(--danger);
 }

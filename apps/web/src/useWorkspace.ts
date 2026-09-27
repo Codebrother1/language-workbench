@@ -47,6 +47,7 @@ import {
   type AIRequest,
   requestedVariantShape,
   resolveModel,
+  modelKey,
   routingPreferencesSchema,
   emptyLibrary,
   personalLibrarySchema,
@@ -241,6 +242,10 @@ export function useWorkspace() {
   } | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState<{
+    label: string;
+    models: ModelRef[];
+  } | null>(null);
   const requestBusy = useRef(false);
   const navigating = useRef(false);
   const [documentWorkbench, setDocumentWorkbench] = useState(false);
@@ -1404,7 +1409,13 @@ export function useWorkspace() {
   const setControls = (v: SetStateAction<SectionWorkbench["controls"]>) =>
     setField("controls", v);
   const setLens = (v: SetStateAction<LensOptions>) => setField("lens", v);
-  const setOneOffModel = (v: ModelRef | null) => setField("oneOffModel", v);
+  const setOneOffModel = (v: ModelRef | null) =>
+    patchWorkbench((wb) => ({
+      ...wb,
+      oneOffModel: v,
+      runChain: v === null ? null : wb.runChain,
+      clearedChainRunId: v === null ? wb.activeRunId : null,
+    }));
   const setCompareModels = (v: SetStateAction<ModelRef[]>) =>
     setField("compareModels", v);
   const inspectDocumentRun = (id: string) => {
@@ -1614,8 +1625,20 @@ export function useWorkspace() {
     sectionNotes: selectedSection?.notes,
     instruction,
   });
+  const chainModel = activeRun
+    ? !target ||
+      !sameFocusTarget(activeRun.target, target) ||
+      currentWorkbench.clearedChainRunId === activeRun.id
+      ? null
+      : (activeRun.chainModel ??
+        (activeRun.response.routeSource === "action" ? activeRun.model : null))
+    : currentWorkbench.runChain &&
+        target &&
+        sameFocusTarget(currentWorkbench.runChain.target, target)
+      ? currentWorkbench.runChain.model
+      : null;
   const effectiveModel = resolveModel({
-    oneOff: oneOffModel,
+    oneOff: oneOffModel ?? chainModel,
     sectionOverride: selectedSection?.modelOverride,
     sectionType: selectedSection?.kind,
     task: action,
@@ -1711,10 +1734,38 @@ export function useWorkspace() {
       );
     const owner = t.scope === "document" ? null : t.sectionId;
     const wb = getWorkbench(current.current, owner);
+    const followupModel =
+      stage === "propose" &&
+      activeRun &&
+      wb.clearedChainRunId !== activeRun.id &&
+      sameFocusTarget(activeRun.target, t)
+        ? (activeRun.chainModel ??
+          (activeRun.response.routeSource === "action"
+            ? activeRun.model
+            : null))
+        : null;
+    const retryModel =
+      stage === "diagnose" &&
+      !activeRun &&
+      wb.runChain &&
+      sameFocusTarget(wb.runChain.target, t)
+        ? wb.runChain.model
+        : null;
+    const chosenOneOff = wb.oneOffModel ?? followupModel ?? retryModel;
     const draft = getTargetDraft(wb, t);
     const selectedModels = [...wb.compareModels];
     if (comparing && (selectedModels.length < 2 || selectedModels.length > 4))
       return setError("Select between two and four models to compare.");
+    if (
+      comparing &&
+      chosenOneOff &&
+      !selectedModels.some(
+        (model) => modelKey(model) === modelKey(chosenOneOff),
+      )
+    )
+      return setError(
+        "This run chain uses a chosen model. Include it in Compare or explicitly change Run with before comparing.",
+      );
     if (override && !structureInput) {
       setDocumentWorkbench(true);
       update((d) =>
@@ -1723,7 +1774,7 @@ export function useWorkspace() {
     }
     const section = current.current.sections.find((s) => s.id === owner);
     const route = resolveModel({
-      oneOff: wb.oneOffModel,
+      oneOff: chosenOneOff,
       sectionOverride: section?.modelOverride,
       sectionType: section?.kind,
       task: chosen,
@@ -1731,6 +1782,25 @@ export function useWorkspace() {
       preferences: settingsRef.current.routing,
       applicationDefault: activeCatalog.applicationDefault,
     });
+    const chosenProvider = activeCatalog.providers.find(
+      (provider) => provider.id === route.model.providerId,
+    );
+    const chosenDescriptor = chosenProvider?.models.find(
+      (model) => model.id === route.model.modelId,
+    );
+    if (
+      !chosenProvider?.configured ||
+      !chosenProvider.enabled ||
+      !chosenProvider.implemented ||
+      !chosenDescriptor
+    )
+      return setError(
+        "The chosen provider/model is unavailable for this step. Change the model explicitly before continuing; no fallback was used.",
+      );
+    if (chosenDescriptor.capabilities.structuredOutput === false)
+      return setError(
+        "The chosen model cannot return structured writing results. Change the provider/model explicitly; no fallback was used.",
+      );
     const capture: RunCapture = {
       ...(chosen === "words"
         ? {
@@ -1754,11 +1824,22 @@ export function useWorkspace() {
       ...(structureInput ? { structure: structureInput } : {}),
       controls: { ...wb.controls },
       model: route.model,
+      ...(chosenOneOff ? { chainModel: chosenOneOff } : {}),
       question:
         wb.runs.find((r) => r.id === wb.activeRunId)?.response.question ?? "",
     };
     requestBusy.current = true;
     setBusy(true);
+    setRunning({
+      label: comparing
+        ? `Comparing ${selectedModels.length} models…`
+        : stage === "propose"
+          ? "Proposing…"
+          : chosen === "critique"
+            ? "Analyzing the draft…"
+            : "Analyzing…",
+      models: comparing ? selectedModels : [route.model],
+    });
     setError("");
     try {
       await settingsQueue.current;
@@ -1796,7 +1877,7 @@ export function useWorkspace() {
         answer: capture.answer,
         controls: capture.controls,
         variantCount: requestedVariantShape(capture.instruction)?.min ?? 2,
-        modelOverride: comparing ? null : wb.oneOffModel,
+        modelOverride: comparing ? null : chosenOneOff,
         ...(chosen === "words"
           ? {
               lens: {
@@ -1808,11 +1889,25 @@ export function useWorkspace() {
           : {}),
       };
       // Consume only the captured single-operation override. Persistent routes are untouched.
-      if (!comparing && wb.oneOffModel)
+      if (wb.oneOffModel)
         update((d) =>
           updateWorkbench(d, owner, (local) => ({
             ...local,
             oneOffModel: null,
+            runChain: { model: wb.oneOffModel!, target: t },
+          })),
+        );
+      else if (
+        stage === "propose" &&
+        followupModel &&
+        (!wb.runChain ||
+          modelKey(wb.runChain.model) !== modelKey(followupModel) ||
+          !sameFocusTarget(wb.runChain.target, t))
+      )
+        update((d) =>
+          updateWorkbench(d, owner, (local) => ({
+            ...local,
+            runChain: { model: followupModel, target: t },
           })),
         );
       if (lensMode)
@@ -1842,13 +1937,25 @@ export function useWorkspace() {
       } else {
         const result = await api<AIResponse>("/ai", "POST", request);
         const run = makeRun(capture, result);
-        update((d) => appendRun(d, run, capture.question));
+        update((d) =>
+          appendRun(
+            stage === "diagnose" && !wb.oneOffModel && wb.runChain
+              ? updateWorkbench(d, owner, (local) => ({
+                  ...local,
+                  runChain: null,
+                }))
+              : d,
+            run,
+            capture.question,
+          ),
+        );
       }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       requestBusy.current = false;
       setBusy(false);
+      setRunning(null);
     }
   };
   const runStructure = async (
@@ -1920,7 +2027,7 @@ export function useWorkspace() {
     if (activeRun)
       update((d) => editRunProposal(d, sectionId, activeRun.id, id, text));
   };
-  const applyText = (t: EditTarget, text: string, label: string) => {
+  const applyText = (t: EditTarget, text: string) => {
     if (!editor) throw new Error("Editor unavailable");
     if (t.scope === "document")
       throw new Error("Document analysis cannot replace your writing.");
@@ -2004,9 +2111,10 @@ export function useWorkspace() {
       );
       const original: Variant = {
         id: uid(),
-        label: "Original · " + label,
+        label: "Original target",
         text: t.text,
         target: acceptedTarget,
+        sourceTarget: t,
         origin: "original",
         createdAt: new Date().toISOString(),
       };
@@ -2041,7 +2149,7 @@ export function useWorkspace() {
         t = responseTarget;
       if (!p || !t) return;
       if (state === "accepted") {
-        applyText(t, p.text, p.label);
+        applyText(t, p.text);
         const used = activeRun?.controls.libraryItemId;
         if (
           activeRun?.response.provider === "human-library" &&
@@ -2086,7 +2194,7 @@ export function useWorkspace() {
   };
   const activate = (v: Variant) => {
     try {
-      applyText(v.target, v.text, v.label);
+      applyText(v.target, v.text);
     } catch (e) {
       setError(
         (e as Error).message +
@@ -2377,6 +2485,7 @@ export function useWorkspace() {
     setSectionTypeModel,
     setTaskModel,
     oneOffModel,
+    chainModel,
     setOneOffModel,
     compareModels,
     setCompareModels,
@@ -2419,6 +2528,7 @@ export function useWorkspace() {
     response,
     responseTarget,
     busy,
+    running,
     answer,
     setAnswer,
     responseAnswer,

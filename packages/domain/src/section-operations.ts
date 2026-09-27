@@ -196,6 +196,8 @@ export function duplicateSection(doc: Document, sectionId: string): Document {
   for (const variant of copy.variants ?? []) {
     variant.id = freshId();
     variant.target = remapTarget(variant.target);
+    if (variant.sourceTarget)
+      variant.sourceTarget = remapTarget(variant.sourceTarget);
     if (variant.runId !== undefined)
       variant.runId = mappedId(runIds, variant.runId);
   }
@@ -214,6 +216,9 @@ export function duplicateSection(doc: Document, sectionId: string): Document {
     }
     if (wb.activeRunId != null)
       wb.activeRunId = mappedId(runIds, wb.activeRunId);
+    if (wb.clearedChainRunId)
+      wb.clearedChainRunId = mappedId(runIds, wb.clearedChainRunId);
+    if (wb.runChain) wb.runChain.target = remapTarget(wb.runChain.target);
     if (wb.proposalStates)
       wb.proposalStates = Object.fromEntries(
         Object.entries(wb.proposalStates).map(([id, state]) => [

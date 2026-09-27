@@ -159,6 +159,11 @@ test("empty Segue storyboard + neighbors → coaching → relational comparison 
   await expect(compare.getByTestId("compare-canonical")).toContainText(
     "The feeling came first",
   );
+  await expect(compare.getByTestId("compare-original")).toHaveCount(1);
+  await expect(compare.getByTestId("compare-original")).toContainText(
+    "Original target snapshot",
+  );
+  await expect(compare.getByTestId("compare-version")).toHaveCount(1);
   await compare.getByRole("button", { name: "Back to this Segue" }).click();
   await expect(page.locator(".lab-head")).toContainText("Segue workbench");
   await expect(page.locator(".structure-item.active")).toHaveAttribute(

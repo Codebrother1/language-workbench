@@ -404,6 +404,19 @@ describe("one authoritative routing algorithm and immutable comparison", () => {
     ]);
     expect(result.proposals).toEqual([]);
   });
+  it("never calls the configured live default during an explicitly Offline diagnose-to-propose chain", async () => {
+    const input = fixture();
+    input.modelOverride = plain;
+    const diagnosis = await registry.run(input);
+    expect(diagnosis.model).toEqual(plain);
+    const proposed = await registry.run({
+      ...input,
+      stage: "propose",
+      answer: "Material: These are my own words.",
+    });
+    expect(proposed.model).toEqual(plain);
+    expect(calls).toHaveLength(0);
+  });
   it("routes words/lens, critique, and culture tasks; unsupported web search fails explicitly", async () => {
     const settings = repository.getSettings();
     settings.routing = {

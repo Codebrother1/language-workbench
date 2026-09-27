@@ -133,14 +133,27 @@ export function RelationalCompare({
       .map((part) => part.text)
       .join("");
   if (!section) return null;
+  const canonicalText = sectionText(section);
+  const originalVariant = section.variants
+    .filter((variant) => variant.origin === "original")
+    .at(-1);
+  const originalText =
+    originalVariant?.sourceTarget?.text ??
+    originalVariant?.text ??
+    (w.responseTarget?.sectionId === section.id ? w.responseTarget.text : null);
   const allCandidates = [
-    ...section.variants.map((v) => ({
-      id: v.id,
-      label: v.label,
-      text: v.text,
-      model: v.model,
-      type: "variant" as const,
-    })),
+    ...section.variants
+      .filter(
+        (variant) =>
+          variant.origin !== "original" || variant.text !== originalText,
+      )
+      .map((v) => ({
+        id: v.id,
+        label: v.label,
+        text: v.text,
+        model: v.model,
+        type: "variant" as const,
+      })),
     ...(w.response?.proposals ?? []).map((p) => ({
       id: p.id,
       label: p.label,
@@ -150,12 +163,27 @@ export function RelationalCompare({
     })),
   ];
   const seen = new Set<string>();
-  const candidates = allCandidates.filter((c) => {
-    const key = JSON.stringify([c.model?.providerId, c.model?.modelId, c.text]);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const candidates = allCandidates
+    .filter((candidate) => {
+      if (
+        candidate.text === canonicalText ||
+        candidate.text === originalText ||
+        seen.has(candidate.text)
+      )
+        return false;
+      seen.add(candidate.text);
+      return true;
+    })
+    .map((candidate) => ({
+      ...candidate,
+      sources: [
+        ...new Set(
+          allCandidates
+            .filter((other) => other.text === candidate.text)
+            .map((other) => modelLabel(w.catalog, other.model)),
+        ),
+      ],
+    }));
   const chosen = included.length
     ? candidates.filter((c) => included.includes(c.id))
     : candidates.slice(-3);
@@ -214,10 +242,22 @@ export function RelationalCompare({
         )}
       </div>
       <div className="relational-versions">
+        {originalText !== null && originalText !== canonicalText && (
+          <article
+            className="comparison-version"
+            data-testid="compare-original"
+          >
+            <span className="eyebrow">Original target snapshot</span>
+            <p>{originalText}</p>
+          </article>
+        )}
         <article className="comparison-version current-version">
-          <span className="eyebrow">Canonical · {section.label}</span>
+          <span className="eyebrow">
+            Current canonical prose · {section.label}
+            {originalText === canonicalText ? " · Original unchanged" : ""}
+          </span>
           <p data-testid="compare-canonical">
-            {sectionText(section) || "Empty — still waiting for your words."}
+            {canonicalText || "Empty — still waiting for your words."}
           </p>
           {section.notes && <p className="small muted">{section.notes}</p>}
           <Button onClick={() => w.copy(sectionText(section))}>
@@ -234,8 +274,11 @@ export function RelationalCompare({
               className="comparison-version"
               data-testid="compare-version"
             >
-              <span className="eyebrow">{display(c.label)}</span>
-              <small>{modelLabel(w.catalog, c.model)}</small>
+              <span className="eyebrow">
+                {c.type === "variant" ? "Saved variant / take" : "AI proposal"}{" "}
+                · {display(c.label)}
+              </span>
+              <small>{c.sources.join(" · ")}</small>
               <textarea
                 aria-label={"Edit version " + display(c.label)}
                 rows={5}

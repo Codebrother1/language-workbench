@@ -142,6 +142,12 @@ export class Repository {
           ]),
         ),
         activeRunId: w.activeRunId ? (runIds.get(w.activeRunId) ?? null) : null,
+        clearedChainRunId: w.clearedChainRunId
+          ? (runIds.get(w.clearedChainRunId) ?? null)
+          : w.clearedChainRunId,
+        runChain: w.runChain
+          ? { ...w.runChain, target: remapTarget(w.runChain.target) }
+          : w.runChain,
         runs: w.runs.map((r) => ({
           ...r,
           id: runIds.get(r.id)!,
@@ -180,6 +186,9 @@ export class Repository {
           ...v,
           id: uid(),
           target: remapTarget(v.target),
+          sourceTarget: v.sourceTarget
+            ? remapTarget(v.sourceTarget)
+            : undefined,
           runId: v.runId ? runIds.get(v.runId) : undefined,
         })),
       })),

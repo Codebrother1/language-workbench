@@ -34,7 +34,7 @@ A pending operation blocks switching documents with an explicit message. You may
 
 A run captures its original target, offsets and section snapshot. Inspecting a saved run keeps that original visible as history: an unchanged or uniquely surviving selection can be restored exactly; a replacement bracketed by unique stable neighboring text is labeled **Target changed since this run** and shows its current passage separately; without reliable anchors it is **unresolved** and does not highlight a substitute. **Return to current passage** only navigates there; **Use current passage** or a fresh text selection is required for a new Lab request. An unresolved selection cannot be used for another run. Accept/Replace/Activate rechecks that anchor against the current document. If the source section changed, make a fresh selection and request rather than expecting automatic relocation. Editing an unrelated section need not invalidate the original target. Section merges retain prior runs, but stale anchors still fail closed. Run inspection never refreshes an obsolete anchor into permission to overwrite new text.
 
-Original variants are text snapshots, not full rich-format backups. Section-wide replacement rebuilds paragraphs and can lose formatting. Whole-piece analysis and cross-section selections do not authorize whole-document rewriting. Live candidates are checked after generation against explicit count/line/short-bridge requests and nearby Segue prose; clear neighbor restatements are omitted, while lightweight cadence, motif and stock-prose mismatches receive brief quality notes. When a safe distinct option is missing, an output check says so instead of inventing one. This is a lexical heuristic, not reliable semantic understanding or a promise that every subtle paraphrase will be caught. No automatic extra model call is made to fill a missing variant. Whole-piece critique shows the requested revision question separately and flags missing deliverables.
+Accepted edits save the original target text and an immutable source-target snapshot independently of the current replacement anchor; the saved original is not named after a proposal. Variant names remain writer-editable. Compare distinguishes original target, current canonical prose and saved takes or proposals; identical wording appears once with its provenance rather than as duplicate blocks. Original variants are text snapshots, not full rich-format backups. Section-wide replacement rebuilds paragraphs and can lose formatting. Whole-piece analysis and cross-section selections do not authorize whole-document rewriting. Live candidates are checked after generation against explicit count/line/short-bridge requests and nearby Segue prose; clear neighbor restatements are omitted, while lightweight cadence, motif and stock-prose mismatches receive brief quality notes. When a safe distinct option is missing, an output check says so instead of inventing one. This is a lexical heuristic, not reliable semantic understanding or a promise that every subtle paraphrase will be caught. No automatic extra model call is made to fill a missing variant. Whole-piece critique shows the requested revision question separately and flags missing deliverables.
 
 ## Choose models without changing text
 
@@ -44,7 +44,7 @@ One resolver is shared by the frontend and backend:
 
 | Priority | Choice | Where it lives |
 | --- | --- | --- |
-| 1 | One-off **Run with** | Current workbench; consumed by next single-model operation |
+| 1 | One-off **Run with** | Current workbench; captured for the next logical run chain on its exact target |
 | 2 | Section override | Section metadata |
 | 3 | Section-type default | Global routing settings |
 | 4 | Task default | Global routing settings |
@@ -53,7 +53,7 @@ One resolver is shared by the frontend and backend:
 
 Word/Phrase Lens uses task **`words`** with exactly this priority. It does not bypass a section or section-type override to favor a special lexical model. Whole-document analysis has no section/type override.
 
-**Diagnosis counts as the next operation.** If Run with is set before diagnosing, it is consumed by that diagnosis; the later proposal uses normal routing unless you set another one-off. Once dispatched, even a failed request consumes that one-off. A persistent section override is different and stays until cleared. Compare has explicit model references of its own and does not consume Run with.
+**Diagnosis starts a logical run chain.** If Run with is set before diagnosing, the pending picker clears on dispatch, but the chosen model stays pinned to that exact target through its follow-up answer, proposal and comparison. A new diagnosis starts a new chain and uses normal routing unless Run with is chosen again. An explicit new Run with choice replaces the chain choice; clearing Run with discards the chain. Compare still requires 2–4 explicit models and must include the chain model when one is pinned; choosing additional models is an explicit potentially paid request. An unavailable or unsupported pinned model reports the problem and requires a deliberate provider change, never a fallback to the application default.
 
 In **AI provider settings**, choose a document default and, optionally, application, section-type or task defaults. Clearing an override restores inheritance. Unknown/disabled/unconfigured choices are not silently replaced by another model; a request reports the problem. This pass leaves the configured application default (Luna in the reported setup) untouched. If a writer prefers Sol for structural critique after a matched comparison, they can explicitly set a critique task default or use a one-off **Run with**; this pass does not change routing or silently add a higher-cost call.
 
@@ -67,7 +67,7 @@ In **AI provider settings**, choose a document default and, optionally, applicat
 
 Comparison never overwrites a draft or automatically chooses a winner. Each provider outcome is independent; successful runs remain available when another model fails. Errors are shown rather than replaced with mock success. With live models, expect a request and possible charges per selected model.
 
-The UI shows a busy state, errors, completed runs, and proposal outcomes. It is not a token-streaming/per-provider progress console. Recent-output review is vertical and limited to a small recent set, not a full comparison canvas. There is no favorites/recent-model picker UI, although history records the actual models used.
+The UI shows a task-specific Analyzing/Proposing/Comparing state and the chosen model while a request is pending; duplicate submissions are disabled and errors clear the busy state. It is not a token-streaming/per-provider progress console, and no percentage is inferred. Recent-output review is vertical and limited to a small recent set, not a full comparison canvas. There is no favorites/recent-model picker UI, although history records the actual models used.
 
 ### Matched live generation check — 2026-09-25
 

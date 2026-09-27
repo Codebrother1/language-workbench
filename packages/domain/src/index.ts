@@ -129,6 +129,7 @@ export const workbenchRunSchema = z.object({
   answer: z.string(),
   controls: z.record(z.union([z.string(), z.number(), z.boolean()])),
   model: modelRefSchema.nullable(),
+  chainModel: modelRefSchema.optional(),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -154,6 +155,11 @@ export const sectionWorkbenchSchema = z.object({
     .default({}),
   lens: lensOptionsSchema.default({}),
   oneOffModel: modelRefSchema.nullable().default(null),
+  runChain: z
+    .object({ model: modelRefSchema, target: editTargetSchema })
+    .nullable()
+    .optional(),
+  clearedChainRunId: z.string().nullable().optional(),
   compareModels: z.array(modelRefSchema).max(4).default([]),
   runs: z.array(workbenchRunSchema).default([]),
   activeRunId: z.string().nullable().default(null),
@@ -168,6 +174,7 @@ export const variantSchema = z.object({
   label: z.string(),
   text: z.string(),
   target: editTargetSchema,
+  sourceTarget: editTargetSchema.optional(),
   createdAt: z.string(),
   origin: z.enum(["human", "ai", "original"]),
   model: modelRefSchema.optional(),

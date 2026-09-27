@@ -181,6 +181,7 @@ export type RunCapture = {
   answer: string;
   controls: SectionWorkbench["controls"];
   model: ModelRef | null;
+  chainModel?: ModelRef;
   question: string;
 };
 export function makeRun(
@@ -196,6 +197,7 @@ export function makeRun(
     answer: capture.answer,
     controls: { ...capture.controls },
     model: response.model ?? capture.model,
+    ...(capture.chainModel ? { chainModel: capture.chainModel } : {}),
     ...(capture.lens ? { lens: capture.lens } : {}),
     ...(capture.structure
       ? { structure: structuredClone(capture.structure) }
@@ -333,6 +335,14 @@ export function forkWorkbench(
         ...run,
         target: { ...run.target, documentId },
       })),
+      ...(wb.runChain
+        ? {
+            runChain: {
+              ...wb.runChain,
+              target: { ...wb.runChain.target, documentId },
+            },
+          }
+        : {}),
     }
   );
 }

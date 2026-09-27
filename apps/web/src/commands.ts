@@ -26,7 +26,7 @@ export const commands: CommandDefinition[] = [
     label: "Paste something to respond to",
     description:
       "Open a source field for a comment, transcript, quote or excerpt.",
-    keywords: ["paste", "comment", "reference", "announcement"],
+    keywords: ["paste", "comment", "paste reference", "announcement"],
     group: "Write",
   },
   {
@@ -51,7 +51,20 @@ export const commands: CommandDefinition[] = [
     id: "sentence",
     label: "Work this sentence",
     description: "Reveal the existing tools for the sentence at your cursor.",
-    keywords: ["sentence", "rewrite", "shorten", "clarify", "coach"],
+    keywords: [
+      "sentence",
+      "rewrite",
+      "shorten",
+      "clarify",
+      "coach",
+      "tone",
+      "register",
+      "metaphor",
+      "figurative",
+      "voice in this line",
+      "sentence rhythm",
+      "swap sentence",
+    ],
     group: "Work on language",
   },
   {
@@ -76,6 +89,8 @@ export const commands: CommandDefinition[] = [
       "definition",
       "antonym",
       "slang alternatives",
+      "swap",
+      "register of a word",
     ],
     group: "Work on language",
   },
@@ -197,7 +212,7 @@ export const commands: CommandDefinition[] = [
   },
   {
     id: "style",
-    label: "Style DNA — what sounds like you",
+    label: "Style DNA — your voice",
     description:
       "Edit your existing global voice preferences and knowledge packs.",
     keywords: [

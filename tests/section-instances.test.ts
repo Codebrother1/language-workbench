@@ -303,6 +303,21 @@ describe("insertSectionAt", () => {
 });
 
 describe("duplicateSection", () => {
+  it("rebinds a captured model chain and immutable original snapshot to the copied section", () => {
+    const doc = richDocument();
+    const section = doc.sections[0];
+    const original = targetFor(doc, section.id, "word", 0, 5);
+    section.workbench!.runChain = {
+      model: { providerId: "mock", modelId: "plain" },
+      target: original,
+    };
+    section.variants[0].sourceTarget = original;
+    const copy = duplicateSection(doc, section.id).sections[1];
+    expect(copy.workbench!.runChain!.target.sectionId).toBe(copy.id);
+    expect(copy.variants[0].sourceTarget!.sectionId).toBe(copy.id);
+    expect(section.workbench!.runChain!.target.sectionId).toBe(section.id);
+    expect(section.variants[0].sourceTarget!.sectionId).toBe(section.id);
+  });
   it("deep-copies rich marks, notes, model preferences, drafts, structure, lens and controls", () => {
     const doc = richDocument();
     const before = structuredClone(doc);

@@ -1099,7 +1099,10 @@ export function WritingLabShell({
                   }
                   onClick={() => w.ask("propose")}
                 >
-                  Propose options <ArrowRight size={14} />
+                  {w.running?.label === "Proposing…"
+                    ? "Proposing…"
+                    : "Propose options"}{" "}
+                  <ArrowRight size={14} />
                 </Button>
               </>
             )}
@@ -1292,17 +1295,45 @@ export function WritingLabShell({
               Saved alternatives and accepted originals stay with this section.
             </p>
           ) : (
-            section.variants.map((v) => (
-              <article key={v.id} className="variant">
-                {v.model && (
-                  <p className="small muted">
-                    {modelLabel(w.catalog, v.model)}
-                  </p>
-                )}
-                <Field label={v.origin + " variant"}>
-                  <input
-                    aria-label="Variant label"
-                    value={v.label}
+            section.variants.map((v) => {
+              const originalText =
+                v.sourceTarget?.text ??
+                (v.origin === "original" ? v.text : v.target.text);
+              const currentText = sectionText(section);
+              return (
+                <article key={v.id} className="variant">
+                  {v.model && (
+                    <p className="small muted">
+                      {modelLabel(w.catalog, v.model)}
+                    </p>
+                  )}
+                  <Field label={v.origin + " variant"}>
+                    <input
+                      aria-label="Variant label"
+                      value={v.label}
+                      onChange={(e) =>
+                        w.update((d) => ({
+                          ...d,
+                          sections: d.sections.map((s) =>
+                            s.id === section.id
+                              ? {
+                                  ...s,
+                                  variants: s.variants.map((x) =>
+                                    x.id === v.id
+                                      ? { ...x, label: e.target.value }
+                                      : x,
+                                  ),
+                                }
+                              : s,
+                          ),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <textarea
+                    aria-label="Variant text"
+                    value={v.text}
+                    rows={3}
                     onChange={(e) =>
                       w.update((d) => ({
                         ...d,
@@ -1312,7 +1343,7 @@ export function WritingLabShell({
                                 ...s,
                                 variants: s.variants.map((x) =>
                                   x.id === v.id
-                                    ? { ...x, label: e.target.value }
+                                    ? { ...x, text: e.target.value }
                                     : x,
                                 ),
                               }
@@ -1321,83 +1352,87 @@ export function WritingLabShell({
                       }))
                     }
                   />
-                </Field>
-                <textarea
-                  aria-label="Variant text"
-                  value={v.text}
-                  rows={3}
-                  onChange={(e) =>
-                    w.update((d) => ({
-                      ...d,
-                      sections: d.sections.map((s) =>
-                        s.id === section.id
-                          ? {
-                              ...s,
-                              variants: s.variants.map((x) =>
-                                x.id === v.id
-                                  ? { ...x, text: e.target.value }
-                                  : x,
-                              ),
-                            }
-                          : s,
-                      ),
-                    }))
-                  }
-                />
-                <div className="row wrap">
-                  <Button onClick={() => w.activate(v)}>Activate</Button>
-                  <Button
-                    aria-label="Copy variant"
-                    onClick={() => w.copy(v.text)}
-                  >
-                    <Copy size={13} />
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (
-                        section &&
-                        ["Segue", "Transition"].includes(section.kind) &&
-                        onCompare
-                      )
-                        onCompare();
-                      else setCompare(compare === v.id ? null : v.id);
-                    }}
-                  >
-                    Compare
-                  </Button>
-                  <Button
-                    aria-label="Delete variant"
-                    onClick={() =>
-                      w.update((d) => ({
-                        ...d,
-                        sections: d.sections.map((s) =>
-                          s.id === section.id
-                            ? {
-                                ...s,
-                                variants: s.variants.filter(
-                                  (x) => x.id !== v.id,
-                                ),
-                              }
-                            : s,
-                        ),
-                      }))
-                    }
-                  >
-                    <X size={13} />
-                  </Button>
-                </div>
-                {compare === v.id && (
-                  <div className="comparison">
-                    <b>Original target</b>
-                    <p>{v.target.text}</p>
-                    <b>Current section</b>
-                    <p>{sectionText(section)}</p>
-                    <b>Alternative</b>
-                    <p>{v.text}</p>
+                  <div className="row wrap">
+                    <Button onClick={() => w.activate(v)}>Activate</Button>
+                    <Button
+                      aria-label="Copy variant"
+                      onClick={() => w.copy(v.text)}
+                    >
+                      <Copy size={13} />
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (
+                          section &&
+                          ["Segue", "Transition"].includes(section.kind) &&
+                          onCompare
+                        )
+                          onCompare();
+                        else setCompare(compare === v.id ? null : v.id);
+                      }}
+                    >
+                      Compare
+                    </Button>
+                    <Button
+                      aria-label="Delete variant"
+                      onClick={() =>
+                        w.update((d) => ({
+                          ...d,
+                          sections: d.sections.map((s) =>
+                            s.id === section.id
+                              ? {
+                                  ...s,
+                                  variants: s.variants.filter(
+                                    (x) => x.id !== v.id,
+                                  ),
+                                }
+                              : s,
+                          ),
+                        }))
+                      }
+                    >
+                      <X size={13} />
+                    </Button>
                   </div>
-                )}
-              </article>
-            ))
+                  {compare === v.id && (
+                    <div
+                      className="comparison"
+                      data-testid="variant-comparison"
+                    >
+                      <b>
+                        Original target snapshot
+                        {originalText === currentText
+                          ? " · Current canonical prose"
+                          : ""}
+                      </b>
+                      <p data-testid="compare-original">{originalText}</p>
+                      {originalText !== currentText && (
+                        <>
+                          <b>Current canonical prose</b>
+                          <p data-testid="compare-current">{currentText}</p>
+                        </>
+                      )}
+                      {v.text !== originalText && v.text !== currentText ? (
+                        <>
+                          <b>Saved variant / take</b>
+                          <p data-testid="compare-take">{v.text}</p>
+                        </>
+                      ) : (
+                        <small>
+                          Saved{" "}
+                          {v.origin === "original" ? "original" : "variant"}{" "}
+                          matches the{" "}
+                          {v.text === originalText
+                            ? "original target"
+                            : "current prose"}
+                          .
+                        </small>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })
           )}
         </details>
       )}
@@ -1423,7 +1458,10 @@ export function WritingLabShell({
           disabled={w.busy || !w.ready || !hasWriting}
           onClick={() => w.ask("diagnose", "critique")}
         >
-          Whole-piece critique <ArrowUpRight size={14} />
+          {w.running?.label === "Analyzing the draft…"
+            ? "Analyzing…"
+            : "Whole-piece critique"}{" "}
+          <ArrowUpRight size={14} />
         </Button>
         <details>
           <summary>Break a familiar template</summary>
