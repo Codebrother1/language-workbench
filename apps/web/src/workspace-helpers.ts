@@ -33,6 +33,13 @@ export function labActionLabel(action: WritingAction, target: string): string {
   }
 }
 
+export function currentTakeIds(section: WritingSection): string[] {
+  const prose = sectionText(section);
+  return section.variants
+    .filter((take) => take.text === prose)
+    .map((take) => take.id);
+}
+
 export function humanTargetLabel(target: EditTarget): string {
   if (target.scope === "document") return "Whole piece";
   if (target.scope === "section") return "Whole section";
@@ -200,6 +207,14 @@ export type RunCapture = {
   chainModel?: ModelRef;
   question: string;
 };
+export function writerResultReason(reason: string): string {
+  return reason.replace(
+    /A protected (quote|code span)(.*?) was changed/gi,
+    (_match, kind: string, excerpt: string) =>
+      `The generated option changed a protected ${kind}${excerpt}`,
+  );
+}
+
 export function resultOutcome(
   run: WorkbenchRun,
 ): { title: string; reasons: string[] } | null {

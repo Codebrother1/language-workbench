@@ -1145,6 +1145,23 @@ hr {
   align-items: center;
   list-style: none;
 }
+.take-state {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-size: 11px;
+}
+.take-current {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 11px;
+}
 .variant {
   padding: 20px 0;
   border-bottom: 1px solid var(--line);
@@ -2914,6 +2931,33 @@ summary {
 }
 
 /* Docked workspace: the same Workbench, editor and Inspector stay mounted. */
+@media (min-width: 1181px) {
+  .app {
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .topbar,
+  .viewbar {
+    flex: none;
+  }
+  .app .workspace.dock-workspace {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app .dock-workspace .structure,
+  .app .dock-workspace .writing,
+  .app .dock-workspace .inspector {
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    position: relative;
+    overflow: auto;
+  }
+}
 .app .workspace.dock-workspace {
   display: flex;
   flex-direction: row;

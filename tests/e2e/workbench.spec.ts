@@ -182,9 +182,9 @@ test("sentence diagnosis reads globally but proposal, copy and acceptance stay l
     "Leave this ending alone.",
   );
   await page.locator(".variants summary").click();
-  await expect(page.getByLabel("Variant text")).toHaveValue(/I really utilize/);
-  await expect(page.getByLabel("Variant label")).toHaveValue("Original target");
-  await page.getByLabel("Variant label").fill("My earlier line");
+  await expect(page.getByLabel("Take text")).toHaveValue(/I really utilize/);
+  await expect(page.getByLabel("Take name")).toHaveValue("Original target");
+  await page.getByLabel("Take name").fill("My earlier line");
   await page
     .getByRole("button", { name: "Compare", exact: true })
     .last()
@@ -223,7 +223,7 @@ test("sentence diagnosis reads globally but proposal, copy and acceptance stay l
     "I really utilize",
   );
   await page.locator(".variants summary").click();
-  await expect(page.getByLabel("Variant label").first()).toHaveValue(
+  await expect(page.getByLabel("Take name").first()).toHaveValue(
     "My earlier line",
   );
   await page
@@ -249,8 +249,21 @@ test("human Save take preserves two manual closers and switches them without a m
   });
   await page.getByRole("button", { name: /^03 Closer$/ }).click();
   await page.getByRole("button", { name: "Save take", exact: true }).click();
-  await page.getByLabel("Take name (optional)").fill("Calm");
-  await page.getByRole("button", { name: "Save this take" }).click();
+  const takeNameInput = page.getByLabel("Take name (optional)");
+  await expect(takeNameInput).toBeFocused();
+  expect(
+    await takeNameInput.evaluate(
+      (input) => (input as HTMLInputElement).labels?.[0]?.textContent,
+    ),
+  ).toContain("Take name (optional)");
+  await takeNameInput.press("Escape");
+  await expect(takeNameInput).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "1 take", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await takeNameInput.fill("Calm");
+  await takeNameInput.press("Enter");
   await expect(
     page.getByRole("button", { name: "1 take", exact: true }),
   ).toBeVisible();
@@ -269,7 +282,10 @@ test("human Save take preserves two manual closers and switches them without a m
   await expect(saved).toHaveCount(2);
   await expect(saved.nth(0).getByLabel("Take name")).toHaveValue("Calm");
   await expect(saved.nth(1).getByLabel("Take name")).toHaveValue("Louder");
+  await expect(saved.nth(1).getByTestId("take-current")).toHaveText("In draft");
+  await expect(page.getByTestId("current-draft-state")).toContainText("Louder");
   await saved.nth(0).getByRole("button", { name: "Activate" }).click();
+  await expect(saved.nth(0).getByTestId("take-current")).toHaveText("In draft");
   await expect(page.getByTestId("writing-editor")).toContainText(
     "Leave this ending alone.",
   );
@@ -289,10 +305,20 @@ test("human Save take preserves two manual closers and switches them without a m
   await expect(page.getByTestId("compare-current")).toHaveText(
     "Leave this ending alone!",
   );
+  await expect(page.getByTestId("variant-comparison")).toContainText(
+    "Calm · Saved by you",
+  );
+  await expect(page.getByTestId("variant-comparison")).not.toContainText(
+    "original target",
+  );
   await select(page, "Leave this ending alone!");
   await page.keyboard.insertText("Leave this ending alone!!");
   await expect(page.getByTestId("compare-current")).toHaveText(
     "Leave this ending alone!!",
+  );
+  await expect(page.getByTestId("take-current")).toHaveCount(0);
+  await expect(page.getByTestId("current-draft-state")).toHaveText(
+    "Current draft",
   );
   await expect(page.getByTestId("compare-original")).toHaveText(
     "Leave this ending alone.",
@@ -324,6 +350,29 @@ test("human Save take preserves two manual closers and switches them without a m
   await page.getByRole("button", { name: /^03 Closer$/ }).click();
   await page.getByRole("button", { name: "3 takes", exact: true }).click();
   await expect(page.locator(".variants .variant")).toHaveCount(3);
+});
+
+test("take activation copy does not append punctuation to a writer's name", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Unhinged 2 a.m.");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Another closer.");
+  await page.getByRole("button", { name: "1 take", exact: true }).click();
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Activate" })
+    .click();
+  await expect(page.getByRole("status")).toContainText(
+    "Activated Unhinged 2 a.m.",
+  );
+  await expect(page.getByRole("status")).not.toContainText("a.m..");
 });
 
 test("saved take stays with its section through rename, role, reorder, park, include and duplicate", async ({
@@ -397,14 +446,14 @@ test("saved take stays with its section through rename, role, reorder, park, inc
     .click();
   await page
     .locator(".variants .variant")
-    .getByRole("button", { name: "Copy variant" })
+    .getByRole("button", { name: "Copy take" })
     .click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe("Leave this ending alone.");
   await page
     .locator(".variants .variant")
-    .getByRole("button", { name: "Delete variant" })
+    .getByRole("button", { name: "Delete take" })
     .click();
   await save(page);
   const after = (await (await request.get(`/api/documents/${doc.id}`)).json())
@@ -862,7 +911,7 @@ test("saved variants and section notes survive reorder, deletion undo, and reloa
   await page.reload();
   await page.getByRole("button", { name: "01 Opening" }).click();
   await page.locator(".variants summary").click();
-  await page.getByRole("button", { name: "Copy variant", exact: true }).click();
+  await page.getByRole("button", { name: "Copy take", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(stored.sections[0].variants[0].text);

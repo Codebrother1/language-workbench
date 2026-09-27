@@ -2174,7 +2174,7 @@ export function useWorkspace() {
     }
     setNotice(
       captureOriginal
-        ? "Applied only to the target. Original saved as a variant."
+        ? "Applied only to the target. Original before apply saved as a take."
         : "Activated take in this section. Your other writing is unchanged.",
     );
   };
@@ -2271,8 +2271,8 @@ export function useWorkspace() {
         }));
       setNotice(
         leaving
-          ? `Activated ${take.label}. Previous draft saved as ${leaving.label}.`
-          : `Activated ${take.label}.`,
+          ? `Activated ${take.label} · Previous draft saved as ${leaving.label}`
+          : `Activated ${take.label}`,
       );
     } catch (e) {
       setError(

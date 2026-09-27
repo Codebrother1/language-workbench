@@ -295,7 +295,7 @@ export function RelationalCompare({
                 {c.origin === "human"
                   ? "Saved take"
                   : c.type === "variant"
-                    ? "Saved variant"
+                    ? "Saved take · AI proposal"
                     : "AI proposal"}{" "}
                 · {display(c.label)}
               </span>

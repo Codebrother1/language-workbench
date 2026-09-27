@@ -525,6 +525,9 @@ test("delayed model work shows honest progress and clears it after success or er
       .getByLabel("Section model", { exact: true })
       .locator('option[value=""]'),
   ).toHaveText("Use default model");
+  await expect(
+    page.getByLabel("Run with", { exact: true }).locator('option[value=""]'),
+  ).toHaveText("Use default model");
   await page
     .getByLabel("Section model", { exact: true })
     .selectOption(modelKey(conservative));
@@ -614,14 +617,18 @@ test("zero-result reasons and genuinely empty results are visible without invent
     "No safe result",
   );
   await expect(page.getByTestId("result-outcome")).toContainText(
-    "A protected quote was changed",
+    "The generated option changed a protected quote",
   );
+  await page.getByRole("button", { name: "Copy all AI output" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("The generated option changed a protected quote");
   await expect(page.getByTestId("proposal")).toHaveCount(0);
   await save(page);
   await page.reload();
   await section(page, "Hook");
   await expect(page.getByTestId("result-outcome")).toContainText(
-    "A protected quote was changed",
+    "The generated option changed a protected quote",
   );
   empty = true;
   await page.getByLabel("Your material").fill("Material: Another human line.");

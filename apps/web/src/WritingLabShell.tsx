@@ -33,6 +33,8 @@ import {
   runDraftState,
   humanTargetLabel,
   resultOutcome,
+  writerResultReason,
+  currentTakeIds,
   labActionLabel,
 } from "./workspace-helpers";
 
@@ -112,6 +114,7 @@ export function WritingLabShell({
 }) {
   const { target, response, responseTarget } = w;
   const section = w.doc.sections.find((s) => s.id === target?.sectionId);
+  const currentTakes = section ? currentTakeIds(section) : [];
   const lab = labFor(section?.kind ?? "Freeform", target?.scope ?? "selection");
   const sectionIntent =
     target?.scope === "section" &&
@@ -279,8 +282,12 @@ export function WritingLabShell({
         displayText(response.diagnosis),
         displayText(response.mechanism),
         displayText(response.question),
-        ...(response.qualityNotices ?? []).map(displayText),
-        ...response.missingIngredients.map(displayText),
+        ...(response.qualityNotices ?? []).map((reason) =>
+          displayText(writerResultReason(reason)),
+        ),
+        ...response.missingIngredients.map((reason) =>
+          displayText(writerResultReason(reason)),
+        ),
         ...response.findings.map((f) => displayText(f.title + "\n" + f.detail)),
         ...response.lexical.map((l) =>
           displayText(Object.values(l).join("\n")),
@@ -788,7 +795,7 @@ export function WritingLabShell({
                   <p key={index}>
                     <ReferencedText
                       w={w}
-                      text={reason}
+                      text={writerResultReason(reason)}
                       onJumpSection={onJumpSection}
                     />
                   </p>
@@ -1209,7 +1216,11 @@ export function WritingLabShell({
                   <CandidatePreview w={w} text={p.text} open={i === 0} />
                 )}
                 {w.proposalStates[p.id] ? (
-                  <div className="success">{w.proposalStates[p.id]}</div>
+                  <div className="success">
+                    {w.proposalStates[p.id] === "saved"
+                      ? "Saved as take"
+                      : w.proposalStates[p.id]}
+                  </div>
                 ) : (
                   <div className="proposal-actions">
                     <Button
@@ -1329,16 +1340,20 @@ export function WritingLabShell({
       {(hasTarget || explicitVariants) && section && !isWholeAnalysis && (
         <details ref={variantsRef} className="variants">
           <summary>
-            {section.variants.some((v) => v.origin === "human")
-              ? section.variants.some((v) => v.origin !== "human")
-                ? "Saved takes & variants"
-                : "Saved takes"
-              : "Variants"}{" "}
-            <span className="count">{section.variants.length}</span>
+            Saved takes <span className="count">{section.variants.length}</span>
+            <span className="take-state" data-testid="current-draft-state">
+              {currentTakes.length
+                ? `In draft: ${section.variants
+                    .filter((take) => currentTakes.includes(take.id))
+                    .map((take) => take.label)
+                    .join(" · ")}`
+                : "Current draft"}
+            </span>
           </summary>
           {section.variants.length === 0 ? (
             <p className="muted small">
-              Saved alternatives and accepted originals stay with this section.
+              Save take on the selected card, or save an AI option here. Nothing
+              changes in your draft until you activate a take.
             </p>
           ) : (
             section.variants.map((v) => {
@@ -1348,6 +1363,11 @@ export function WritingLabShell({
               const currentText = sectionText(section);
               return (
                 <article key={v.id} className="variant">
+                  {currentTakes.includes(v.id) && (
+                    <span className="take-current" data-testid="take-current">
+                      In draft
+                    </span>
+                  )}
                   <p className="small muted">
                     {v.origin === "human"
                       ? "Saved by you"
@@ -1356,13 +1376,9 @@ export function WritingLabShell({
                         : "AI proposal"}
                     {v.model ? ` · ${modelLabel(w.catalog, v.model)}` : ""}
                   </p>
-                  <Field
-                    label={v.origin === "human" ? "Take name" : "Variant name"}
-                  >
+                  <Field label="Take name">
                     <input
-                      aria-label={
-                        v.origin === "human" ? "Take name" : "Variant label"
-                      }
+                      aria-label="Take name"
                       value={v.label}
                       onChange={(e) =>
                         w.update((d) => ({
@@ -1384,9 +1400,7 @@ export function WritingLabShell({
                     />
                   </Field>
                   <textarea
-                    aria-label={
-                      v.origin === "human" ? "Take text" : "Variant text"
-                    }
+                    aria-label="Take text"
                     value={v.text}
                     rows={3}
                     onChange={(e) =>
@@ -1410,7 +1424,7 @@ export function WritingLabShell({
                   <div className="row wrap">
                     <Button onClick={() => w.activate(v)}>Activate</Button>
                     <Button
-                      aria-label="Copy variant"
+                      aria-label="Copy take"
                       onClick={() => w.copy(v.text)}
                     >
                       <Copy size={13} />
@@ -1429,7 +1443,7 @@ export function WritingLabShell({
                       Compare
                     </Button>
                     <Button
-                      aria-label="Delete variant"
+                      aria-label="Delete take"
                       onClick={() =>
                         w.update((d) => ({
                           ...d,
@@ -1476,22 +1490,17 @@ export function WritingLabShell({
                           <b>
                             {v.origin === "human"
                               ? `${v.label} · Saved by you`
-                              : "Saved variant / take"}
+                              : v.origin === "original"
+                                ? "Original before apply"
+                                : `${v.label} · AI proposal saved as take`}
                           </b>
                           <p data-testid="compare-take">{v.text}</p>
                         </>
                       ) : (
                         <small>
                           {v.origin === "human"
-                            ? `${v.label} · Saved by you`
-                            : v.origin === "original"
-                              ? "Original before apply"
-                              : "Saved variant"}{" "}
-                          matches the{" "}
-                          {v.text === originalText
-                            ? "original target"
-                            : "current prose"}
-                          .
+                            ? `${v.label} · Saved by you. ${v.text === currentText ? "This take matches the current draft." : "This saved take differs from the current draft."}`
+                            : `${v.origin === "original" ? "Original before apply" : `${v.label} · AI proposal saved as take`} matches ${v.text === currentText ? "the current draft" : "the earlier version"}.`}
                         </small>
                       )}
                     </div>

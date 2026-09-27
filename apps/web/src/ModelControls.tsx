@@ -148,7 +148,7 @@ export function ModelControls({ w }: { w: Workspace }) {
           value={w.oneOffModel ?? w.chainModel}
           onChange={w.setOneOffModel}
           label="Run with"
-          inherit="Normal route · no pinned model"
+          inherit="Use default model"
         />
         <p className="small muted">
           Run with stays with this target’s Diagnose → Propose chain. New
@@ -201,7 +201,7 @@ export function ModelControls({ w }: { w: Workspace }) {
           </Button>
           <p className="small muted">
             2–4 configured models. Live comparison can incur one request per
-            model. Successful candidates are saved as variants, never activated.
+            model. Successful candidates are saved as takes, never activated.
           </p>
         </details>
         <Button className="text-button" onClick={() => w.setPanel("providers")}>

@@ -50,11 +50,30 @@ describe("one discovery catalog over existing capabilities", () => {
     ["copy document", "copy-document"],
     ["source", "sources"],
     ["variants", "variants"],
+    ["take", "variants"],
+    ["takes", "variants"],
+    ["version", "variants"],
+    ["alternate version", "variants"],
+    ["save version", "variants"],
+    ["save take", "variants"],
+    ["keep this version", "variants"],
   ] as const) {
     it(`finds ${query} using the same catalog`, () => {
       expect(searchCommands(query)[0].id).toBe(id);
     });
   }
+  it("ranks exact take intent ahead of incidental stakes substrings", () => {
+    const results = searchCommands("take");
+    expect(results[0].id).toBe("variants");
+    expect(results.findIndex((item) => item.id === "variants")).toBeLessThan(
+      results.findIndex((item) => item.label.toLowerCase().includes("stakes")) <
+        0
+        ? results.length
+        : results.findIndex((item) =>
+            item.label.toLowerCase().includes("stakes"),
+          ),
+    );
+  });
   it("keeps unknown queries empty and the initial view short", () => {
     expect(searchCommands("unfindable-zxq")).toEqual([]);
     expect(searchCommands("")).toHaveLength(7);

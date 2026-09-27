@@ -452,6 +452,8 @@ test("real writing pass keeps lists, heading, staged work and preview focus sepa
     .getByLabel("Your material", { exact: true })
     .fill("Material: First step, considered again.");
   await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("proposal")).toBeVisible();
+  await expect(numbered.getByRole("button", { name: "1 take" })).toHaveCount(0);
   await page.getByTestId("save-variant").first().click();
   await page.locator(".structure-tool > summary").click();
   await page
@@ -463,9 +465,7 @@ test("real writing pass keeps lists, heading, staged work and preview focus sepa
   await page
     .getByRole("button", { name: "Stage for target", exact: true })
     .click();
-  await expect(
-    numbered.getByRole("button", { name: "1 variant" }),
-  ).toBeVisible();
+  await expect(numbered.getByRole("button", { name: "1 take" })).toBeVisible();
   await expect(
     numbered.getByRole("button", { name: "Structure work" }),
   ).toBeVisible();
@@ -475,7 +475,7 @@ test("real writing pass keeps lists, heading, staged work and preview focus sepa
   await expect(page.locator(`[id="${ids[1]}"] ol li`)).toHaveCount(1);
   await page
     .locator(`[data-section-id="${ids[1]}"]`)
-    .getByRole("button", { name: "1 variant" })
+    .getByRole("button", { name: "1 take" })
     .click();
   await expect(page.locator(".variants")).toHaveAttribute("open", "");
   await page

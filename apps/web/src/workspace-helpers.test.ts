@@ -21,8 +21,10 @@ import {
   sectionReference,
   sectionMentions,
   humanTargetLabel,
+  currentTakeIds,
   runDraftState,
   resultOutcome,
+  writerResultReason,
   labActionLabel,
   type RunCapture,
 } from "./workspace-helpers";
@@ -52,6 +54,39 @@ function fixture() {
   };
   return { doc, a, b, capture, response };
 }
+
+describe("live take identity", () => {
+  it("matches exact canonical prose, including punctuation, case and spacing", () => {
+    const doc = newDocument("Voice", "Yeah.");
+    const section = doc.sections[0];
+    const target = targetFor(doc, section.id);
+    section.variants = [
+      {
+        id: "calm",
+        label: "Calm",
+        origin: "human",
+        text: "Yeah.",
+        target,
+        createdAt: doc.createdAt,
+      },
+      {
+        id: "loud",
+        label: "Louder",
+        origin: "human",
+        text: "Yeah!",
+        target,
+        createdAt: doc.createdAt,
+      },
+    ];
+    expect(currentTakeIds(section)).toEqual(["calm"]);
+    section.content = newSection("Freeform", "Yeah!").content;
+    expect(currentTakeIds(section)).toEqual(["loud"]);
+    section.content = newSection("Freeform", "yeah!").content;
+    expect(currentTakeIds(section)).toEqual([]);
+    section.content = newSection("Freeform", "Yeah! ").content;
+    expect(currentTakeIds(section)).toEqual([]);
+  });
+});
 
 describe("writer-facing target names", () => {
   it("keeps quoted turns, sentences, selected passages and sections distinct", () => {
@@ -106,6 +141,13 @@ describe("Lab result and action truthfulness", () => {
     ).toBe("Unavailable for this provider");
     expect(resultOutcome({ ...run, stage: "diagnose" })).toBeNull();
     expect(run.response.proposals).toEqual([]);
+  });
+  it("attributes protected-quote violations to the generated option without losing the reason", () => {
+    const reason = "No safe offline proposal: A protected quote was changed.";
+    expect(writerResultReason(reason)).toBe(
+      "No safe offline proposal: The generated option changed a protected quote.",
+    );
+    expect(reason).toContain("A protected quote was changed");
   });
   it("names only common approaches specially", () => {
     expect(labActionLabel("coach", "section")).toBe("Diagnose this section");

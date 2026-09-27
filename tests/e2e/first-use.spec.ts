@@ -483,7 +483,14 @@ test("explicit search can reveal an empty section’s variants without forcing t
   await open(page);
   await command(page, "variants");
   await expect(page.locator(".variants")).toHaveAttribute("open", "");
-  await expect(page.locator(".variants")).toContainText("Saved alternatives");
+  await expect(page.locator(".variants")).toContainText(
+    "Save take on the selected card",
+  );
+  await command(page, "take");
+  await expect(page.locator(".variants")).toHaveAttribute("open", "");
+  await expect(
+    page.getByRole("button", { name: "Save take", exact: true }),
+  ).toBeVisible();
   await expect(page.getByTestId("writing-editor")).toHaveText("");
 });
 

@@ -272,10 +272,22 @@ export const commands: CommandDefinition[] = [
   },
   {
     id: "variants",
-    label: "Variants for this part",
+    label: "Save take · Saved takes",
     description:
-      "Find your section’s saved alternatives; nothing activates automatically.",
-    keywords: ["variants", "alternatives", "versions", "original"],
+      "Open this section’s takes and AI proposals. Use Save take on the selected card to keep the current draft.",
+    keywords: [
+      "take",
+      "takes",
+      "version",
+      "alternate version",
+      "save version",
+      "save take",
+      "keep this version",
+      "variants",
+      "alternatives",
+      "versions",
+      "original",
+    ],
     group: "Find your tools",
   },
   {
@@ -401,11 +413,17 @@ export function searchCommands(
         aliases = command.keywords.join(" ").toLowerCase(),
         haystack =
           title + " " + aliases + " " + command.description.toLowerCase();
+      const words: string[] = haystack.match(/[\p{L}\p{N}]+/gu) ?? [];
       return {
         command,
         index,
         score: terms.every((t) => haystack.includes(t))
-          ? (title.includes(q) ? 8 : 0) +
+          ? (terms.every((t) => words.includes(t))
+              ? 24
+              : terms.every((t) => words.some((word) => word.startsWith(t)))
+                ? 14
+                : 0) +
+            (title.includes(q) ? 8 : 0) +
             (command.keywords.some((k) => k.toLowerCase() === q) ? 12 : 0) +
             terms.reduce(
               (sum, t) =>

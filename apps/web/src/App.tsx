@@ -187,16 +187,8 @@ function ParkedGroupHeading({
 }
 type SavedWorkKind = "variants" | "structure" | "history";
 function savedWorkLabel(section: WritingSection): string {
-  const takes = section.variants.filter(
-    (variant) => variant.origin === "human",
-  ).length;
-  const other = section.variants.length - takes;
-  return [
-    takes ? `${takes} ${takes === 1 ? "take" : "takes"}` : "",
-    other ? `${other} ${other === 1 ? "variant" : "variants"}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const count = section.variants.length;
+  return `${count} ${count === 1 ? "take" : "takes"}`;
 }
 function Structure({
   w,
@@ -230,6 +222,11 @@ function Structure({
   const [includePosition, setIncludePosition] = useState("");
   const [saveTakeId, setSaveTakeId] = useState<string | null>(null);
   const [takeName, setTakeName] = useState("");
+  const takeNameInput = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    if (saveTakeId && w.selectedSectionId === saveTakeId)
+      takeNameInput.current?.focus({ preventScroll: true });
+  }, [saveTakeId, w.selectedSectionId]);
   const structureRef = useRef<HTMLElement>(null);
   const thoughtRef = useRef<HTMLTextAreaElement>(null);
   const draftStart = useRef<HTMLDivElement>(null);
@@ -844,9 +841,18 @@ function Structure({
                       <label>
                         Take name (optional)
                         <input
+                          ref={takeNameInput}
                           value={takeName}
                           maxLength={80}
                           onChange={(event) => setTakeName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setSaveTakeId(null);
+                              setTakeName("");
+                            }
+                          }}
                           placeholder="Calm, Before cut…"
                         />
                       </label>
@@ -2212,7 +2218,7 @@ export default function App() {
         >
           <p>
             {confirmation.kind === "document"
-              ? "The document, references, variants, and history will be permanently deleted. Export JSON first if you want a backup."
+              ? "The document, references, saved takes, and history will be permanently deleted. Export JSON first if you want a backup."
               : "This removes the section and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session. Deleting the last section leaves an empty Freeform writing surface."}
           </p>
           <div className="row end">

@@ -48,6 +48,46 @@ async function chooseLayout(page: Page, name: string) {
     .click();
 }
 
+test("desktop shell fits viewport while panes scroll independently and narrow panes stack", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  const bodyHeight = () =>
+    page.evaluate(() => document.documentElement.scrollHeight);
+  expect(await bodyHeight()).toBeLessThanOrEqual(901);
+  const workbench = page.locator('[data-pane="workbench"]');
+  const preview = page.locator('[data-pane="preview"]');
+  expect(
+    await workbench.locator(".structure").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return el.scrollTop;
+    }),
+  ).toBeGreaterThan(0);
+  expect(
+    await preview.locator(".writing").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return el.scrollTop;
+    }),
+  ).toBeGreaterThan(0);
+  expect(await bodyHeight()).toBeLessThanOrEqual(901);
+  await page.getByRole("button", { name: "Focus preview" }).click();
+  expect(await bodyHeight()).toBeLessThanOrEqual(901);
+  await page.getByRole("button", { name: "Restore panes" }).click();
+  await page.getByRole("button", { name: "Hide Inspector" }).click();
+  expect(await bodyHeight()).toBeLessThanOrEqual(901);
+  await page.getByRole("button", { name: "Show Inspector" }).click();
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(workbench).toBeVisible();
+  await expect(preview).toBeVisible();
+  expect((await preview.boundingBox())!.y).toBeGreaterThan(
+    (await workbench.boundingBox())!.y,
+  );
+});
+
 test("dock resizing, pane visibility, presets and reload preserve one document", async ({
   page,
   request,
