@@ -22,6 +22,8 @@ import {
   sectionMentions,
   humanTargetLabel,
   currentTakeIds,
+  chooseActiveDocument,
+  textDifference,
   runDraftState,
   resultOutcome,
   writerResultReason,
@@ -54,6 +56,39 @@ function fixture() {
   };
   return { doc, a, b, capture, response };
 }
+
+describe("active document selection", () => {
+  it("prefers the selected identity over list order and falls back when it disappears", () => {
+    const a = newDocument("Museum", "First draft");
+    const b = newDocument("Other", "Recent draft");
+    expect(chooseActiveDocument([b, a], a.id)?.id).toBe(a.id);
+    expect(chooseActiveDocument([b, a], "deleted")?.id).toBe(b.id);
+    expect(chooseActiveDocument([], "deleted")).toBeNull();
+  });
+});
+
+describe("lightweight text comparison", () => {
+  it("isolates punctuation, word and identical text without altering either side", () => {
+    expect(textDifference("Yeah.", "Yeah!")).toEqual({
+      prefix: "Yeah",
+      removed: ".",
+      added: "!",
+      suffix: "",
+    });
+    expect(textDifference("Calm closer.", "Loud closer.")).toEqual({
+      prefix: "",
+      removed: "Calm",
+      added: "Loud",
+      suffix: " closer.",
+    });
+    expect(textDifference("Same.", "Same.")).toEqual({
+      prefix: "Same.",
+      removed: "",
+      added: "",
+      suffix: "",
+    });
+  });
+});
 
 describe("live take identity", () => {
   it("matches exact canonical prose, including punctuation, case and spacing", () => {

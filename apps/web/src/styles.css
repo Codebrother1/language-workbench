@@ -1174,6 +1174,22 @@ hr {
   font-size: 12px;
   padding: 5px 7px;
 }
+.compare-removed {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  text-decoration: line-through;
+  border-radius: 2px;
+}
+.compare-added {
+  background: var(--highlight);
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+  text-decoration: none;
+  border-radius: 2px;
+}
+.compare-change {
+  overflow-wrap: anywhere;
+}
 .comparison {
   background: var(--accent-light);
   padding: 12px;

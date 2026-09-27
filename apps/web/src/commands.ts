@@ -50,13 +50,15 @@ export const commands: CommandDefinition[] = [
   {
     id: "sentence",
     label: "Work this sentence",
-    description: "Reveal the existing tools for the sentence at your cursor.",
+    description:
+      "Reveal existing sentence approaches for humor, tone, rhythm or a rewrite at your cursor.",
     keywords: [
       "sentence",
       "rewrite",
       "shorten",
       "clarify",
       "coach",
+      "funnier",
       "tone",
       "register",
       "metaphor",

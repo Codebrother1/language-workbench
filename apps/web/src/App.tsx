@@ -7,7 +7,7 @@ import {
   SectionInsertionPicker,
   SectionInsertionGaps,
 } from "./SectionInsertion";
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DockDivider, type PaneWidths } from "./DockDivider";
 import { EditorContent } from "@tiptap/react";
 import { Selection, TextSelection } from "@tiptap/pm/state";
@@ -564,8 +564,18 @@ function Structure({
                   className="section-focus"
                   onClick={() => w.focusSection(s.id)}
                 >
-                  <span className="section-number">
-                    {String(i + 1).padStart(2, "0")}
+                  <span
+                    className="section-number"
+                    title={
+                      s.placement === "parked"
+                        ? "Parked · outside reader order"
+                        : undefined
+                    }
+                    aria-label={s.placement === "parked" ? "Parked" : undefined}
+                  >
+                    {s.placement === "parked"
+                      ? "P"
+                      : String(i + 1).padStart(2, "0")}
                   </span>
                   <span
                     title={
@@ -992,6 +1002,7 @@ function Structure({
                   <div className="row wrap">
                     <Button
                       aria-label="Move section up"
+                      title="Move section up"
                       disabled={
                         i === 0 ||
                         w.doc.sections[i - 1]?.placement !== s.placement ||
@@ -1005,6 +1016,7 @@ function Structure({
                     </Button>
                     <Button
                       aria-label="Move section down"
+                      title="Move section down"
                       disabled={
                         i === w.doc.sections.length - 1 ||
                         w.doc.sections[i + 1]?.placement !== s.placement ||
@@ -1032,6 +1044,7 @@ function Structure({
                     </Button>
                     <Button
                       aria-label="Remove section"
+                      title="Remove section"
                       onClick={() => onRemove(s.id)}
                     >
                       <Trash2 size={13} />
@@ -1334,6 +1347,16 @@ export default function App() {
     kind: SavedWorkKind;
     token: number;
   } | null>(null);
+  const [takeReturn, setTakeReturn] = useState<{
+    documentId: string;
+    sectionId: string;
+    pageScroll: number;
+    cardTop: number;
+    workbenchScroll: number;
+    previewScroll: number;
+    inspectorVisible: boolean;
+  } | null>(null);
+  useEffect(() => setTakeReturn(null), [w.doc.id]);
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
   const text = documentText(w.doc);
@@ -1484,6 +1507,45 @@ export default function App() {
     setReadingMode(false);
     w.focusSection(id);
     setPendingJump(id);
+  };
+  const returnToTakeSection = () => {
+    const origin = takeReturn;
+    if (
+      !origin ||
+      origin.documentId !== w.doc.id ||
+      !w.doc.sections.some((section) => section.id === origin.sectionId)
+    ) {
+      setTakeReturn(null);
+      return;
+    }
+    w.prepareSectionTarget(origin.sectionId);
+    if (!origin.inspectorVisible) void w.setInspectorVisible(false);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(".dock-workbench .structure")
+          ?.scrollTo({ top: origin.workbenchScroll, behavior: "instant" });
+        document
+          .querySelector<HTMLElement>(".dock-preview .writing")
+          ?.scrollTo({ top: origin.previewScroll, behavior: "instant" });
+        window.scrollTo({ top: origin.pageScroll, behavior: "instant" });
+        const card = document.querySelector<HTMLElement>(
+          `[data-section-id="${CSS.escape(origin.sectionId)}"]`,
+        );
+        if (card) {
+          window.scrollBy({
+            top: card.getBoundingClientRect().top - origin.cardTop,
+            behavior: "instant",
+          });
+          if (
+            card.getBoundingClientRect().bottom < 0 ||
+            card.getBoundingClientRect().top > window.innerHeight
+          )
+            card.scrollIntoView({ block: "center", behavior: "instant" });
+        }
+      }),
+    );
+    setTakeReturn(null);
   };
   const openTrailFinding = (runId: string, findingIndex: number) => {
     w.inspectDocumentRun(runId);
@@ -1666,7 +1728,7 @@ export default function App() {
               aria-label="Switch document"
               value={w.doc.id}
               onChange={(e) => w.navigate(e.target.value)}
-              disabled={!w.ready}
+              disabled={!w.ready || w.documentSwitching}
             >
               {w.documents.length ? (
                 w.documents.map((d) => (
@@ -2030,7 +2092,29 @@ export default function App() {
               focusPreview(id);
             }}
             onOpenSavedWork={(sectionId, kind) => {
-              w.focusSection(sectionId);
+              if (kind === "variants") {
+                setTakeReturn({
+                  documentId: w.doc.id,
+                  sectionId,
+                  pageScroll: window.scrollY,
+                  cardTop:
+                    document
+                      .querySelector<HTMLElement>(
+                        `[data-section-id="${CSS.escape(sectionId)}"]`,
+                      )
+                      ?.getBoundingClientRect().top ?? 0,
+                  workbenchScroll:
+                    document.querySelector<HTMLElement>(
+                      ".dock-workbench .structure",
+                    )?.scrollTop ?? 0,
+                  previewScroll:
+                    document.querySelector<HTMLElement>(
+                      ".dock-preview .writing",
+                    )?.scrollTop ?? 0,
+                  inspectorVisible: w.layout.inspectorVisible,
+                });
+                w.prepareSectionTarget(sectionId);
+              } else w.focusSection(sectionId);
               void w.setInspectorVisible(true);
               setOpenWork({ sectionId, kind, token: Date.now() });
             }}
@@ -2144,7 +2228,9 @@ export default function App() {
               <span>
                 {wordCount.toLocaleString()} words{" "}
                 <span className="dot-separator">·</span>{" "}
-                {Math.max(1, Math.ceil(wordCount / 200))} min read
+                {wordCount === 0
+                  ? "No reading time yet"
+                  : `${Math.max(1, Math.ceil(wordCount / 200))} min read`}
               </span>
               <span>
                 {draft.length} {draft.length === 1 ? "section" : "sections"}{" "}
@@ -2183,6 +2269,10 @@ export default function App() {
             labOrigin={labOrigin?.documentId === w.doc.id ? labOrigin : null}
             onReturnToLab={returnToLab}
             onOpenTrailFinding={openTrailFinding}
+            takeOriginSectionId={
+              takeReturn?.documentId === w.doc.id ? takeReturn.sectionId : null
+            }
+            onReturnToTakeSection={returnToTakeSection}
             openWork={openWork}
           />
         </div>

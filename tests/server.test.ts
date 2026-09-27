@@ -166,6 +166,10 @@ describe("local API and SQLite persistence", () => {
   });
   it("settings survive restart, invalid bodies are 400, route IDs must match", async () => {
     const settings = await (await request("/api/settings")).json();
+    const selected = await (
+      await request("/api/documents", "POST", { title: "Selected draft" })
+    ).json();
+    settings.activeDocumentId = selected.id;
     settings.theme = "dark";
     settings.styleDNA.neverSuggest = ["synergy"];
     expect((await request("/api/settings", "PUT", settings)).status).toBe(200);

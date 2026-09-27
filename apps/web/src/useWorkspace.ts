@@ -86,6 +86,7 @@ import {
 } from "./editor";
 import {
   getWorkbench,
+  chooseActiveDocument,
   updateWorkbench,
   isLensTarget as detectsLensTarget,
   isDeliveryTarget as detectsDeliveryTarget,
@@ -249,6 +250,7 @@ export function useWorkspace() {
   } | null>(null);
   const requestBusy = useRef(false);
   const navigating = useRef(false);
+  const [documentSwitching, setDocumentSwitching] = useState(false);
   const [documentWorkbench, setDocumentWorkbench] = useState(false);
   const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
   const latestCatalogRequest = useRef(0);
@@ -620,6 +622,20 @@ export function useWorkspace() {
     );
     setDocumentWorkbench(false);
   };
+  const rememberSelectedDocument = async (id: string) => {
+    if (settingsRef.current.activeDocumentId === id) {
+      await settingsQueue.current;
+      return;
+    }
+    const next = { ...settingsRef.current, activeDocumentId: id };
+    settingsRef.current = next;
+    setSettings(next);
+    const operation = settingsQueue.current
+      .catch(() => {})
+      .then(() => api<Settings>("/settings", "PUT", next));
+    settingsQueue.current = operation;
+    await operation;
+  };
   useEffect(() => {
     if (!editor || isReady.current) return;
     let alive = true;
@@ -645,7 +661,8 @@ export function useWorkspace() {
         setHealth(h);
         setCatalog(c);
         let active: Document;
-        if (dirty.current === 0 && ds.length) active = ds[0];
+        if (dirty.current === 0 && ds.length)
+          active = chooseActiveDocument(ds, s.activeDocumentId)!;
         else {
           const created = await api<Document>("/documents", "POST", {});
           persisted.current = created;
@@ -659,6 +676,15 @@ export function useWorkspace() {
           ds.push(active);
           dirty.current++;
         }
+        if (!alive) return;
+        if (s.activeDocumentId !== active.id)
+          try {
+            await rememberSelectedDocument(active.id);
+          } catch {
+            setError(
+              "Document opened, but the last selected document could not be saved.",
+            );
+          }
         if (!alive) return;
         current.current = active;
         if (dirty.current === 0) persisted.current = active;
@@ -912,16 +938,22 @@ export function useWorkspace() {
         "Finish the current operation before switching documents. Section navigation is still available.",
       );
     navigating.current = true;
+    setDocumentSwitching(true);
     try {
       await flush();
       const next =
         current.current.id === id
           ? current.current
           : documents.find((d) => d.id === id);
-      if (next) load(next);
-    } catch {
+      if (next) {
+        await rememberSelectedDocument(next.id);
+        load(next);
+      }
+    } catch (error) {
+      setError("Could not switch documents: " + (error as Error).message);
     } finally {
       navigating.current = false;
+      setDocumentSwitching(false);
     }
   };
   const create = async (duplicate = false) => {
@@ -930,6 +962,7 @@ export function useWorkspace() {
         "Finish the current operation before switching documents. Section navigation is still available.",
       );
     navigating.current = true;
+    setDocumentSwitching(true);
     try {
       await flush();
       const next = duplicate
@@ -942,12 +975,18 @@ export function useWorkspace() {
         : await api<Document>("/documents", "POST", {});
       await flush();
       setDocuments((ds) => [...ds, next]);
+      try {
+        await rememberSelectedDocument(next.id);
+      } catch {
+        setError("New document opened, but its selection could not be saved.");
+      }
       load(next);
       if (!duplicate) editor?.view.focus();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       navigating.current = false;
+      setDocumentSwitching(false);
     }
   };
   const remove = async () => {
@@ -956,21 +995,27 @@ export function useWorkspace() {
         "Finish the current operation before switching documents. Section navigation is still available.",
       );
     navigating.current = true;
+    setDocumentSwitching(true);
     try {
       await flush();
       await api("/documents/" + current.current.id, "DELETE");
       const remaining = documents.filter((d) => d.id !== current.current.id);
-      setDocuments(remaining);
-      if (remaining.length) load(remaining[0]);
-      else {
-        const next = await api<Document>("/documents", "POST", {});
-        setDocuments([next]);
-        load(next);
+      const next =
+        remaining[0] ?? (await api<Document>("/documents", "POST", {}));
+      setDocuments(remaining.length ? remaining : [next]);
+      try {
+        await rememberSelectedDocument(next.id);
+      } catch {
+        setError(
+          "Another document opened, but its selection could not be saved.",
+        );
       }
+      load(next);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       navigating.current = false;
+      setDocumentSwitching(false);
     }
   };
   const importDoc = async (file: File) => {
@@ -979,6 +1024,7 @@ export function useWorkspace() {
         "Finish the current operation before switching documents. Section navigation is still available.",
       );
     navigating.current = true;
+    setDocumentSwitching(true);
     try {
       await flush();
       const parsed = documentSchema.parse(JSON.parse(await file.text()));
@@ -988,11 +1034,19 @@ export function useWorkspace() {
       });
       await flush();
       setDocuments((ds) => [...ds, next]);
+      try {
+        await rememberSelectedDocument(next.id);
+      } catch {
+        setError(
+          "Imported document opened, but its selection could not be saved.",
+        );
+      }
       load(next);
     } catch (e) {
       setError("Import failed: " + (e as Error).message);
     } finally {
       navigating.current = false;
+      setDocumentSwitching(false);
     }
   };
   const prepareSectionTarget = (id: string): EditTarget | null => {
@@ -2598,6 +2652,7 @@ export function useWorkspace() {
     settings,
     health,
     ready,
+    documentSwitching,
     saveState,
     error,
     setError,

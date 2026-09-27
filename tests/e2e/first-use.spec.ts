@@ -72,6 +72,29 @@ async function select(page: Page, text: string) {
   }, text);
 }
 
+test("empty draft read time and section controls use honest help text", async ({
+  page,
+  request,
+}) => {
+  await seed(request, "");
+  await open(page);
+  await expect(page.locator(".writing-footer")).toContainText("0 words");
+  await expect(page.locator(".writing-footer")).toContainText(
+    "No reading time yet",
+  );
+  await expect(page.locator(".writing-footer")).not.toContainText("1 min read");
+  await page.locator(".section-options > summary").click();
+  for (const label of [
+    "Move section up",
+    "Move section down",
+    "Remove section",
+  ])
+    await expect(page.getByRole("button", { name: label })).toHaveAttribute(
+      "title",
+      label,
+    );
+});
+
 test("empty document has one obvious writing path and a simple Inspector, with no setup barrier", async ({
   page,
   request,

@@ -33,6 +33,44 @@ export function labActionLabel(action: WritingAction, target: string): string {
   }
 }
 
+export function chooseActiveDocument(
+  documents: Document[],
+  selectedId: string | null,
+): Document | null {
+  return (
+    documents.find((document) => document.id === selectedId) ??
+    documents[0] ??
+    null
+  );
+}
+
+export function textDifference(
+  before: string,
+  after: string,
+): {
+  prefix: string;
+  removed: string;
+  added: string;
+  suffix: string;
+} {
+  const a = Array.from(before),
+    b = Array.from(after);
+  let start = 0,
+    end = 0;
+  while (start < Math.min(a.length, b.length) && a[start] === b[start]) start++;
+  while (
+    end < Math.min(a.length - start, b.length - start) &&
+    a[a.length - 1 - end] === b[b.length - 1 - end]
+  )
+    end++;
+  return {
+    prefix: a.slice(0, start).join(""),
+    removed: a.slice(start, a.length - end).join(""),
+    added: b.slice(start, b.length - end).join(""),
+    suffix: end ? a.slice(-end).join("") : "",
+  };
+}
+
 export function currentTakeIds(section: WritingSection): string[] {
   const prose = sectionText(section);
   return section.variants

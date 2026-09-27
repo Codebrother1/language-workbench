@@ -88,6 +88,57 @@ test("desktop shell fits viewport while panes scroll independently and narrow pa
   );
 });
 
+test("stacked Saved takes returns to the originating card without losing its place", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const target = doc.sections[7];
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  const card = page.locator(`[data-section-id="${target.id}"]`);
+  await card.locator(".section-focus").click();
+  await card.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Before cut");
+  await page.getByRole("button", { name: "Save this take" }).click();
+  await card.getByRole("button", { name: "1 take" }).click();
+  await expect(page.locator(".variants")).toHaveAttribute("open", "");
+  const labScroll = await page.evaluate(() => window.scrollY);
+  await expect(
+    page.getByRole("button", { name: "Return to section" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Return to section" }).click();
+  await expect(card).toBeInViewport();
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeLessThan(labScroll - 200);
+  await expect(card).toHaveClass(/active/);
+  await expect(page.getByLabel("Switch document")).toHaveValue(doc.id);
+});
+
+test("parked cards do not claim reader numbering until included", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const parked = doc.sections.at(-1)!;
+  await page.goto("/");
+  const card = page.locator(`[data-section-id="${parked.id}"]`);
+  await expect(card.locator(".section-number")).toHaveText("P");
+  await card.locator(".section-focus").click();
+  await card.getByRole("button", { name: "Include in draft" }).click();
+  await page.getByLabel("Draft position").selectOption("__end__");
+  await page.getByRole("button", { name: "Include here" }).click();
+  await expect(card.locator(".section-number")).toHaveText("12");
+  await save(page);
+  expect(
+    (
+      await (await request.get(`/api/documents/${doc.id}`)).json()
+    ).sections.find((item: any) => item.id === parked.id).placement,
+  ).toBe("draft");
+});
+
 test("dock resizing, pane visibility, presets and reload preserve one document", async ({
   page,
   request,

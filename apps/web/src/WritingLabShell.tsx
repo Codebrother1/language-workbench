@@ -35,6 +35,7 @@ import {
   resultOutcome,
   writerResultReason,
   currentTakeIds,
+  textDifference,
   labActionLabel,
 } from "./workspace-helpers";
 
@@ -80,6 +81,8 @@ export function WritingLabShell({
   labOrigin,
   onReturnToLab,
   onOpenTrailFinding,
+  takeOriginSectionId,
+  onReturnToTakeSection,
 }: {
   w: Workspace;
   navigation: Wayfinding;
@@ -106,6 +109,8 @@ export function WritingLabShell({
   labOrigin?: { documentId: string; sectionId: string; runId: string } | null;
   onReturnToLab: (sectionId: string, runId: string) => void;
   onOpenTrailFinding: (runId: string, findingIndex: number) => void;
+  takeOriginSectionId?: string | null;
+  onReturnToTakeSection: () => void;
   openWork?: {
     sectionId: string;
     kind: "variants" | "structure" | "history";
@@ -1350,6 +1355,11 @@ export function WritingLabShell({
                 : "Current draft"}
             </span>
           </summary>
+          {takeOriginSectionId === section.id && (
+            <Button className="text-button" onClick={onReturnToTakeSection}>
+              Return to section
+            </Button>
+          )}
           {section.variants.length === 0 ? (
             <p className="muted small">
               Save take on the selected card, or save an AI option here. Nothing
@@ -1361,6 +1371,8 @@ export function WritingLabShell({
                 v.sourceTarget?.text ??
                 (v.origin === "original" ? v.text : v.target.text);
               const currentText = sectionText(section);
+              const draftDiff = textDifference(originalText, currentText);
+              const takeDiff = textDifference(currentText, v.text);
               return (
                 <article key={v.id} className="variant">
                   {currentTakes.includes(v.id) && (
@@ -1478,11 +1490,33 @@ export function WritingLabShell({
                           ? " · Current draft text"
                           : ""}
                       </b>
-                      <p data-testid="compare-original">{originalText}</p>
+                      <p data-testid="compare-original">
+                        {draftDiff.prefix}
+                        {draftDiff.removed && (
+                          <mark
+                            className="compare-removed"
+                            title="Earlier wording"
+                          >
+                            {draftDiff.removed}
+                          </mark>
+                        )}
+                        {draftDiff.suffix}
+                      </p>
                       {originalText !== currentText && (
                         <>
                           <b>Current draft text</b>
-                          <p data-testid="compare-current">{currentText}</p>
+                          <p data-testid="compare-current">
+                            {draftDiff.prefix}
+                            {draftDiff.added && (
+                              <mark
+                                className="compare-added"
+                                title="Current wording"
+                              >
+                                {draftDiff.added}
+                              </mark>
+                            )}
+                            {draftDiff.suffix}
+                          </p>
                         </>
                       )}
                       {v.text !== originalText && v.text !== currentText ? (
@@ -1494,7 +1528,18 @@ export function WritingLabShell({
                                 ? "Original before apply"
                                 : `${v.label} · AI proposal saved as take`}
                           </b>
-                          <p data-testid="compare-take">{v.text}</p>
+                          <p data-testid="compare-take">
+                            {takeDiff.prefix}
+                            {takeDiff.added && (
+                              <mark
+                                className="compare-added"
+                                title="Saved take wording"
+                              >
+                                {takeDiff.added}
+                              </mark>
+                            )}
+                            {takeDiff.suffix}
+                          </p>
                         </>
                       ) : (
                         <small>

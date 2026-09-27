@@ -20,6 +20,7 @@ describe("one discovery catalog over existing capabilities", () => {
     ["synonyms", "word"],
     ["replace word", "word"],
     ["tone", "sentence"],
+    ["funnier", "sentence"],
     ["voice", "style"],
     ["register", "sentence"],
     ["metaphor", "sentence"],

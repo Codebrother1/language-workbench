@@ -3,7 +3,7 @@ import { draftSections, sectionText, type WritingSection } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Dialog } from "./ui";
 import { modelLabel } from "./ModelControls";
-import { sectionMentions } from "./workspace-helpers";
+import { sectionMentions, textDifference } from "./workspace-helpers";
 export function NeighborContext({
   section,
   label,
@@ -144,6 +144,8 @@ export function RelationalCompare({
     originalVariant?.sourceTarget?.text ??
     originalVariant?.text ??
     (w.responseTarget?.sectionId === section.id ? w.responseTarget.text : null);
+  const draftDiff =
+    originalText === null ? null : textDifference(originalText, canonicalText);
   const allCandidates = [
     ...section.variants
       .filter(
@@ -262,7 +264,15 @@ export function RelationalCompare({
             <span className="eyebrow">
               {originalVariant ? "Original before apply" : "Original target"}
             </span>
-            <p>{originalText}</p>
+            <p>
+              {draftDiff!.prefix}
+              {draftDiff!.removed && (
+                <mark className="compare-removed" title="Earlier wording">
+                  {draftDiff!.removed}
+                </mark>
+              )}
+              {draftDiff!.suffix}
+            </p>
           </article>
         )}
         <article className="comparison-version current-version">
@@ -271,7 +281,19 @@ export function RelationalCompare({
             {originalText === canonicalText ? " · Original unchanged" : ""}
           </span>
           <p data-testid="compare-canonical">
-            {canonicalText || "Empty — still waiting for your words."}
+            {draftDiff && originalText !== canonicalText ? (
+              <>
+                {draftDiff.prefix}
+                {draftDiff.added && (
+                  <mark className="compare-added" title="Current wording">
+                    {draftDiff.added}
+                  </mark>
+                )}
+                {draftDiff.suffix}
+              </>
+            ) : (
+              canonicalText || "Empty — still waiting for your words."
+            )}
           </p>
           {!!currentTakeNames.length && (
             <small>Also saved as {currentTakeNames.join(" · ")}</small>
@@ -285,6 +307,7 @@ export function RelationalCompare({
           const containsKnownId = sectionMentions(w.doc, c.text).some(
             (part) => part.sectionId,
           );
+          const difference = textDifference(canonicalText, c.text);
           return (
             <article
               key={c.id}
@@ -324,6 +347,18 @@ export function RelationalCompare({
                       }))
                 }
               />
+              <small
+                className="compare-change"
+                aria-label="Text difference from current draft"
+              >
+                Changed:{" "}
+                {difference.removed && (
+                  <del className="compare-removed">{difference.removed}</del>
+                )}{" "}
+                {difference.added && (
+                  <ins className="compare-added">{difference.added}</ins>
+                )}
+              </small>
               <div className="row wrap">
                 <Button onClick={() => w.copy(display(c.text))}>
                   Copy version

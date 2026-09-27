@@ -305,6 +305,12 @@ test("human Save take preserves two manual closers and switches them without a m
   await expect(page.getByTestId("compare-current")).toHaveText(
     "Leave this ending alone!",
   );
+  await expect(
+    page.getByTestId("compare-original").locator(".compare-removed"),
+  ).toHaveText(".");
+  await expect(
+    page.getByTestId("compare-current").locator(".compare-added"),
+  ).toHaveText("!");
   await expect(page.getByTestId("variant-comparison")).toContainText(
     "Calm · Saved by you",
   );
@@ -350,6 +356,34 @@ test("human Save take preserves two manual closers and switches them without a m
   await page.getByRole("button", { name: /^03 Closer$/ }).click();
   await page.getByRole("button", { name: "3 takes", exact: true }).click();
   await expect(page.locator(".variants .variant")).toHaveCount(3);
+});
+
+test("take comparison emphasizes a changed word without rewriting the draft", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Before cut");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await select(page, "Leave");
+  await page.keyboard.insertText("Hold");
+  await page.getByRole("button", { name: "1 take", exact: true }).click();
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Compare" })
+    .click();
+  await expect(
+    page.getByTestId("compare-original").locator(".compare-removed"),
+  ).toHaveText("Leave");
+  await expect(
+    page.getByTestId("compare-current").locator(".compare-added"),
+  ).toHaveText("Hold");
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "Hold this ending alone.",
+  );
 });
 
 test("take activation copy does not append punctuation to a writer's name", async ({
@@ -646,6 +680,55 @@ test("stale proposals cannot overwrite manual edits", async ({
     "I really utilize",
   );
 });
+test("last selected document survives A to B to A, reload and a fresh app view", async ({
+  page,
+  request,
+}) => {
+  const a = await seed(request);
+  const b = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Other draft", "Another document.") },
+    })
+  ).json();
+  await open(page);
+  const picker = page.getByLabel("Switch document");
+  await picker.selectOption(a.id);
+  await picker.selectOption(b.id);
+  await picker.selectOption(a.id);
+  await page.reload();
+  await expect(picker).toHaveValue(a.id);
+  await page.getByLabel("Document title").fill("The Museum of Almost");
+  await save(page);
+  await page.reload();
+  await expect(picker).toHaveValue(a.id);
+  await expect(page.getByLabel("Document title")).toHaveValue(
+    "The Museum of Almost",
+  );
+  const reopened = await page.context().newPage();
+  await reopened.goto("/");
+  await expect(reopened.getByLabel("Switch document")).toHaveValue(a.id);
+  await reopened.close();
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "New document", exact: true }).click();
+  await expect(picker).not.toHaveValue(a.id);
+  const newId = await picker.inputValue();
+  await page.reload();
+  await expect(picker).toHaveValue(newId);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page
+    .getByRole("button", { name: "Delete document", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete document", exact: true })
+    .click();
+  await expect(picker).not.toHaveValue(newId);
+  const fallback = await picker.inputValue();
+  expect([a.id, b.id]).toContain(fallback);
+  await page.reload();
+  await expect(picker).toHaveValue(fallback);
+});
+
 test("new, duplicate, import/export and delete confirmation work", async ({
   page,
   request,

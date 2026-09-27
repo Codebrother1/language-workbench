@@ -344,6 +344,7 @@ export const radarItemSchema = z.object({
 });
 export type LanguageRadarItem = z.infer<typeof radarItemSchema>;
 export const settingsSchema = z.object({
+  activeDocumentId: z.string().nullable().default(null),
   layout: z
     .object({
       primaryView: z.enum(["workbench", "document"]).default("workbench"),
@@ -951,6 +952,7 @@ export const defaultPacks: KnowledgePack[] = [
 ].map(([id, name, principles]) => ({ id, name, principles, enabled: true }));
 export function defaultSettings(): Settings {
   return {
+    activeDocumentId: null,
     styleDNA: styleDNASchema.parse({}),
     knowledgePacks: defaultPacks.map((p) => ({ ...p })),
     radar: [],
