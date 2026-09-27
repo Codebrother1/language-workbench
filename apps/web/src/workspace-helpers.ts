@@ -33,6 +33,40 @@ export function labActionLabel(action: WritingAction, target: string): string {
   }
 }
 
+export function duplicateDocumentCue(
+  doc: Document,
+  documents: Document[],
+): string {
+  const matches = documents.filter(
+    (other) =>
+      other.id !== doc.id &&
+      other.title.trim().toLowerCase() === doc.title.trim().toLowerCase(),
+  );
+  if (!matches.length) return "";
+  const excerpt = (item: Document) =>
+    documentText(item).replace(/\s+/g, " ").trim().slice(0, 42);
+  const opening = excerpt(doc);
+  if (opening && matches.every((item) => excerpt(item) !== opening))
+    return `“${opening}”`;
+  const edited = new Date(doc.updatedAt).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return matches.every(
+    (item) =>
+      new Date(item.updatedAt).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }) !== edited,
+  )
+    ? `modified ${edited}`
+    : `modified ${edited} · ${doc.id.slice(-6)}`;
+}
+
 export function documentBackup(
   documents: Document[],
   archivedIds: string[],

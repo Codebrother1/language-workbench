@@ -888,7 +888,14 @@ test("archiving an active document preserves its work and restores it without ch
   await expect(
     manage.getByRole("heading", { name: "Archived · 0" }),
   ).toBeVisible();
+  await expect(row.getByRole("button", { name: /Archive/ })).toBeFocused();
+  await expect(manage.getByRole("status")).toContainText(
+    `Restored “${first.title}”`,
+  );
   await manage.getByRole("button", { name: "Close dialog" }).click();
+  await expect(
+    page.getByRole("button", { name: "Document actions" }),
+  ).toBeFocused();
   await expect(picker).toHaveValue(second.id);
   await picker.selectOption(first.id);
   const restored = await (
@@ -969,6 +976,12 @@ test("archived document permanent removal has a named safe confirmation", async 
   await expect(
     manage.getByRole("heading", { name: "Archived · 0" }),
   ).toBeVisible();
+  await expect(
+    manage
+      .locator(".managed-document")
+      .first()
+      .getByRole("button", { name: /Archive/ }),
+  ).toBeFocused();
   expect((await request.get(`/api/documents/${doc.id}`)).status()).toBe(404);
 });
 
@@ -990,10 +1003,10 @@ test("bulk archive of every active document creates a blank survivor and bulk re
   const manage = page.getByRole("dialog", { name: "Manage documents" });
   await manage.getByRole("button", { name: "Select all visible" }).click();
   await expect(manage.getByText("2 selected")).toBeVisible();
-  await manage.getByRole("button", { name: "Archive selected" }).click();
+  await manage.getByRole("button", { name: /Archive 2 active/ }).click();
   await manage
     .getByRole("alertdialog", { name: "Confirm archive" })
-    .getByRole("button", { name: "Archive documents" })
+    .getByRole("button", { name: "Archive selected" })
     .click();
   await expect(
     manage.getByRole("heading", { name: "Active · 1" }),
@@ -1010,14 +1023,14 @@ test("bulk archive of every active document creates a blank survivor and bulk re
   await page.getByRole("button", { name: "Manage documents" }).click();
   const reopened = page.getByRole("dialog", { name: "Manage documents" });
   await reopened.getByRole("button", { name: "Select all visible" }).click();
-  await reopened.getByRole("button", { name: "Restore selected" }).click();
+  await reopened.getByRole("button", { name: /Restore 2 archived/ }).click();
   await expect(
     reopened.getByRole("heading", { name: "Active · 3" }),
   ).toBeVisible();
   await expect(page.getByLabel("Switch document")).toHaveValue(blankId);
 });
 
-test("bulk permanent removal of the last active document opens a fresh blank draft", async ({
+test("archiving the last active document keeps its blank replacement through permanent archived deletion", async ({
   page,
   request,
 }) => {
@@ -1027,9 +1040,16 @@ test("bulk permanent removal of the last active document opens a fresh blank dra
   await page.getByRole("button", { name: "Manage documents" }).click();
   const manage = page.getByRole("dialog", { name: "Manage documents" });
   await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage.getByRole("button", { name: /Archive 1 active/ }).click();
   await manage
-    .getByRole("button", { name: "Delete selected permanently" })
+    .getByRole("alertdialog", { name: "Confirm archive" })
+    .getByRole("button", { name: /Archive/ })
     .click();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 1" }),
+  ).toBeVisible();
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage.getByRole("button", { name: /Delete 1 archived/ }).click();
   const confirmation = manage.getByRole("alertdialog", {
     name: "Confirm permanent delete",
   });
@@ -1047,6 +1067,160 @@ test("bulk permanent removal of the last active document opens a fresh blank dra
   await expect(page.getByTestId("writing-editor")).toHaveText("");
   await page.reload();
   await expect(page.getByLabel("Switch document")).not.toHaveValue(doc.id);
+});
+
+test("document menu and Manage dialog preserve keyboard focus through Escape", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  const trigger = page.getByRole("button", { name: "Document actions" });
+  await trigger.focus();
+  await trigger.press("Enter");
+  await expect(
+    page.getByRole("button", { name: "AI providers", exact: true }),
+  ).toBeFocused();
+  for (let index = 0; index < 5; index++)
+    await page.keyboard.press("ArrowDown");
+  const manage = page.getByRole("button", { name: "Manage documents" });
+  await expect(manage).toBeFocused();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Manage documents" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.press("Enter");
+  await expect(
+    page.getByRole("button", { name: "AI providers", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+});
+
+test("Manage rows stay grouped at 1024px and archived destructive actions are separated", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await request.post("/api/documents/archive", { data: { ids: [doc.id] } });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  const archived = manage
+    .locator(".managed-document")
+    .filter({ hasText: doc.title });
+  await expect(archived).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(1025);
+  expect(
+    await archived
+      .locator(".managed-danger")
+      .evaluate((node) => getComputedStyle(node).borderLeftWidth),
+  ).toBe("1px");
+  const bounds = (await archived.boundingBox())!;
+  const controls = (await archived.locator(".row").boundingBox())!;
+  expect(controls.x + controls.width).toBeLessThanOrEqual(
+    bounds.x + bounds.width + 1,
+  );
+});
+
+test("Manage documents keeps filtered selections visible in the summary and only deletes archived IDs", async ({
+  page,
+  request,
+}) => {
+  const first = await seed(request);
+  const second = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Other title", "Second document.") },
+    })
+  ).json();
+  const third = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Third title", "Third document.") },
+    })
+  ).json();
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage.getByLabel("Search document titles").fill("Other title");
+  await expect(
+    manage.getByText("3 selected · 2 hidden by filter"),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("button", { name: /Archive 3 active/ }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("button", { name: /Delete.*archived/ }),
+  ).toBeDisabled();
+  await manage.getByRole("button", { name: "Clear hidden selections" }).click();
+  await expect(manage.getByText("1 selected")).toBeVisible();
+  await manage.getByRole("button", { name: "Clear selection" }).click();
+  await expect(manage.getByText("0 selected")).toBeVisible();
+  await manage.getByLabel("Search document titles").fill("");
+  await manage
+    .locator(`[data-managed-id="${first.id}"]`)
+    .getByRole("button", { name: /Archive/ })
+    .click();
+  await manage
+    .getByRole("alertdialog", { name: "Confirm archive" })
+    .getByRole("button", { name: /Archive/ })
+    .click();
+  await manage
+    .locator(`[data-managed-id="${first.id}"]`)
+    .getByRole("checkbox")
+    .check();
+  await manage
+    .locator(`[data-managed-id="${second.id}"]`)
+    .getByRole("checkbox")
+    .check();
+  await expect(manage.getByText("2 selected")).toBeVisible();
+  await expect(
+    manage.getByRole("button", { name: /Archive 1 active/ }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("button", { name: /Restore 1 archived/ }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("button", { name: /Delete 1 archived/ }),
+  ).toBeVisible();
+  await manage.getByRole("button", { name: /Delete 1 archived/ }).click();
+  await manage
+    .getByRole("alertdialog", { name: "Confirm permanent delete" })
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  await expect(manage.getByText("1 selected")).toBeVisible();
+  expect(
+    (await (await request.get("/api/documents")).json()).map(
+      (doc: any) => doc.id,
+    ),
+  ).toEqual(expect.arrayContaining([second.id, third.id]));
+  expect((await request.get(`/api/documents/${first.id}`)).status()).toBe(404);
+});
+
+test("blocked bulk download reports an error rather than claiming export", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await page.evaluate(() => {
+    HTMLAnchorElement.prototype.click = () => {
+      throw new Error("Blocked download");
+    };
+  });
+  await manage.getByRole("button", { name: "Export all" }).click();
+  await expect(manage.getByRole("alert")).toContainText("Blocked download");
+  await expect(manage.getByRole("status")).toHaveCount(0);
 });
 
 test("Manage documents selects by ID, exports one backup and requires DELETE for bulk permanent removal", async ({
@@ -1067,9 +1241,38 @@ test("Manage documents selects by ID, exports one backup and requires DELETE for
     })
   ).json();
   await open(page);
+  const duplicateOptions = await page
+    .getByLabel("Switch document")
+    .locator("option")
+    .allTextContents();
+  expect(
+    duplicateOptions.filter((text) => text.includes(first.title)),
+  ).toHaveLength(2);
+  expect(
+    new Set(duplicateOptions.filter((text) => text.includes(first.title))).size,
+  ).toBe(2);
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("button", { name: "Manage documents" }).click();
   const manage = page.getByRole("dialog", { name: "Manage documents" });
+  const sameTitleRows = manage
+    .locator(".managed-document")
+    .filter({ hasText: first.title });
+  await expect(sameTitleRows).toHaveCount(2);
+  await expect(sameTitleRows.nth(0).locator(".document-cue")).not.toHaveText(
+    await sameTitleRows.nth(1).locator(".document-cue").innerText(),
+  );
+  const firstRowArchive = sameTitleRows
+    .nth(0)
+    .getByRole("button", { name: /Archive .*A place for my words/ });
+  await expect(firstRowArchive).toBeVisible();
+  const cue = await sameTitleRows.nth(0).locator(".document-cue").innerText();
+  await firstRowArchive.click();
+  const duplicateConfirmation = manage.getByRole("alertdialog", {
+    name: "Confirm archive",
+  });
+  await expect(duplicateConfirmation).toContainText(cue);
+  await duplicateConfirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(firstRowArchive).toBeFocused();
   await expect(
     manage.getByRole("heading", { name: "Active · 3" }),
   ).toBeVisible();
@@ -1081,8 +1284,15 @@ test("Manage documents selects by ID, exports one backup and requires DELETE for
   await expect(manage.getByText("2 selected")).toBeVisible();
   const selectedDownload = page.waitForEvent("download");
   await manage.getByRole("button", { name: "Export selected" }).click();
+  const selectedFile = await selectedDownload;
+  expect(selectedFile.suggestedFilename()).toMatch(
+    /language-workbench-selected-.*\.json/,
+  );
+  await expect(manage.getByRole("status")).toContainText(
+    "Exported 2 documents",
+  );
   const selectedBackup = JSON.parse(
-    readFileSync(await (await selectedDownload).path()!, "utf8"),
+    readFileSync(await selectedFile.path()!, "utf8"),
   );
   expect(selectedBackup).toMatchObject({
     format: "language-workbench-document-backup",
@@ -1096,16 +1306,26 @@ test("Manage documents selects by ID, exports one backup and requires DELETE for
   );
   const allDownload = page.waitForEvent("download");
   await manage.getByRole("button", { name: "Export all" }).click();
-  const allBackup = JSON.parse(
-    readFileSync(await (await allDownload).path()!, "utf8"),
+  const allFile = await allDownload;
+  expect(allFile.suggestedFilename()).toMatch(
+    /language-workbench-all-.*\.json/,
+  );
+  expect(allFile.suggestedFilename()).not.toBe(
+    selectedFile.suggestedFilename(),
+  );
+  const allBackup = JSON.parse(readFileSync(await allFile.path()!, "utf8"));
+  const repeatedDownload = page.waitForEvent("download");
+  await manage.getByRole("button", { name: "Export all" }).click();
+  expect((await repeatedDownload).suggestedFilename()).not.toBe(
+    allFile.suggestedFilename(),
   );
   expect(new Set(allBackup.documents.map((doc: any) => doc.id))).toEqual(
     new Set([first.id, second.id, remaining.id]),
   );
-  await manage.getByRole("button", { name: "Archive selected" }).click();
+  await manage.getByRole("button", { name: /Archive 2 active/ }).click();
   const archive = manage.getByRole("alertdialog", { name: "Confirm archive" });
   await expect(archive).toContainText("Archive 2 documents?");
-  await archive.getByRole("button", { name: "Archive documents" }).click();
+  await archive.getByRole("button", { name: "Archive selected" }).click();
   await expect(
     manage.getByRole("heading", { name: "Active · 1" }),
   ).toBeVisible();
@@ -1122,14 +1342,18 @@ test("Manage documents selects by ID, exports one backup and requires DELETE for
   );
   await manage.getByRole("button", { name: "Select all visible" }).click();
   await expect(manage.getByText("2 selected")).toBeVisible();
-  await manage.getByRole("button", { name: "Restore selected" }).click();
+  await manage.getByRole("button", { name: /Restore 2 archived/ }).click();
   await expect(
     manage.getByRole("heading", { name: "Active · 3" }),
   ).toBeVisible();
   await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage.getByRole("button", { name: /Archive 2 active/ }).click();
   await manage
-    .getByRole("button", { name: "Delete selected permanently" })
+    .getByRole("alertdialog", { name: "Confirm archive" })
+    .getByRole("button", { name: /Archive/ })
     .click();
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage.getByRole("button", { name: /Delete 2 archived/ }).click();
   const deletion = manage.getByRole("alertdialog", {
     name: "Confirm permanent delete",
   });
@@ -1140,11 +1364,13 @@ test("Manage documents selects by ID, exports one backup and requires DELETE for
   ).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(deletion).toHaveCount(0);
-  await manage
-    .getByRole("button", { name: "Delete selected permanently" })
-    .click();
+  await manage.getByRole("button", { name: /Delete 2 archived/ }).click();
+  await deletion.getByLabel("Type DELETE to confirm").fill("DELETE ");
+  await deletion.getByLabel("Type DELETE to confirm").press("Enter");
+  await expect(deletion).toBeVisible();
   await deletion.getByLabel("Type DELETE to confirm").fill("DELETE");
-  await deletion.getByRole("button", { name: "Delete permanently" }).click();
+  await deletion.getByLabel("Type DELETE to confirm").press("Enter");
+  await expect(deletion).toHaveCount(0);
   await expect(
     manage.getByRole("heading", { name: "Active · 1" }),
   ).toBeVisible();

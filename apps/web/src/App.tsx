@@ -68,7 +68,11 @@ import {
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
-import { customSectionLabel, sectionMentions } from "./workspace-helpers";
+import {
+  customSectionLabel,
+  sectionMentions,
+  duplicateDocumentCue,
+} from "./workspace-helpers";
 
 function draftPositionLabel(section: WritingSection, index: number): string {
   const opening = sectionText(section).replace(/\s+/g, " ").trim();
@@ -1339,6 +1343,16 @@ export default function App() {
     id?: string;
   } | null>(null);
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (menu)
+      requestAnimationFrame(() =>
+        menuRef.current
+          ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+          ?.focus(),
+      );
+  }, [menu]);
   const layoutMenu = useRef<HTMLDetailsElement>(null);
   const [dragWidths, setDragWidths] = useState<PaneWidths | null>(null);
   const [previewFocused, setPreviewFocused] = useState(false);
@@ -1806,6 +1820,12 @@ export default function App() {
                 w.documents.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.id === w.doc.id ? w.doc.title : d.title}
+                    {duplicateDocumentCue(
+                      d.id === w.doc.id ? w.doc : d,
+                      w.documents,
+                    )
+                      ? ` · ${duplicateDocumentCue(d.id === w.doc.id ? w.doc : d, w.documents)}`
+                      : ""}
                   </option>
                 ))
               ) : (
@@ -1903,18 +1923,45 @@ export default function App() {
             )}
           </Button>
           <div className="menu-anchor">
-            <Button
+            <button
+              type="button"
+              className="button"
+              ref={menuTrigger}
               aria-label="Document actions"
               aria-expanded={menu}
               onClick={() => setMenu(!menu)}
             >
               <MoreHorizontal size={20} />
-            </Button>
+            </button>
             {menu && (
               <div
+                ref={menuRef}
                 className="document-menu"
                 role="group"
                 aria-label="Document commands"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setMenu(false);
+                    requestAnimationFrame(() => menuTrigger.current?.focus());
+                  }
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const buttons = Array.from(
+                      menuRef.current?.querySelectorAll<HTMLButtonElement>(
+                        "button:not(:disabled)",
+                      ) ?? [],
+                    );
+                    const index = buttons.indexOf(
+                      document.activeElement as HTMLButtonElement,
+                    );
+                    buttons[
+                      (index +
+                        (event.key === "ArrowDown" ? 1 : buttons.length - 1)) %
+                        buttons.length
+                    ]?.focus();
+                  }
+                }}
               >
                 <Button
                   onClick={() => {
@@ -2369,7 +2416,13 @@ export default function App() {
           />
         </div>
       </div>
-      <UtilityPanel w={w} libraryNavigation={navigation.libraryNavigation} />
+      <UtilityPanel
+        w={w}
+        libraryNavigation={navigation.libraryNavigation}
+        returnToMenu={() =>
+          document.querySelector<HTMLElement>('[aria-label="Document actions"]')
+        }
+      />
       {compareSection && compareSection === w.selectedSectionId && (
         <RelationalCompare w={w} close={() => setCompareSection(null)} />
       )}
@@ -2401,13 +2454,18 @@ export default function App() {
                   : "Remove section?"
           }
           close={() => setConfirmation(null)}
+          returnFocus={
+            confirmation.kind === "section"
+              ? undefined
+              : () => menuTrigger.current
+          }
           initialFocus="[data-safe-cancel]"
         >
           <p>
             {confirmation.kind === "document"
               ? `This permanently deletes this document, its references, saved takes and history. Export JSON first if you want a backup.${w.documents.length === 1 ? " A new blank document will be created." : ""}`
               : confirmation.kind === "archive"
-                ? "Archive removes this document from the writing switcher. All writing, takes, sources and history stay intact; restore it in Manage documents. A new blank document opens if this is the last active one."
+                ? `Archive removes this document from the writing switcher. All writing, takes, sources and history stay intact; restore it in Manage documents.${w.documents.length === 1 ? " A new blank document will be created." : ""}`
                 : `This removes the ${removing?.placement === "parked" ? "parked thought" : "section"} and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session.${w.doc.sections.length === 1 ? " Removing the last section leaves an empty Freeform writing surface." : ""}`}
           </p>
           <div className="row end">

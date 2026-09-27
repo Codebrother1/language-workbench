@@ -408,6 +408,8 @@ hr {
 .managed-document {
   border-bottom: 1px solid var(--line);
   padding: 12px 0;
+  max-width: 580px;
+  overflow-wrap: anywhere;
 }
 .managed-document > label {
   display: flex;
@@ -420,6 +422,12 @@ hr {
 }
 .managed-document .row {
   margin: 6px 0 0 24px;
+  flex-wrap: wrap;
+}
+.managed-danger {
+  border-left: 1px solid var(--line);
+  margin-left: 5px;
+  padding-left: 12px;
 }
 .managed-actions {
   margin: 12px 0;

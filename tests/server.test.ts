@@ -298,6 +298,10 @@ describe("local API and SQLite persistence", () => {
       await (await request("/api/documents/archived")).json(),
     ).toHaveLength(2);
     expect(
+      (await request("/api/documents/bulk", "DELETE", { ids: [docs[2].id] }))
+        .status,
+    ).toBe(409);
+    expect(
       (
         await (
           await request("/api/documents/bulk", "DELETE", {

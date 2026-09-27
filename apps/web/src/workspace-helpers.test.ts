@@ -24,6 +24,7 @@ import {
   currentTakeIds,
   chooseActiveDocument,
   documentBackup,
+  duplicateDocumentCue,
   textDifference,
   runDraftState,
   resultOutcome,
@@ -57,6 +58,19 @@ function fixture() {
   };
   return { doc, a, b, capture, response };
 }
+
+describe("document title disambiguation", () => {
+  it("shows a short opening for duplicate titles and nothing for unique titles", () => {
+    const a = newDocument("Repeated", "This is the first opening.");
+    const b = newDocument("Repeated", "This is the second opening.");
+    const other = newDocument("Unique", "Elsewhere.");
+    expect(duplicateDocumentCue(a, [a, b, other])).toContain("first opening");
+    expect(duplicateDocumentCue(b, [a, b, other])).toContain("second opening");
+    expect(duplicateDocumentCue(other, [a, b, other])).toBe("");
+    b.sections[0].content = a.sections[0].content;
+    expect(duplicateDocumentCue(a, [a, b])).toContain(a.id.slice(-6));
+  });
+});
 
 describe("document backup", () => {
   it("exports selected document-local data without application credentials or global settings", () => {

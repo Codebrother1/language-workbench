@@ -95,6 +95,7 @@ export function Dialog({
   wide = false,
   className = "",
   initialFocus,
+  returnFocus,
 }: {
   title: string;
   close: () => void;
@@ -102,13 +103,23 @@ export function Dialog({
   wide?: boolean;
   className?: string;
   initialFocus?: string;
+  returnFocus?: () => HTMLElement | null;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     ref.current?.showModal();
     if (initialFocus)
       ref.current?.querySelector<HTMLElement>(initialFocus)?.focus();
-    return () => ref.current?.close();
+    return () => {
+      ref.current?.close();
+      requestAnimationFrame(() =>
+        (returnFocus?.() ?? (opener?.isConnected ? opener : null))?.focus(),
+      );
+    };
   }, []);
   return (
     <dialog
@@ -175,7 +186,12 @@ export function download(filename: string, text: string, type = "text/plain") {
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([text], { type }));
   link.download = filename;
-  link.click();
+  try {
+    link.click();
+  } catch (error) {
+    URL.revokeObjectURL(link.href);
+    throw error;
+  }
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 export function safeURL(url: string) {

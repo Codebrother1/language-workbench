@@ -215,7 +215,7 @@ Fidelity is a requested constraint, not semantic proof. The mock declines exact-
 | `GET/POST /api/documents`, `GET/PUT/DELETE /api/documents/:id` | List active/create/read/CAS save/delete                                              |
 | `GET /api/documents/archived`                               | List archived document bodies without altering them                                  |
 | `POST /api/documents/archive`, `POST /api/documents/restore` | Atomic marker changes by stable document IDs                                         |
-| `DELETE /api/documents/bulk`                                 | Validated transactional permanent removal by ID; multiple IDs require `DELETE`       |
+| `DELETE /api/documents/bulk`                                 | Archived-only transactional removal; multiple IDs require `DELETE`       |
 | `POST /api/import`                                             | Validated identity-remapped document copy                                            |
 | `GET /api/library`                                             | Read shared library, including revision                                              |
 | `PUT /api/library`                                             | Validate full library body; revision CAS save, 409 on conflict                       |

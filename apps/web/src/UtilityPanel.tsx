@@ -1,7 +1,7 @@
 import type { LibraryNavigation } from "./wayfinding";
 import { PersonalLibrary, ScopedStyleGuides } from "./PersonalLibrary";
 import { ProviderSettings } from "./ProviderSettings";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, ExternalLink, Copy, RefreshCw } from "lucide-react";
 import {
   contentTypeConfig,
@@ -23,7 +23,11 @@ import {
   safeURL,
   download,
 } from "./ui";
-import { sectionMentions, documentBackup } from "./workspace-helpers";
+import {
+  sectionMentions,
+  documentBackup,
+  duplicateDocumentCue,
+} from "./workspace-helpers";
 const words = (value: string) =>
   value
     .split(",")
@@ -536,9 +540,53 @@ function ManageDocuments({ w }: { w: Workspace }) {
   const [confirmation, setConfirmation] = useState<{
     action: "archive" | "delete";
     ids: string[];
+    fromRow?: boolean;
   } | null>(null);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const exportSequence = useRef(0);
+  const focusOrigin = useRef<{ id: string | null; index: number }>({
+    id: null,
+    index: 0,
+  });
+  const rememberOpener = (element: HTMLElement, id: string | null = null) => {
+    openerRef.current = element;
+    focusOrigin.current = {
+      id,
+      index: Array.from(
+        rootRef.current?.querySelectorAll(".managed-document") ?? [],
+      ).findIndex((row) => row.getAttribute("data-managed-id") === id),
+    };
+  };
+  const returnFocus = (afterAction = false) =>
+    requestAnimationFrame(() => {
+      const opener = openerRef.current;
+      if (
+        !afterAction &&
+        opener?.isConnected &&
+        !opener.hasAttribute("disabled")
+      )
+        return opener.focus();
+      const rows = Array.from(
+        rootRef.current?.querySelectorAll<HTMLElement>(".managed-document") ??
+          [],
+      );
+      const same = rows.find(
+        (row) => row.dataset.managedId === focusOrigin.current.id,
+      );
+      const row =
+        same ??
+        rows[Math.min(Math.max(focusOrigin.current.index, 0), rows.length - 1)];
+      const next =
+        row?.querySelector<HTMLElement>("button:not(:disabled)") ??
+        row?.querySelector<HTMLElement>("input[type=checkbox]") ??
+        rootRef.current?.querySelector<HTMLElement>("button:not(:disabled)") ??
+        document.querySelector<HTMLElement>('[aria-label="Document actions"]');
+      next?.focus();
+    });
   useEffect(() => {
     let alive = true;
     void api<Document[]>("/documents/archived")
@@ -556,6 +604,9 @@ function ManageDocuments({ w }: { w: Workspace }) {
     ...w.documents.map((doc) => (doc.id === w.doc.id ? w.doc : doc)),
     ...archived,
   ];
+  const cue = (doc: Document) => duplicateDocumentCue(doc, all);
+  const identity = (doc: Document) =>
+    `“${doc.title.trim() || "Untitled"}”${cue(doc) ? `, ${cue(doc)}` : ""}`;
   const visibleActive = w.documents.filter((doc) =>
     doc.title.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -563,6 +614,8 @@ function ManageDocuments({ w }: { w: Workspace }) {
     doc.title.toLowerCase().includes(query.trim().toLowerCase()),
   );
   const visible = [...visibleActive, ...visibleArchived];
+  const visibleIds = new Set(visible.map((doc) => doc.id));
+  const hiddenCount = selected.filter((id) => !visibleIds.has(id)).length;
   const activeIds = selected.filter((id) =>
     w.documents.some((doc) => doc.id === id),
   );
@@ -591,9 +644,15 @@ function ManageDocuments({ w }: { w: Workspace }) {
             : await w.deleteManagedDocuments(ids);
       if (okay) {
         await refresh();
-        setSelected([]);
+        setSelected((current) => current.filter((id) => !ids.includes(id)));
         setConfirmation(null);
         setTyped("");
+        setFeedback(
+          ids.length === 1
+            ? `${action === "archive" ? "Archived" : action === "restore" ? "Restored" : "Deleted"} “${all.find((doc) => doc.id === ids[0])?.title.trim() || "Untitled"}”.`
+            : `${action === "archive" ? "Archived" : action === "restore" ? "Restored" : "Deleted"} ${ids.length} documents.`,
+        );
+        returnFocus(true);
       } else
         setError("Finish the current operation before changing documents.");
     } catch (cause) {
@@ -602,7 +661,7 @@ function ManageDocuments({ w }: { w: Workspace }) {
       setPending(false);
     }
   };
-  const exportDocs = async (ids: string[]) => {
+  const exportDocs = async (ids: string[], scope: "selected" | "all") => {
     if (!ids.length || pending) return;
     setPending(true);
     setError("");
@@ -612,7 +671,7 @@ function ManageDocuments({ w }: { w: Workspace }) {
         ids.map((id) => api<Document>(`/documents/${encodeURIComponent(id)}`)),
       );
       download(
-        "language-workbench-documents.json",
+        `language-workbench-${scope}-${new Date().toISOString().replace(/[:.]/g, "-")}-${++exportSequence.current}.json`,
         JSON.stringify(
           documentBackup(
             docs,
@@ -623,6 +682,10 @@ function ManageDocuments({ w }: { w: Workspace }) {
         ),
         "application/json",
       );
+      setFeedback(
+        `Exported ${docs.length} ${docs.length === 1 ? "document" : "documents"}.`,
+      );
+      returnFocus();
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -643,6 +706,8 @@ function ManageDocuments({ w }: { w: Workspace }) {
         JSON.stringify(latest, null, 2),
         "application/json",
       );
+      setFeedback(`Exported “${latest.title.trim() || "Untitled"}”.`);
+      returnFocus();
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -651,64 +716,87 @@ function ManageDocuments({ w }: { w: Workspace }) {
   };
   const rows = (docs: Document[], placement: "Active" | "Archived") =>
     docs.map((doc) => (
-      <li key={doc.id} className="managed-document">
+      <li key={doc.id} className="managed-document" data-managed-id={doc.id}>
         <label>
           <input
             type="checkbox"
-            aria-label={`Select ${placement.toLowerCase()} document ${doc.title.trim() || "Untitled"} ${doc.id.slice(0, 8)}`}
+            aria-label={`Select ${placement.toLowerCase()} document ${identity(doc)}`}
             checked={selected.includes(doc.id)}
+            disabled={pending}
             onChange={() => toggle(doc.id)}
           />
           <span>
             <b>{doc.title.trim() || "Untitled"}</b>
+            {cue(doc) && <small className="document-cue">{cue(doc)}</small>}
             <small>
               {documentText(doc).trim().split(/\s+/).filter(Boolean).length}{" "}
-              words · Edited {new Date(doc.updatedAt).toLocaleDateString()} ·{" "}
-              {doc.id.slice(0, 8)}
+              words · Edited {new Date(doc.updatedAt).toLocaleDateString()}
             </small>
           </span>
         </label>
         <div className="row wrap">
           {placement === "Active" ? (
             <Button
+              aria-label={`Archive ${identity(doc)}`}
               disabled={pending}
-              onClick={() =>
-                setConfirmation({ action: "archive", ids: [doc.id] })
-              }
+              onClick={(event) => {
+                rememberOpener(event.currentTarget, doc.id);
+                setConfirmation({
+                  action: "archive",
+                  ids: [doc.id],
+                  fromRow: true,
+                });
+              }}
             >
               Archive
             </Button>
           ) : (
             <Button
+              aria-label={`Restore ${identity(doc)}`}
               disabled={pending}
-              onClick={() => void act("restore", [doc.id])}
+              onClick={(event) => {
+                rememberOpener(event.currentTarget, doc.id);
+                void act("restore", [doc.id]);
+              }}
             >
               Restore
             </Button>
           )}
-          <Button disabled={pending} onClick={() => void exportOne(doc)}>
+          <Button
+            aria-label={`Export JSON ${identity(doc)}`}
+            disabled={pending}
+            onClick={(event) => {
+              rememberOpener(event.currentTarget, doc.id);
+              void exportOne(doc);
+            }}
+          >
             Export JSON
           </Button>
           {placement === "Archived" && (
-            <Button
-              className="danger"
-              disabled={pending}
-              onClick={() =>
-                setConfirmation({ action: "delete", ids: [doc.id] })
-              }
-            >
-              Delete permanently
-            </Button>
+            <span className="managed-danger">
+              <Button
+                className="danger"
+                aria-label={`Delete permanently ${identity(doc)}`}
+                disabled={pending}
+                onClick={(event) => {
+                  rememberOpener(event.currentTarget, doc.id);
+                  setConfirmation({ action: "delete", ids: [doc.id] });
+                }}
+              >
+                Delete permanently
+              </Button>
+            </span>
           )}
         </div>
       </li>
     ));
   const titles =
-    confirmation?.ids.map(
-      (id) => all.find((doc) => doc.id === id)?.title.trim() || "Untitled",
-    ) ?? [];
+    confirmation?.ids.map((id) => {
+      const doc = all.find((item) => item.id === id);
+      return doc ? identity(doc) : "this document";
+    }) ?? [];
   return (
-    <div className="manage-documents">
+    <div className="manage-documents" ref={rootRef}>
       <p className="panel-intro">
         Archive removes documents from the writing switcher without deleting
         their content. Backups here contain documents only, not Personal
@@ -724,6 +812,7 @@ function ManageDocuments({ w }: { w: Workspace }) {
       </Field>
       <div className="row wrap">
         <Button
+          disabled={pending}
           onClick={() =>
             setSelected((ids) => [
               ...new Set([...ids, ...visible.map((doc) => doc.id)]),
@@ -732,42 +821,86 @@ function ManageDocuments({ w }: { w: Workspace }) {
         >
           Select all visible
         </Button>
-        <Button onClick={() => setSelected([])}>Clear selection</Button>
-        <b aria-live="polite">{selected.length} selected</b>
+        <Button disabled={pending} onClick={() => setSelected([])}>
+          Clear selection
+        </Button>
+        {hiddenCount > 0 && (
+          <Button
+            disabled={pending}
+            onClick={() =>
+              setSelected((ids) => ids.filter((id) => visibleIds.has(id)))
+            }
+          >
+            Clear hidden selections
+          </Button>
+        )}
+        <b aria-live="polite">
+          {selected.length} selected
+          {hiddenCount > 0 ? ` · ${hiddenCount} hidden by filter` : ""}
+        </b>
       </div>
       <div className="row wrap managed-actions">
         <Button
           disabled={!activeIds.length || pending}
-          onClick={() => setConfirmation({ action: "archive", ids: activeIds })}
+          onClick={(event) => {
+            rememberOpener(event.currentTarget, activeIds[0] ?? null);
+            setConfirmation({ action: "archive", ids: activeIds });
+          }}
         >
-          Archive selected
+          Archive {activeIds.length} active{" "}
+          {activeIds.length === 1 ? "document" : "documents"}
         </Button>
         <Button
           disabled={!archivedIds.length || pending}
-          onClick={() => void act("restore", archivedIds)}
+          onClick={(event) => {
+            rememberOpener(event.currentTarget, archivedIds[0] ?? null);
+            void act("restore", archivedIds);
+          }}
         >
-          Restore selected
+          Restore {archivedIds.length} archived{" "}
+          {archivedIds.length === 1 ? "document" : "documents"}
         </Button>
         <Button
           disabled={!selected.length || pending}
-          onClick={() => void exportDocs(selected)}
+          onClick={(event) => {
+            rememberOpener(event.currentTarget);
+            void exportDocs(selected, "selected");
+          }}
         >
           Export selected
         </Button>
         <Button
           disabled={!all.length || pending}
-          onClick={() => void exportDocs(all.map((doc) => doc.id))}
+          onClick={(event) => {
+            rememberOpener(event.currentTarget);
+            void exportDocs(
+              all.map((doc) => doc.id),
+              "all",
+            );
+          }}
         >
           Export all
         </Button>
         <Button
           className="danger"
-          disabled={!selected.length || pending}
-          onClick={() => setConfirmation({ action: "delete", ids: selected })}
+          disabled={!archivedIds.length || pending}
+          onClick={(event) => {
+            rememberOpener(event.currentTarget, archivedIds[0] ?? null);
+            setConfirmation({ action: "delete", ids: archivedIds });
+          }}
         >
-          Delete selected permanently
+          Delete {archivedIds.length} archived{" "}
+          {archivedIds.length === 1 ? "document" : "documents"}
         </Button>
       </div>
+      <small className="muted">
+        Bulk backup · import-all not yet supported
+      </small>
+      {feedback && (
+        <p role="status" className="guidance">
+          {feedback}
+        </p>
+      )}
       {error && (
         <p role="alert" className="guidance">
           {error}
@@ -804,22 +937,33 @@ function ManageDocuments({ w }: { w: Workspace }) {
               event.stopPropagation();
               setConfirmation(null);
               setTyped("");
+              returnFocus();
+            }
+            if (
+              event.key === "Enter" &&
+              event.target instanceof HTMLInputElement &&
+              confirmation.action === "delete" &&
+              confirmation.ids.length > 1 &&
+              typed === "DELETE"
+            ) {
+              event.preventDefault();
+              void act("delete", confirmation.ids);
             }
           }}
         >
           <b>
             {confirmation.action === "archive"
               ? confirmation.ids.length === 1
-                ? `Archive “${titles[0]}”?`
+                ? `Archive ${titles[0]}?`
                 : `Archive ${confirmation.ids.length} documents?`
               : confirmation.ids.length === 1
-                ? `Permanently delete “${titles[0]}”?`
+                ? `Permanently delete ${titles[0]}?`
                 : `Permanently delete ${confirmation.ids.length} documents?`}
           </b>
           <p>
             {confirmation.action === "archive"
               ? "All sections, takes, sources and history are kept. Restore from Archived whenever you need them."
-              : "This permanently deletes the documents and all their saved takes, history and references. Export selected or Export all before deleting if you need a backup."}
+              : `This permanently deletes ${confirmation.ids.length === 1 ? "this archived document and its" : "these archived documents and their"} saved takes, history and references. Export selected or Export all before deleting if you need a backup.`}
           </p>
           {confirmation.ids.length > 1 && (
             <p>
@@ -841,6 +985,7 @@ function ManageDocuments({ w }: { w: Workspace }) {
               onClick={() => {
                 setConfirmation(null);
                 setTyped("");
+                returnFocus();
               }}
             >
               Cancel
@@ -858,7 +1003,9 @@ function ManageDocuments({ w }: { w: Workspace }) {
               onClick={() => void act(confirmation.action, confirmation.ids)}
             >
               {confirmation.action === "archive"
-                ? "Archive documents"
+                ? confirmation.fromRow
+                  ? "Archive document"
+                  : "Archive selected"
                 : "Delete permanently"}
             </Button>
           </div>
@@ -871,9 +1018,11 @@ function ManageDocuments({ w }: { w: Workspace }) {
 export function UtilityPanel({
   w,
   libraryNavigation,
+  returnToMenu,
 }: {
   w: Workspace;
   libraryNavigation?: LibraryNavigation;
+  returnToMenu?: () => HTMLElement | null;
 }) {
   const [styleDraft, setStyleDraft] = useState<Settings | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -902,7 +1051,12 @@ export function UtilityPanel({
     guides: "Scoped Style Guides",
   }[w.panel];
   return (
-    <Dialog title={title} close={close} wide>
+    <Dialog
+      title={title}
+      close={close}
+      wide
+      returnFocus={w.panel === "documents" ? returnToMenu : undefined}
+    >
       {w.panel === "library" ? (
         <PersonalLibrary
           key={libraryNavigation?.token ?? 0}

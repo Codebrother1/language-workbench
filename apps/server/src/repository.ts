@@ -142,11 +142,23 @@ export class Repository {
       throw error;
     }
   }
-  deleteMany(ids: string[]): number {
+  deleteMany(ids: string[], archivedOnly = false): number {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const unique = [...new Set(ids)];
-      unique.forEach((id) => this.get(id));
+      unique.forEach((id) => {
+        this.get(id);
+        if (
+          archivedOnly &&
+          !this.db
+            .prepare("SELECT 1 FROM archived_documents WHERE document_id=?")
+            .get(id)
+        )
+          throw new APIError(
+            409,
+            "Archive the document before permanently deleting it from Manage documents.",
+          );
+      });
       for (const id of unique) {
         this.db
           .prepare("DELETE FROM archived_documents WHERE document_id=?")

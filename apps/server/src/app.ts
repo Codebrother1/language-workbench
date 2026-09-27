@@ -149,7 +149,7 @@ export function createApp({
         400,
         "Type DELETE to confirm bulk permanent deletion.",
       );
-    res.json({ count: repository.deleteMany(ids) });
+    res.json({ count: repository.deleteMany(ids, true) });
   });
   app.post("/api/documents", (req, res) => {
     const input = createSchema.parse(req.body);
