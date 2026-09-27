@@ -94,16 +94,20 @@ export function Dialog({
   children,
   wide = false,
   className = "",
+  initialFocus,
 }: {
   title: string;
   close: () => void;
   children: ReactNode;
   wide?: boolean;
   className?: string;
+  initialFocus?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
+    if (initialFocus)
+      ref.current?.querySelector<HTMLElement>(initialFocus)?.focus();
     return () => ref.current?.close();
   }, []);
   return (
@@ -127,6 +131,44 @@ export function Dialog({
       </header>
       <div className="dialog-body">{children}</div>
     </dialog>
+  );
+}
+export function ConfirmDelete({
+  title,
+  confirmLabel,
+  ariaLabel = confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  confirmLabel: string;
+  ariaLabel?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      role="alertdialog"
+      aria-label={ariaLabel}
+      className="delete-confirm"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onCancel();
+        }
+      }}
+    >
+      <p>{title}</p>
+      <div className="row wrap">
+        <Button autoFocus onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button className="danger solid" onClick={onConfirm}>
+          {confirmLabel}
+        </Button>
+      </div>
+    </div>
   );
 }
 export function download(filename: string, text: string, type = "text/plain") {

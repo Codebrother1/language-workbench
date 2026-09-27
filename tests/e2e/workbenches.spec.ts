@@ -989,6 +989,25 @@ test("provider settings are honest, searchable, and manual model IDs need no reb
     .getByRole("button", { name: "Test connection · Offline", exact: true })
     .click();
   await expect(dialog.getByRole("status")).toContainText("Offline");
+  const offline = dialog.locator(".provider-card").filter({
+    has: page.getByRole("heading", { name: "Offline", exact: true }),
+  });
+  await expect(offline.locator(".tag")).toContainText([
+    "Enabled",
+    "Configured",
+  ]);
+  await offline.getByRole("button", { name: "Disable Offline" }).click();
+  await expect(offline.locator(".tag")).toContainText([
+    "Disabled",
+    "Configured",
+  ]);
+  await expect(offline.getByRole("status")).toHaveText("Offline disabled");
+  await offline.getByRole("button", { name: "Enable Offline" }).click();
+  await expect(offline.locator(".tag")).toContainText([
+    "Enabled",
+    "Configured",
+  ]);
+  await expect(offline.getByRole("status")).toHaveText("Offline enabled");
   const card = dialog.locator(".provider-card").filter({
     has: page.getByRole("heading", { name: "OpenAI Direct", exact: true }),
   });

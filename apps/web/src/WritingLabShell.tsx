@@ -26,7 +26,14 @@ import {
   type AIResponse,
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
-import { Button, Field, Select, Range, GrowingTextarea } from "./ui";
+import {
+  Button,
+  ConfirmDelete,
+  Field,
+  Select,
+  Range,
+  GrowingTextarea,
+} from "./ui";
 import {
   sectionMentions,
   sectionReference,
@@ -223,6 +230,10 @@ export function WritingLabShell({
         320)
       : (response?.diagnosis.length ?? 0);
   const [compare, setCompare] = useState<string | null>(null);
+  const [deletingTake, setDeletingTake] = useState<{
+    sectionId: string;
+    id: string;
+  } | null>(null);
   const responseRef = useRef<HTMLElement>(null);
   const variantsRef = useRef<HTMLDetailsElement>(null);
   const wasBusy = useRef(false);
@@ -1480,25 +1491,47 @@ export function WritingLabShell({
                     </Button>
                     <Button
                       aria-label="Delete take"
+                      title="Delete take"
                       onClick={() =>
-                        w.update((d) => ({
-                          ...d,
-                          sections: d.sections.map((s) =>
-                            s.id === section.id
-                              ? {
-                                  ...s,
-                                  variants: s.variants.filter(
-                                    (x) => x.id !== v.id,
-                                  ),
-                                }
-                              : s,
-                          ),
-                        }))
+                        setDeletingTake({ sectionId: section.id, id: v.id })
                       }
                     >
                       <X size={13} />
                     </Button>
                   </div>
+                  {deletingTake?.sectionId === section.id &&
+                    deletingTake.id === v.id && (
+                      <ConfirmDelete
+                        title={
+                          v.label.trim()
+                            ? `Delete take “${v.label}”?`
+                            : "Delete this saved take?"
+                        }
+                        confirmLabel="Delete take"
+                        onCancel={() => setDeletingTake(null)}
+                        onConfirm={() => {
+                          w.update((d) => ({
+                            ...d,
+                            sections: d.sections.map((s) =>
+                              s.id === section.id
+                                ? {
+                                    ...s,
+                                    variants: s.variants.filter(
+                                      (x) => x.id !== v.id,
+                                    ),
+                                  }
+                                : s,
+                            ),
+                          }));
+                          w.setNotice(
+                            v.label.trim()
+                              ? `Deleted take “${v.label}”.`
+                              : "Deleted saved take.",
+                          );
+                          setDeletingTake(null);
+                        }}
+                      />
+                    )}
                   {compare === v.id && (
                     <div
                       className="comparison"

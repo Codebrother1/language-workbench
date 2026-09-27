@@ -401,6 +401,16 @@ hr {
   font-size: 12px;
   font-weight: 700;
 }
+.delete-confirm {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.delete-confirm p {
+  margin: 0 0 10px;
+}
 .save-take-form {
   display: grid;
   gap: 8px;
@@ -3121,6 +3131,14 @@ body.resizing-dock * {
   border-bottom: 1px solid var(--line);
   font-size: 12px;
   font-weight: 700;
+}
+.parked-group-heading {
+  flex-wrap: wrap;
+}
+.parked-group-heading .delete-confirm {
+  flex: 0 0 100%;
+  color: var(--text);
+  font-weight: 400;
 }
 .parked-group-heading button:first-child {
   display: flex;

@@ -358,6 +358,69 @@ test("human Save take preserves two manual closers and switches them without a m
   await expect(page.locator(".variants .variant")).toHaveCount(3);
 });
 
+test("deleting a take that matches the draft leaves prose in place and marks Current draft", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Plain and fast");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await page.getByRole("button", { name: "1 take" }).click();
+  await expect(page.getByTestId("current-draft-state")).toContainText(
+    "Plain and fast",
+  );
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Delete take" })
+    .click();
+  const prompt = page.getByRole("alertdialog", { name: "Delete take" });
+  await expect(prompt).toContainText("Plain and fast");
+  await prompt.getByRole("button", { name: "Delete take" }).click();
+  await expect(page.getByTestId("current-draft-state")).toHaveText(
+    "Current draft",
+  );
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "Leave this ending alone.",
+  );
+  await save(page);
+  const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(stored.sections[2].variants).toEqual([]);
+  expect(stored.sections[2].content).toEqual(doc.sections[2].content);
+});
+
+test("source removal needs confirmation and leaves authored prose untouched", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document sources" }).click();
+  const dialog = page.getByRole("dialog", { name: "Source material" });
+  const remove = dialog.getByRole("button", { name: "Remove source" });
+  await expect(remove).toHaveAttribute("title", "Remove source");
+  await remove.click();
+  const prompt = dialog.getByRole("alertdialog", { name: "Remove source" });
+  await expect(prompt).toContainText("The actual words");
+  await prompt.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog.getByLabel("Source text")).toHaveValue(
+    doc.sources[0].text,
+  );
+  await remove.click();
+  await prompt.getByRole("button", { name: "Remove source" }).click();
+  await expect(dialog.getByLabel("Source text")).toHaveCount(0);
+  await expect(dialog.getByRole("status")).toContainText("Removed source");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(stored.sources).toEqual([]);
+  expect(stored.sections.map((s: any) => s.content)).toEqual(
+    doc.sections.map((s) => s.content),
+  );
+});
+
 test("take comparison emphasizes a changed word without rewriting the draft", async ({
   page,
   request,
@@ -485,10 +548,19 @@ test("saved take stays with its section through rename, role, reorder, park, inc
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe("Leave this ending alone.");
-  await page
+  const deleteTake = page
     .locator(".variants .variant")
-    .getByRole("button", { name: "Delete take" })
-    .click();
+    .getByRole("button", { name: "Delete take" });
+  await expect(deleteTake).toHaveAttribute("title", "Delete take");
+  await deleteTake.click();
+  const prompt = page.getByRole("alertdialog", { name: "Delete take" });
+  await expect(prompt).toContainText("Before cut");
+  await expect(page.locator(".variants .variant")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(prompt).toHaveCount(0);
+  await deleteTake.click();
+  await prompt.getByRole("button", { name: "Delete take" }).click();
+  await expect(page.getByRole("status")).toContainText("Deleted take");
   await save(page);
   const after = (await (await request.get(`/api/documents/${doc.id}`)).json())
     .sections;
@@ -604,6 +676,40 @@ test("drag/reorder preserves metadata and save survives reload; split and merge 
     "Segue",
   ]);
 });
+test("Style DNA clean close is immediate but unsaved changes require a discard decision", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  const openStyle = () =>
+    page.getByRole("button", { name: "Style DNA", exact: true }).click();
+  await openStyle();
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await openStyle();
+  const rhythm = page.getByLabel("Rhythm", { exact: true });
+  const original = await rhythm.inputValue();
+  await rhythm.fill("A more deliberate rhythm.");
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  const prompt = page.getByRole("alertdialog", {
+    name: "Unsaved Style DNA changes",
+  });
+  await expect(prompt).toContainText("Discard changes");
+  await prompt.getByRole("button", { name: "Keep editing" }).click();
+  await expect(rhythm).toHaveValue("A more deliberate rhythm.");
+  await page.keyboard.press("Escape");
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole("button", { name: "Discard changes" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Style DNA & knowledge" }),
+  ).toHaveCount(0);
+  await openStyle();
+  await expect(page.getByLabel("Rhythm", { exact: true })).toHaveValue(
+    original,
+  );
+});
+
 test("Style DNA and brief persist; source never becomes authored text; light and dark readable", async ({
   page,
   request,
@@ -727,6 +833,37 @@ test("last selected document survives A to B to A, reload and a fresh app view",
   expect([a.id, b.id]).toContain(fallback);
   await page.reload();
   await expect(picker).toHaveValue(fallback);
+});
+
+test("document deletion names the document, starts on Cancel, and explains blank replacement", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  const trigger = page.getByRole("button", {
+    name: "Delete document",
+    exact: true,
+  });
+  await expect(trigger).toHaveAttribute("title", "Delete document");
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: /Delete/ });
+  await expect(dialog).toContainText(doc.title);
+  await expect(dialog).toContainText("A new blank document will be created");
+  await expect(
+    dialog.getByRole("button", { name: "Keep writing" }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await trigger.click();
+  await dialog.getByRole("button", { name: "Delete document" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    `Deleted “${doc.title}”`,
+  );
+  await expect(page.getByLabel("Document title")).toHaveValue("Untitled");
+  await expect(page.getByTestId("writing-editor")).toHaveText("");
 });
 
 test("new, duplicate, import/export and delete confirmation work", async ({

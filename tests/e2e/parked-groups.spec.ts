@@ -37,6 +37,101 @@ async function writeInCard(page: Page, id: string, prefix: string) {
   await page.keyboard.insertText(prefix);
 }
 
+test("empty parked groups delete deliberately; occupied groups keep every thought", async ({
+  page,
+  request,
+}) => {
+  const doc = await fresh(request);
+  await page.goto("/");
+  await page.getByRole("button", { name: "+ New parked group" }).click();
+  await page.getByLabel("New parked group name").fill("Scratchpad");
+  await page.getByRole("button", { name: "Create group" }).click();
+  const group = page
+    .locator("[data-parked-group-heading]")
+    .filter({ hasText: "Scratchpad" });
+  const remove = group.getByRole("button", {
+    name: "Delete parked group Scratchpad",
+  });
+  await expect(remove).toHaveAttribute(
+    "title",
+    "Delete parked group Scratchpad",
+  );
+  await remove.click();
+  const prompt = group.getByRole("alertdialog", {
+    name: "Delete parked group",
+  });
+  await expect(prompt).toContainText("Scratchpad");
+  await page.keyboard.press("Escape");
+  await expect(group).toBeVisible();
+  await remove.click();
+  await prompt.getByRole("button", { name: "Delete group" }).click();
+  await expect(group).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Deleted group");
+  await page.getByRole("button", { name: "+ New parked group" }).click();
+  await page.getByLabel("New parked group name").fill("Still needed");
+  await page.getByRole("button", { name: "Create group" }).click();
+  await page.getByLabel("Thought destination").selectOption("parked");
+  await page.getByLabel("New thought").fill("A parked line worth keeping.");
+  await page.getByLabel("New thought").press("Enter");
+  const parked = page.locator('.structure-item[data-placement="parked"]');
+  await parked.locator(".section-focus").click();
+  await parked
+    .getByLabel("Group for Freeform")
+    .selectOption({ label: "Still needed" });
+  await page
+    .locator("[data-parked-group-heading]")
+    .filter({ hasText: "Still needed" })
+    .getByRole("button", { name: "Delete parked group Still needed" })
+    .click();
+  await expect(page.getByRole("status")).toContainText(
+    "Move its parked thoughts",
+  );
+  await save(page);
+  const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(stored.parkedGroups.map((item: any) => item.name)).toEqual([
+    "Still needed",
+  ]);
+  expect(
+    stored.sections.filter((item: any) => item.placement === "parked"),
+  ).toHaveLength(1);
+});
+
+test("parked thought removal names its owner and session Undo restores group and placement", async ({
+  page,
+  request,
+}) => {
+  const doc = await fresh(request);
+  await page.goto("/");
+  await page.getByRole("button", { name: "+ New parked group" }).click();
+  await page.getByLabel("New parked group name").fill("Asides");
+  await page.getByRole("button", { name: "Create group" }).click();
+  await page.getByLabel("Thought destination").selectOption("parked");
+  await page.getByLabel("New thought").fill("Keep this detour.");
+  await page.getByLabel("New thought").press("Enter");
+  const card = page.locator('.structure-item[data-placement="parked"]');
+  const id = await card.getAttribute("data-section-id");
+  await card.locator(".section-focus").click();
+  await card.getByLabel("Group for Freeform").selectOption({ label: "Asides" });
+  await card.locator(".section-options > summary").click();
+  await card.getByLabel("Label", { exact: true }).fill("Unsent detour");
+  await card.getByRole("button", { name: "Remove section" }).click();
+  const dialog = page.getByRole("dialog", { name: /Remove parked thought/ });
+  await expect(dialog).toContainText("Unsent detour");
+  await dialog.getByRole("button", { name: "Delete parked thought" }).click();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveCount(0);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveAttribute(
+    "data-placement",
+    "parked",
+  );
+  await save(page);
+  const restored = (
+    await (await request.get(`/api/documents/${doc.id}`)).json()
+  ).sections.find((section: any) => section.id === id);
+  expect(restored.parkedGroupId).toBeTruthy();
+  expect(restored.placement).toBe("parked");
+});
+
 test("draft and parked capture, groups, reinclusion, labels and export share one section list", async ({
   page,
   request,

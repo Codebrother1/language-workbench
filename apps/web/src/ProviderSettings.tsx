@@ -29,7 +29,11 @@ function ProviderCard({
         body,
       );
       await w.refreshCatalog();
-      setStatus(result.message ?? "Updated");
+      setStatus(
+        method === "PATCH" && path === ""
+          ? `${p.displayName} ${p.enabled ? "disabled" : "enabled"}`
+          : (result.message ?? "Updated"),
+      );
     } catch (e) {
       setStatus((e as Error).message);
     } finally {
@@ -46,13 +50,16 @@ function ProviderCard({
     <section className="provider-card">
       <div className="row between">
         <h3>{p.displayName}</h3>
-        <span className="tag">
-          {p.implemented
-            ? p.configured
-              ? "Configured"
-              : "Not configured"
-            : "Not implemented"}
-        </span>
+        {p.implemented ? (
+          <div className="row wrap">
+            <span className="tag">{p.enabled ? "Enabled" : "Disabled"}</span>
+            <span className="tag">
+              {p.configured ? "Configured" : "Not configured"}
+            </span>
+          </div>
+        ) : (
+          <span className="tag">Not implemented</span>
+        )}
       </div>
       <p>{p.status}</p>
       {p.credentialSuffix && (

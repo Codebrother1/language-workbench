@@ -12,7 +12,7 @@ import {
   type SourceMaterial,
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
-import { Dialog, Button, Field, Select, safeURL } from "./ui";
+import { Dialog, Button, ConfirmDelete, Field, Select, safeURL } from "./ui";
 import { sectionMentions } from "./workspace-helpers";
 const words = (value: string) =>
   value
@@ -125,6 +125,8 @@ function Brief({ w }: { w: Workspace }) {
   );
 }
 function Sources({ w }: { w: Workspace }) {
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
   const patch = (id: string, key: keyof SourceMaterial, value: string) =>
     w.update((d) => ({
       ...d,
@@ -146,16 +148,35 @@ function Sources({ w }: { w: Workspace }) {
             </span>
             <Button
               aria-label="Remove source"
-              onClick={() =>
-                w.update((d) => ({
-                  ...d,
-                  sources: d.sources.filter((s) => s.id !== source.id),
-                }))
-              }
+              title="Remove source"
+              onClick={() => setDeleting(source.id)}
             >
               <Trash2 size={14} />
             </Button>
           </div>
+          {deleting === source.id && (
+            <ConfirmDelete
+              title={
+                source.title.trim()
+                  ? `Remove source “${source.title}”?`
+                  : "Remove this source?"
+              }
+              confirmLabel="Remove source"
+              onCancel={() => setDeleting(null)}
+              onConfirm={() => {
+                w.update((d) => ({
+                  ...d,
+                  sources: d.sources.filter((item) => item.id !== source.id),
+                }));
+                const message = source.title.trim()
+                  ? `Removed source “${source.title}”.`
+                  : "Removed source.";
+                setFeedback(message);
+                w.setNotice(message);
+                setDeleting(null);
+              }}
+            />
+          )}
           <div className="form-grid">
             <Field label="Reference title">
               <input
@@ -211,6 +232,11 @@ function Sources({ w }: { w: Workspace }) {
           )}
         </section>
       ))}
+      {feedback && (
+        <p role="status" className="guidance">
+          {feedback}
+        </p>
+      )}
       <Button onClick={w.addSource}>
         <Plus size={15} />
         Add reference
@@ -218,8 +244,15 @@ function Sources({ w }: { w: Workspace }) {
     </>
   );
 }
-function Style({ w }: { w: Workspace }) {
-  const [draft, setDraft] = useState<Settings>(w.settings);
+function Style({
+  w,
+  draft,
+  setDraft,
+}: {
+  w: Workspace;
+  draft: Settings;
+  setDraft: (update: (current: Settings) => Settings) => void;
+}) {
   const style = draft.styleDNA;
   const set = (key: string, value: unknown) =>
     setDraft((d) => ({ ...d, styleDNA: { ...d.styleDNA, [key]: value } }));
@@ -492,6 +525,20 @@ export function UtilityPanel({
   w: Workspace;
   libraryNavigation?: LibraryNavigation;
 }) {
+  const [styleDraft, setStyleDraft] = useState<Settings | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const dirty =
+    !!styleDraft &&
+    (JSON.stringify(styleDraft.styleDNA) !==
+      JSON.stringify(w.settings.styleDNA) ||
+      JSON.stringify(styleDraft.knowledgePacks) !==
+        JSON.stringify(w.settings.knowledgePacks));
+  const close = () => {
+    if (confirmDiscard) return setConfirmDiscard(false);
+    if (w.panel === "style" && dirty) return setConfirmDiscard(true);
+    setStyleDraft(null);
+    w.setPanel(null);
+  };
   if (!w.panel) return null;
   const title = {
     brief: "Writing brief",
@@ -504,7 +551,7 @@ export function UtilityPanel({
     guides: "Scoped Style Guides",
   }[w.panel];
   return (
-    <Dialog title={title} close={() => w.setPanel(null)} wide>
+    <Dialog title={title} close={close} wide>
       {w.panel === "library" ? (
         <PersonalLibrary
           key={libraryNavigation?.token ?? 0}
@@ -521,11 +568,48 @@ export function UtilityPanel({
       ) : w.panel === "sources" ? (
         <Sources w={w} />
       ) : w.panel === "style" ? (
-        <Style w={w} />
+        <Style
+          w={w}
+          draft={styleDraft ?? w.settings}
+          setDraft={(update) =>
+            setStyleDraft((current) => update(current ?? w.settings))
+          }
+        />
       ) : w.panel === "radar" ? (
         <Radar w={w} />
       ) : (
         <History w={w} />
+      )}
+      {confirmDiscard && w.panel === "style" && (
+        <div
+          className="delete-confirm"
+          role="alertdialog"
+          aria-label="Unsaved Style DNA changes"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setConfirmDiscard(false);
+            }
+          }}
+        >
+          <p>Discard unsaved Style DNA changes?</p>
+          <div className="row wrap">
+            <Button autoFocus onClick={() => setConfirmDiscard(false)}>
+              Keep editing
+            </Button>
+            <Button
+              className="danger solid"
+              onClick={() => {
+                setConfirmDiscard(false);
+                setStyleDraft(null);
+                w.setPanel(null);
+              }}
+            >
+              Discard changes
+            </Button>
+          </div>
+        </div>
       )}
     </Dialog>
   );

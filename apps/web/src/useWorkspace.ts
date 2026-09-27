@@ -1024,6 +1024,7 @@ export function useWorkspace() {
     setDocumentSwitching(true);
     try {
       await flush();
+      const deletedTitle = current.current.title.trim() || "Untitled";
       await api("/documents/" + current.current.id, "DELETE");
       const remaining = documents.filter((d) => d.id !== current.current.id);
       const next =
@@ -1037,6 +1038,7 @@ export function useWorkspace() {
         );
       }
       load(next);
+      setNotice(`Deleted “${deletedTitle}”.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2590,6 +2592,27 @@ export function useWorkspace() {
           group.id === id ? { ...group, name: trimmed } : group,
         ),
       }));
+    },
+    deleteParkedGroup: (id: string) => {
+      const group = current.current.parkedGroups.find((item) => item.id === id);
+      if (!group) return false;
+      if (
+        current.current.sections.some(
+          (section) =>
+            section.placement === "parked" && section.parkedGroupId === id,
+        )
+      ) {
+        setNotice(
+          `Move its parked thoughts to Ungrouped before deleting “${group.name}”.`,
+        );
+        return false;
+      }
+      update((doc) => ({
+        ...doc,
+        parkedGroups: doc.parkedGroups.filter((item) => item.id !== id),
+      }));
+      setNotice(`Deleted group “${group.name}”.`);
+      return true;
     },
     setParkedGroupCollapsed: (id: string, collapsed: boolean) =>
       update((doc) => ({

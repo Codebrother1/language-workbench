@@ -56,7 +56,15 @@ import {
   type ParkedGroup,
   type WritingSection,
 } from "./domain";
-import { Button, Select, Field, Dialog, GrowingTextarea, download } from "./ui";
+import {
+  Button,
+  ConfirmDelete,
+  Select,
+  Field,
+  Dialog,
+  GrowingTextarea,
+  download,
+} from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
 import { UtilityPanel } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
@@ -133,13 +141,16 @@ function ParkedGroupHeading({
   count,
   onToggle,
   onRename,
+  onDelete,
 }: {
   group: ParkedGroup;
   count: number;
   onToggle: () => void;
   onRename: (name: string) => void;
+  onDelete: () => boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(group.name);
   const finish = () => {
     if (name.trim()) onRename(name);
@@ -181,6 +192,28 @@ function ParkedGroupHeading({
         >
           Rename
         </Button>
+      )}
+      <Button
+        aria-label={`Delete parked group ${group.name}`}
+        title={`Delete parked group ${group.name}`}
+        onClick={() => {
+          if (count) onDelete();
+          else setDeleting(true);
+        }}
+      >
+        <Trash2 size={13} />
+      </Button>
+      {deleting && (
+        <ConfirmDelete
+          title={`Delete empty parked group “${group.name}”?`}
+          confirmLabel="Delete group"
+          ariaLabel="Delete parked group"
+          onCancel={() => setDeleting(false)}
+          onConfirm={() => {
+            onDelete();
+            setDeleting(false);
+          }}
+        />
       )}
     </div>
   );
@@ -303,6 +336,7 @@ function Structure({
       count={parked.filter((item) => item.parkedGroupId === group.id).length}
       onToggle={() => w.setParkedGroupCollapsed(group.id, !group.collapsed)}
       onRename={(name) => w.renameParkedGroup(group.id, name)}
+      onDelete={() => w.deleteParkedGroup(group.id)}
     />
   );
   const addDraftButton = (
@@ -1258,6 +1292,7 @@ function Toolbar({ w }: { w: Workspace }) {
         <Button
           aria-label="Undo"
           title="Undo"
+          disabled={!ed?.can().undo()}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => ed?.chain().focus().undo().run()}
         >
@@ -1266,6 +1301,7 @@ function Toolbar({ w }: { w: Workspace }) {
         <Button
           aria-label="Redo"
           title="Redo"
+          disabled={!ed?.can().redo()}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => ed?.chain().focus().redo().run()}
         >
@@ -1694,6 +1730,10 @@ export default function App() {
     const id = parkedFocusId ?? w.selectedSectionId;
     if (id) requestAnimationFrame(() => scrollPreviewToSection(id, true, true));
   }, [previewFocused, parkedFocusId, w.selectedSectionId]);
+  const removing =
+    confirmation?.kind === "section"
+      ? w.doc.sections.find((section) => section.id === confirmation.id)
+      : null;
   const writeInCard = (id: string, point?: { x: number; y: number }) => {
     pendingCardCaret.current = point ? { id, ...point } : null;
     w.prepareSectionTarget(id);
@@ -1981,6 +2021,7 @@ export default function App() {
                 <hr />
                 <Button
                   className="danger"
+                  title="Delete document"
                   disabled={!w.ready}
                   onClick={() => {
                     setConfirmation({ kind: "document" });
@@ -2334,27 +2375,39 @@ export default function App() {
         <Dialog
           title={
             confirmation.kind === "document"
-              ? "Delete this document?"
-              : "Remove this section?"
+              ? `Delete “${w.doc.title.trim() || "Untitled"}”?`
+              : removing?.placement === "parked"
+                ? `Remove parked thought${removing && customSectionLabel(removing) ? ` “${customSectionLabel(removing)}”` : ""}?`
+                : "Remove section?"
           }
           close={() => setConfirmation(null)}
+          initialFocus="[data-safe-cancel]"
         >
           <p>
             {confirmation.kind === "document"
-              ? "The document, references, saved takes, and history will be permanently deleted. Export JSON first if you want a backup."
-              : "This removes the section and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session. Deleting the last section leaves an empty Freeform writing surface."}
+              ? `This permanently deletes this document, its references, saved takes and history. Export JSON first if you want a backup.${w.documents.length === 1 ? " A new blank document will be created." : ""}`
+              : `This removes the ${removing?.placement === "parked" ? "parked thought" : "section"} and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session.${w.doc.sections.length === 1 ? " Removing the last section leaves an empty Freeform writing surface." : ""}`}
           </p>
           <div className="row end">
-            <Button onClick={() => setConfirmation(null)}>Keep writing</Button>
+            <Button
+              data-safe-cancel="true"
+              onClick={() => setConfirmation(null)}
+            >
+              Keep writing
+            </Button>
             <Button
               className="danger solid"
               onClick={() => {
-                if (confirmation.kind === "document") w.remove();
+                if (confirmation.kind === "document") void w.remove();
                 else if (confirmation.id) w.deleteSection(confirmation.id);
                 setConfirmation(null);
               }}
             >
-              Delete {confirmation.kind}
+              {confirmation.kind === "document"
+                ? "Delete document"
+                : removing?.placement === "parked"
+                  ? "Delete parked thought"
+                  : "Delete section"}
             </Button>
           </div>
         </Dialog>

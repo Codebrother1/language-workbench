@@ -473,6 +473,13 @@ test("deleting any section including the last is confirmed and undoable", async 
   await expect(page.getByTestId("writing-editor")).toContainText("Passage 1");
   await save(page);
   expect((await data(request, doc.id)).sections[0].kind).toBe("Closer");
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Redo", exact: true }),
+  ).toBeDisabled();
 });
 test("arbitrary counts and order survive insertion, editing and clipboard without control text", async ({
   page,
