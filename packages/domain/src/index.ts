@@ -124,6 +124,7 @@ export const workbenchRunSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
   target: editTargetSchema,
+  stage: z.enum(["diagnose", "propose"]).optional(),
   action: z.string(),
   instruction: z.string(),
   answer: z.string(),
@@ -137,6 +138,7 @@ export const workbenchRunSchema = z.object({
 });
 export type WorkbenchRun = z.infer<typeof workbenchRunSchema>;
 export const sectionWorkbenchSchema = z.object({
+  questionAnswers: z.record(z.string()).default({}),
   targetDrafts: z
     .record(
       z.object({

@@ -142,6 +142,12 @@ export class Repository {
           ]),
         ),
         activeRunId: w.activeRunId ? (runIds.get(w.activeRunId) ?? null) : null,
+        questionAnswers: Object.fromEntries(
+          Object.entries(w.questionAnswers).map(([runId, answer]) => [
+            runIds.get(runId) ?? runId,
+            answer,
+          ]),
+        ),
         clearedChainRunId: w.clearedChainRunId
           ? (runIds.get(w.clearedChainRunId) ?? null)
           : w.clearedChainRunId,

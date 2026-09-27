@@ -519,12 +519,31 @@ test("delayed model work shows honest progress and clears it after success or er
   });
   await open(page);
   await section(page, "Hook");
+  await models(page);
+  await expect(
+    page
+      .getByLabel("Section model", { exact: true })
+      .locator('option[value=""]'),
+  ).toHaveText("Use default model");
+  await page
+    .getByLabel("Section model", { exact: true })
+    .selectOption(modelKey(conservative));
+  await page
+    .getByLabel("Run with", { exact: true })
+    .selectOption(modelKey(plain));
   await page.getByRole("button", { name: /Diagnose this/ }).click();
   await expect(page.getByTestId("model-progress")).toContainText("Analyzing…");
   await expect(page.getByTestId("model-progress")).toContainText(
+    "Offline plain",
+  );
+  await expect(page.getByTestId("section-default")).toContainText(
     "Offline conservative",
   );
+  await expect(page.getByTestId("active-route")).toContainText(
+    "Running with: Offline plain",
+  );
   await expect(page.locator(".diagnosis")).toContainText("Synthetic analysis");
+  await expect(page.getByTestId("run-model")).toContainText("Offline plain");
   await expect(page.getByTestId("model-progress")).toHaveCount(0);
   await page
     .getByLabel("Your material")
@@ -544,6 +563,168 @@ test("delayed model work shows honest progress and clears it after success or er
     page.getByRole("button", { name: "Propose options" }),
   ).toBeEnabled();
   expect(calls).toBe(3);
+});
+
+test("zero-result reasons and genuinely empty results are visible without invented proposals", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  let empty = false,
+    unsupported = false,
+    fail = false;
+  await page.route("**/api/ai", (route) => {
+    if (fail)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Provider unavailable" }),
+      });
+    const propose = route.request().postDataJSON().stage === "propose";
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        diagnosis: propose ? "" : "Diagnosis",
+        mechanism: "",
+        question: propose ? "" : "What stays?",
+        missingIngredients: propose
+          ? unsupported
+            ? ["This provider cannot produce this result."]
+            : empty
+              ? []
+              : ["No safe offline proposal: A protected quote was changed."]
+          : [],
+        findings: [],
+        lexical: [],
+        proposals: [],
+      }),
+    });
+  });
+  await open(page);
+  await section(page, "Hook");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.locator(".diagnosis")).toContainText("Diagnosis");
+  await page
+    .getByLabel("Your material")
+    .fill("Material: Human supplied words.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "No safe result",
+  );
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "A protected quote was changed",
+  );
+  await expect(page.getByTestId("proposal")).toHaveCount(0);
+  await save(page);
+  await page.reload();
+  await section(page, "Hook");
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "A protected quote was changed",
+  );
+  empty = true;
+  await page.getByLabel("Your material").fill("Material: Another human line.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "No result returned",
+  );
+  await expect(page.getByTestId("proposal")).toHaveCount(0);
+  unsupported = true;
+  await page.getByLabel("Your material").fill("Material: A third line.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "Unavailable for this provider",
+  );
+  await expect(page.getByTestId("proposal")).toHaveCount(0);
+  fail = true;
+  await page.getByLabel("Your material").fill("Material: A fourth line.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByRole("alert")).toContainText("Provider unavailable");
+});
+
+test("distinct saved Lab questions keep separate follow-up answers", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await page.route("**/api/ai", (route) => {
+    const propose = route.request().postDataJSON().stage === "propose";
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        diagnosis: propose ? "Second diagnosis" : "First diagnosis",
+        mechanism: "",
+        question: propose
+          ? "What changed in the second pass?"
+          : "What matters in the first pass?",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals: propose
+          ? [
+              {
+                id: "p",
+                label: "Option",
+                text: "A human option.",
+                explanation: "Only a preview.",
+              },
+            ]
+          : [],
+      }),
+    });
+  });
+  await open(page);
+  await section(page, "Hook");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.locator(".diagnosis")).toContainText("First diagnosis");
+  await page.getByLabel("Your material").fill("My first answer.");
+  await page.getByRole("button", { name: "Propose options" }).click();
+  await expect(page.getByLabel("Your material")).toHaveValue("");
+  await page.locator(".local-history > summary").click();
+  await page.getByRole("button", { name: "Inspect this run" }).last().click();
+  await expect(page.getByLabel("Your material")).toHaveValue(
+    "My first answer.",
+  );
+  await page.getByRole("button", { name: "Inspect this run" }).first().click();
+  await expect(page.getByLabel("Your material")).toHaveValue("");
+  await page.getByLabel("Your material").fill("My second answer.");
+  await save(page);
+  await page.reload();
+  await section(page, "Hook");
+  await page.locator(".local-history > summary").click();
+  await page.getByRole("button", { name: "Inspect this run" }).last().click();
+  await expect(page.getByLabel("Your material")).toHaveValue(
+    "My first answer.",
+  );
+  await page.getByRole("button", { name: "Inspect this run" }).first().click();
+  await expect(page.getByLabel("Your material")).toHaveValue(
+    "My second answer.",
+  );
+});
+
+test("common Lab approaches name the action without changing the selected prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await section(page, "Hook");
+  await expect(
+    page.getByRole("button", { name: "Diagnose this section" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Writing action", { exact: true })
+    .selectOption("humor");
+  await expect(page.getByRole("button", { name: "Try humor" })).toBeVisible();
+  await page.locator(".all-actions > summary").click();
+  await page.getByLabel("All writing actions").selectOption("register");
+  await expect(
+    page.getByRole("button", { name: "Explore register" }),
+  ).toBeVisible();
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
 });
 
 test("section-type defaults and document fallback use the same resolver", async ({
@@ -696,7 +877,12 @@ test("phrase shape, fidelity, persona and technical audience reach the request; 
   const req = page.waitForRequest((r) => r.url().endsWith("/api/ai"));
   await page.getByRole("button", { name: "Find replacements" }).click();
   expect((await req).postDataJSON().editTarget.text).toBe("putting on airs");
-  await expect(page.locator(".ingredients")).toContainText("cannot guarantee");
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "cannot guarantee",
+  );
+  await expect(page.getByTestId("result-outcome")).toContainText(
+    "Unavailable for this provider",
+  );
   await expect(page.getByTestId("proposal")).toHaveCount(0);
 });
 test("model comparison saves independent candidates with provenance without applying them", async ({

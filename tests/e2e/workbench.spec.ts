@@ -197,6 +197,9 @@ test("sentence diagnosis reads globally but proposal, copy and acceptance stay l
   );
   await expect(page.getByTestId("compare-take")).toHaveCount(0);
   await expect(page.getByTestId("variant-comparison")).toHaveCount(1);
+  await expect(page.getByTestId("variant-comparison")).toContainText(
+    "Current draft text",
+  );
   await page
     .getByRole("button", { name: "Activate", exact: true })
     .first()

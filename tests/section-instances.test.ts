@@ -311,9 +311,15 @@ describe("duplicateSection", () => {
       model: { providerId: "mock", modelId: "plain" },
       target: original,
     };
+    section.workbench!.questionAnswers = {
+      "run-original": "An answer to this question",
+    };
     section.variants[0].sourceTarget = original;
     const copy = duplicateSection(doc, section.id).sections[1];
     expect(copy.workbench!.runChain!.target.sectionId).toBe(copy.id);
+    expect(copy.workbench!.questionAnswers[copy.workbench!.runs[0].id]).toBe(
+      "An answer to this question",
+    );
     expect(copy.variants[0].sourceTarget!.sectionId).toBe(copy.id);
     expect(section.workbench!.runChain!.target.sectionId).toBe(section.id);
     expect(section.variants[0].sourceTarget!.sectionId).toBe(section.id);

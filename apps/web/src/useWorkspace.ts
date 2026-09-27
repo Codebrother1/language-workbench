@@ -1391,13 +1391,20 @@ export function useWorkspace() {
   const setInstruction = (v: SetStateAction<string>) =>
     setDraftField("instruction", v);
   const setAnswer = (v: SetStateAction<string>) => setDraftField("answer", v);
-  const responseAnswer = responseTarget
-    ? getTargetDraft(currentWorkbench, responseTarget).answer
-    : answer;
+  const responseAnswer =
+    activeRun && responseTarget
+      ? (currentWorkbench.questionAnswers[activeRun.id] ??
+        (activeRun.stage
+          ? ""
+          : getTargetDraft(currentWorkbench, responseTarget).answer))
+      : answer;
   const setResponseAnswer = (value: string) => {
-    if (!responseTarget) return setAnswer(value);
+    if (!responseTarget || !activeRun) return setAnswer(value);
     patchWorkbench(
-      (wb) => patchTargetDraft(wb, responseTarget, { answer: value }),
+      (wb) => ({
+        ...patchTargetDraft(wb, responseTarget, { answer: value }),
+        questionAnswers: { ...wb.questionAnswers, [activeRun.id]: value },
+      }),
       responseTarget.scope === "document" ? null : responseTarget.sectionId,
     );
   };
@@ -1801,7 +1808,13 @@ export function useWorkspace() {
       return setError(
         "The chosen model cannot return structured writing results. Change the provider/model explicitly; no fallback was used.",
       );
+    const answerForRequest =
+      stage === "propose" && activeRun && sameFocusTarget(activeRun.target, t)
+        ? (wb.questionAnswers[activeRun.id] ??
+          (activeRun.stage ? "" : draft.answer))
+        : draft.answer;
     const capture: RunCapture = {
+      stage,
       ...(chosen === "words"
         ? {
             lens: {
@@ -1818,9 +1831,11 @@ export function useWorkspace() {
       action: chosen,
       instruction: draft.instruction,
       answer:
-        structureInput && !draft.answer.trim()
+        structureInput && !answerForRequest.trim()
           ? structureInput.preview
-          : draft.answer,
+          : stage === "diagnose" && !structureInput
+            ? ""
+            : answerForRequest,
       ...(structureInput ? { structure: structureInput } : {}),
       controls: { ...wb.controls },
       model: route.model,

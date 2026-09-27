@@ -22,6 +22,8 @@ import {
   sectionMentions,
   humanTargetLabel,
   runDraftState,
+  resultOutcome,
+  labActionLabel,
   type RunCapture,
 } from "./workspace-helpers";
 
@@ -68,6 +70,88 @@ describe("writer-facing target names", () => {
     expect(
       humanTargetLabel({ ...target, scope: "word", unit: "selection" }),
     ).toBe("Selected word");
+  });
+});
+
+describe("Lab result and action truthfulness", () => {
+  it("classifies safe, unsupported and unexplained empty proposals without inventing one", () => {
+    const { capture, response } = fixture();
+    const run = makeRun({ ...capture, stage: "propose" }, response);
+    expect(resultOutcome(run)).toEqual({
+      title: "No result returned",
+      reasons: [],
+    });
+    expect(
+      resultOutcome({
+        ...run,
+        response: {
+          ...response,
+          missingIngredients: [
+            "No safe offline proposal: A protected quote was changed.",
+          ],
+        },
+      }),
+    ).toEqual({
+      title: "No safe result",
+      reasons: ["No safe offline proposal: A protected quote was changed."],
+    });
+    expect(
+      resultOutcome({
+        ...run,
+        response: {
+          ...response,
+          missingIngredients: ["This model cannot return structured output."],
+        },
+      })?.title,
+    ).toBe("Unavailable for this provider");
+    expect(resultOutcome({ ...run, stage: "diagnose" })).toBeNull();
+    expect(run.response.proposals).toEqual([]);
+  });
+  it("names only common approaches specially", () => {
+    expect(labActionLabel("coach", "section")).toBe("Diagnose this section");
+    expect(labActionLabel("humor", "section")).toBe("Try humor");
+    expect(labActionLabel("register", "section")).toBe("Explore register");
+    expect(labActionLabel("rhythm", "passage")).toBe("Explore rhythm");
+    expect(labActionLabel("technical", "section")).toBe(
+      "Diagnose this section",
+    );
+  });
+  it("keeps answers for distinct saved questions isolated during inspection", () => {
+    const { doc, a, capture, response } = fixture();
+    const first = makeRun(
+      { ...capture, stage: "diagnose", answer: "" },
+      response,
+    );
+    let next = appendRun(doc, first);
+    next = updateWorkbench(next, a.id, (wb) => ({
+      ...wb,
+      questionAnswers: { ...wb.questionAnswers, [first.id]: "Answer A" },
+    }));
+    const second = makeRun(
+      { ...capture, stage: "propose", answer: "Answer A" },
+      { ...response, question: "Question B?" },
+    );
+    next = appendRun(next, second);
+    const wb = getWorkbench(next, a.id);
+    expect(wb.questionAnswers[first.id]).toBe("Answer A");
+    expect(wb.questionAnswers[second.id]).toBe("");
+    expect(inspectRun(wb, first.id).questionAnswers[first.id]).toBe("Answer A");
+    expect(inspectRun(wb, second.id).questionAnswers[second.id]).toBe("");
+    const third = makeRun(
+      { ...capture, stage: "propose", answer: "Answer B" },
+      { ...response, question: "Question B?" },
+    );
+    const same = appendRun(
+      updateWorkbench(next, a.id, (current) => ({
+        ...current,
+        questionAnswers: {
+          ...current.questionAnswers,
+          [second.id]: "Answer B",
+        },
+      })),
+      third,
+    );
+    expect(getWorkbench(same, a.id).questionAnswers[third.id]).toBe("Answer B");
   });
 });
 

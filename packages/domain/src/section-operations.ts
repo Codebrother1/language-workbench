@@ -214,6 +214,13 @@ export function duplicateSection(doc: Document, sectionId: string): Document {
         if (finding.sectionId === sectionId) finding.sectionId = copy.id;
       }
     }
+    if (wb.questionAnswers)
+      wb.questionAnswers = Object.fromEntries(
+        Object.entries(wb.questionAnswers).map(([id, answer]) => [
+          mappedId(runIds, id),
+          answer,
+        ]),
+      );
     if (wb.activeRunId != null)
       wb.activeRunId = mappedId(runIds, wb.activeRunId);
     if (wb.clearedChainRunId)

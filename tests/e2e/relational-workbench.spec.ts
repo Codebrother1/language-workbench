@@ -159,6 +159,9 @@ test("empty Segue storyboard + neighbors → coaching → relational comparison 
   await expect(compare.getByTestId("compare-canonical")).toContainText(
     "The feeling came first",
   );
+  await expect(compare.locator(".current-version")).toContainText(
+    "Current draft text",
+  );
   await expect(compare.getByTestId("compare-original")).toHaveCount(1);
   await expect(compare.getByTestId("compare-original")).toContainText(
     "Original target snapshot",

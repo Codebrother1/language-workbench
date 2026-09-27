@@ -32,6 +32,8 @@ import {
   sectionReference,
   runDraftState,
   humanTargetLabel,
+  resultOutcome,
+  labActionLabel,
 } from "./workspace-helpers";
 
 function ReferencedText({
@@ -145,6 +147,7 @@ export function WritingLabShell({
     responseSection?.kind ?? "Freeform",
     responseTarget?.scope ?? "selection",
   );
+  const outcome = w.activeRun ? resultOutcome(w.activeRun) : null;
   const isLexicalRun =
     w.activeRun?.action === "words" && Boolean(w.activeRun?.lens);
   const deliveryActive = w.isDeliveryTarget && w.lens.view === "delivery";
@@ -404,14 +407,25 @@ export function WritingLabShell({
     <aside className="inspector" aria-label="Contextual writing inspector">
       <div className="inspector-top">
         <span className="eyebrow">WRITING LAB</span>
-        <span className="provider" title="Provider for the current model route">
-          {!w.catalog
-            ? "Provider status unavailable"
-            : w.effectiveModel.model.providerId === "mock"
-              ? "Mock · local"
-              : (w.catalog.providers.find(
-                  (p) => p.id === w.effectiveModel.model.providerId,
-                )?.displayName ?? w.effectiveModel.model.providerId)}
+        <span
+          className="provider"
+          title={
+            w.running
+              ? "Model for this request"
+              : "Provider for the next model route"
+          }
+        >
+          {w.running
+            ? w.running.models.length > 1
+              ? `Comparing ${w.running.models.length} models`
+              : modelLabel(w.catalog, w.running.models[0])
+            : !w.catalog
+              ? "Provider status unavailable"
+              : w.effectiveModel.model.providerId === "mock"
+                ? "Mock · local"
+                : (w.catalog.providers.find(
+                    (p) => p.id === w.effectiveModel.model.providerId,
+                  )?.displayName ?? w.effectiveModel.model.providerId)}
         </span>
       </div>
       {findingVisit &&
@@ -631,7 +645,7 @@ export function WritingLabShell({
                 disabled={w.busy || !w.canCoachTarget || !w.ready}
                 onClick={() => w.ask("diagnose")}
               >
-                {w.busy ? "Thinking…" : `Diagnose this ${targetLabel}`}
+                {w.busy ? "Analyzing…" : labActionLabel(w.action, targetLabel)}
                 <ArrowRight size={15} />
               </Button>
             </>
@@ -762,6 +776,31 @@ export function WritingLabShell({
               ? "Mock output — not a live model"
               : response.provider}
           </span>
+          {outcome && (
+            <div
+              className="result-outcome"
+              role="status"
+              data-testid="result-outcome"
+            >
+              <b>{outcome.title}</b>
+              {outcome.reasons.length ? (
+                outcome.reasons.map((reason, index) => (
+                  <p key={index}>
+                    <ReferencedText
+                      w={w}
+                      text={reason}
+                      onJumpSection={onJumpSection}
+                    />
+                  </p>
+                ))
+              ) : (
+                <p>
+                  The request finished without a proposal or explanation. Your
+                  draft is unchanged.
+                </p>
+              )}
+            </div>
+          )}
           {responseTarget?.scope === "document" &&
             analysisState === "Earlier draft" && (
               <div className="analysis-age" role="status">
@@ -966,7 +1005,7 @@ export function WritingLabShell({
               </p>
             </div>
           )}
-          {!!response.qualityNotices?.length && (
+          {!outcome && !!response.qualityNotices?.length && (
             <div className="quality-notices" role="status">
               <b>Output check</b>
               {response.qualityNotices.map((note) => (
@@ -980,7 +1019,7 @@ export function WritingLabShell({
               ))}
             </div>
           )}
-          {response.missingIngredients.length > 0 && (
+          {!outcome && response.missingIngredients.length > 0 && (
             <div className="ingredients">
               <b>Bring your material</b>
               <ul>
@@ -1057,10 +1096,12 @@ export function WritingLabShell({
                 </p>
               </article>
             ))}
-          {response.model && (
+          {(response.model ?? w.activeRun?.model) && (
             <p className="small muted" data-testid="run-model">
-              {modelLabel(w.catalog, response.model)} ·{" "}
-              {response.routeSource?.replace("_", " ")}
+              {modelLabel(w.catalog, response.model ?? w.activeRun?.model)}
+              {response.routeSource
+                ? ` · ${response.routeSource.replace("_", " ")}`
+                : ""}
             </p>
           )}
           {!isLexicalRun &&
@@ -1402,13 +1443,13 @@ export function WritingLabShell({
                       <b>
                         Original target snapshot
                         {originalText === currentText
-                          ? " · Current canonical prose"
+                          ? " · Current draft text"
                           : ""}
                       </b>
                       <p data-testid="compare-original">{originalText}</p>
                       {originalText !== currentText && (
                         <>
-                          <b>Current canonical prose</b>
+                          <b>Current draft text</b>
                           <p data-testid="compare-current">{currentText}</p>
                         </>
                       )}

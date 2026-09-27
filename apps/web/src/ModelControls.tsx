@@ -88,6 +88,9 @@ export function ModelPicker({
 export function ModelControls({ w }: { w: Workspace }) {
   const section = w.doc.sections.find((s) => s.id === w.target?.sectionId);
   const whole = w.responseTarget?.scope === "document";
+  const activeModels = w.running?.models
+    .map((model) => modelLabel(w.catalog, model))
+    .join(" + ");
   const available = (w.catalog?.providers ?? [])
     .filter((p) => p.implemented && p.configured && p.enabled)
     .flatMap((p) => p.models.map((m) => ({ providerId: p.id, modelId: m.id })));
@@ -95,25 +98,38 @@ export function ModelControls({ w }: { w: Workspace }) {
     <details className="model-controls">
       <summary aria-label="Model controls">
         <span>
-          {w.catalog
-            ? modelLabel(w.catalog, w.effectiveModel.model)
-            : "Provider status unavailable"}
+          {activeModels
+            ? `Running with: ${activeModels}`
+            : w.catalog
+              ? `Next run with: ${modelLabel(w.catalog, w.effectiveModel.model)}`
+              : "Provider status unavailable"}
         </span>
         <ChevronDown size={14} />
       </summary>
       <div className="model-controls-body">
+        {activeModels && (
+          <p className="small" data-testid="active-route">
+            Running with: {activeModels}
+          </p>
+        )}
         <p className="small muted">
-          Inherited from: {w.effectiveModel.source.replace("_", " ")}. Changing
-          a model never changes your text.
+          Model source: {w.effectiveModel.source.replace("_", " ")}. Changing a
+          model never changes your text.
         </p>
         {section && !whole && (
           <>
+            <p className="small muted" data-testid="section-default">
+              Section default:{" "}
+              {section.modelOverride
+                ? modelLabel(w.catalog, section.modelOverride)
+                : "Use current routing"}
+            </p>
             <ModelPicker
               catalog={w.catalog}
               value={section.modelOverride}
               onChange={w.setSectionModel}
               label="Section model"
-              inherit="Inherit routing defaults"
+              inherit="Use default model"
             />
             <div className="row wrap">
               <Button onClick={() => w.setSectionModel(null)}>
@@ -176,7 +192,7 @@ export function ModelControls({ w }: { w: Workspace }) {
               w.busy ||
               w.compareModels.length < 2 ||
               whole ||
-              (!w.isLensTarget && !w.answer.trim())
+              (!w.isLensTarget && !w.responseAnswer.trim())
             }
           >
             {w.running?.label.startsWith("Comparing")

@@ -18,6 +18,21 @@ import {
 
 import { patchTargetDraft, resolveHistoricalTarget } from "./target-drafts";
 
+export function labActionLabel(action: WritingAction, target: string): string {
+  switch (action) {
+    case "humor":
+      return "Try humor";
+    case "register":
+      return "Explore register";
+    case "rhythm":
+      return "Explore rhythm";
+    case "figurative":
+      return "Explore figurative language";
+    default:
+      return `Diagnose this ${target}`;
+  }
+}
+
 export function humanTargetLabel(target: EditTarget): string {
   if (target.scope === "document") return "Whole piece";
   if (target.scope === "section") return "Whole section";
@@ -173,6 +188,7 @@ export function inspectRun(wb: SectionWorkbench, id: string): SectionWorkbench {
 }
 
 export type RunCapture = {
+  stage?: "diagnose" | "propose";
   structure?: StructureRequest;
   lens?: LensOptions;
   target: EditTarget;
@@ -184,6 +200,31 @@ export type RunCapture = {
   chainModel?: ModelRef;
   question: string;
 };
+export function resultOutcome(
+  run: WorkbenchRun,
+): { title: string; reasons: string[] } | null {
+  if (run.stage !== "propose" || run.response.proposals.length) return null;
+  const reasons = [
+    ...(run.response.qualityNotices ?? []),
+    ...run.response.missingIngredients,
+  ]
+    .map((reason) => reason.trim())
+    .filter(Boolean);
+  if (!reasons.length) return { title: "No result returned", reasons: [] };
+  const detail = reasons.join(" ");
+  return {
+    title:
+      /\b(unsupported|unavailable|cannot|not configured|not supported)\b/i.test(
+        detail,
+      )
+        ? "Unavailable for this provider"
+        : /\b(no safe|protected|violat|reject|blocked)\b/i.test(detail)
+          ? "No safe result"
+          : "No proposal returned",
+    reasons,
+  };
+}
+
 export function makeRun(
   capture: RunCapture,
   response: AIResponse,
@@ -192,6 +233,7 @@ export function makeRun(
     id: uid(),
     createdAt: new Date().toISOString(),
     target: capture.target,
+    ...(capture.stage ? { stage: capture.stage } : {}),
     action: capture.action,
     instruction: capture.instruction,
     answer: capture.answer,
@@ -226,19 +268,32 @@ export function appendRun(
     throw new Error(
       "The originating section was removed. Run was not restored.",
     );
-  const next = updateWorkbench(doc, sectionId, (wb) => ({
-    ...wb,
-    runs: [...wb.runs, run],
-    activeRunId: run.id,
-    proposalStates: saveVariants
-      ? {
-          ...wb.proposalStates,
-          ...Object.fromEntries(
-            run.response.proposals.map((p) => [p.id, "saved"]),
-          ),
-        }
-      : wb.proposalStates,
-  }));
+  const next = updateWorkbench(doc, sectionId, (wb) => {
+    const previous = wb.runs.find((item) => item.id === wb.activeRunId);
+    const sameQuestion =
+      run.stage === "propose" &&
+      !!run.response.question.trim() &&
+      run.response.question.trim() === previous?.response.question.trim();
+    return {
+      ...wb,
+      runs: [...wb.runs, run],
+      activeRunId: run.id,
+      questionAnswers: {
+        ...wb.questionAnswers,
+        [run.id]: sameQuestion
+          ? (wb.questionAnswers[previous!.id] ?? run.answer)
+          : "",
+      },
+      proposalStates: saveVariants
+        ? {
+            ...wb.proposalStates,
+            ...Object.fromEntries(
+              run.response.proposals.map((p) => [p.id, "saved"]),
+            ),
+          }
+        : wb.proposalStates,
+    };
+  });
   return {
     ...next,
     history: [

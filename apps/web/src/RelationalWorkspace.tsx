@@ -253,7 +253,7 @@ export function RelationalCompare({
         )}
         <article className="comparison-version current-version">
           <span className="eyebrow">
-            Current canonical prose · {section.label}
+            Current draft text · {section.label}
             {originalText === canonicalText ? " · Original unchanged" : ""}
           </span>
           <p data-testid="compare-canonical">

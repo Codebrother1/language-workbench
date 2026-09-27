@@ -1037,6 +1037,17 @@ hr {
 .lens-view {
   margin: 10px 0;
 }
+.result-outcome {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-light);
+  font-size: 13px;
+}
+.result-outcome p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
 .delivery-result {
   display: grid;
   gap: 4px;
