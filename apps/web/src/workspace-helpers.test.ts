@@ -23,6 +23,7 @@ import {
   humanTargetLabel,
   currentTakeIds,
   chooseActiveDocument,
+  documentBackup,
   textDifference,
   runDraftState,
   resultOutcome,
@@ -56,6 +57,36 @@ function fixture() {
   };
   return { doc, a, b, capture, response };
 }
+
+describe("document backup", () => {
+  it("exports selected document-local data without application credentials or global settings", () => {
+    const a = newDocument("A", "Human text.");
+    const b = newDocument("B", "Different draft.");
+    a.sources.push({
+      id: "source",
+      title: "Reference",
+      kind: "quote",
+      text: "Quoted source.",
+      url: "",
+    });
+    const backup = documentBackup(
+      [a],
+      [a.id, b.id],
+      "2026-01-01T00:00:00.000Z",
+    );
+    expect(backup).toMatchObject({
+      format: "language-workbench-document-backup",
+      version: 1,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      archivedIds: [a.id],
+      documents: [a],
+    });
+    expect(backup.documents).not.toContain(b);
+    expect(JSON.stringify(backup)).not.toMatch(
+      /OPENAI_API_KEY|apiKey|credentialSuffix|styleDNA|personalLibrary/,
+    );
+  });
+});
 
 describe("active document selection", () => {
   it("prefers the selected identity over list order and falls back when it disappears", () => {

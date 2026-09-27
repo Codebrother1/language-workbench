@@ -33,6 +33,23 @@ export function labActionLabel(action: WritingAction, target: string): string {
   }
 }
 
+export function documentBackup(
+  documents: Document[],
+  archivedIds: string[],
+  exportedAt = new Date().toISOString(),
+) {
+  const archived = new Set(archivedIds);
+  return {
+    format: "language-workbench-document-backup" as const,
+    version: 1 as const,
+    exportedAt,
+    documents: documents.map((doc) => structuredClone(doc)),
+    archivedIds: documents
+      .filter((doc) => archived.has(doc.id))
+      .map((doc) => doc.id),
+  };
+}
+
 export function chooseActiveDocument(
   documents: Document[],
   selectedId: string | null,

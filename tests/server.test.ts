@@ -12,6 +12,8 @@ import {
 import { MockProvider } from "../apps/server/src/mock-provider";
 import {
   documentTarget,
+  targetFor,
+  emptyWorkbench,
   newSection,
   paragraphs,
 } from "../packages/domain/src/index";
@@ -128,6 +130,196 @@ describe("local API and SQLite persistence", () => {
       204,
     );
     expect((await request(`/api/documents/${first.id}`)).status).toBe(404);
+  });
+  it("archives and restores full documents by ID across a server restart", async () => {
+    const first = await (
+      await request("/api/documents", "POST", {
+        title: "Same title",
+        text: "A durable line.",
+      })
+    ).json();
+    const second = await (
+      await request("/api/documents", "POST", {
+        title: "Same title",
+        text: "A different line.",
+      })
+    ).json();
+    first.sections[0].variants.push({
+      id: "take-one",
+      label: "Earlier",
+      text: "A durable line.",
+      target: targetFor(first, first.sections[0].id),
+      origin: "human",
+      createdAt: first.createdAt,
+    });
+    first.sources.push({
+      id: "source-one",
+      title: "Witness",
+      kind: "quote",
+      text: "A source survives.",
+      url: "",
+    });
+    const run = {
+      id: "run-one",
+      createdAt: first.createdAt,
+      target: targetFor(first, first.sections[0].id),
+      action: "coach",
+      instruction: "Keep my point.",
+      answer: "",
+      controls: {},
+      model: null,
+      response: {
+        provider: "mock",
+        diagnosis: "A saved thought.",
+        mechanism: "",
+        question: "What matters?",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      },
+    };
+    first.sections[0].workbench = {
+      ...emptyWorkbench(),
+      runs: [run],
+      activeRunId: run.id,
+    };
+    first.history.push({
+      id: "history-one",
+      createdAt: first.createdAt,
+      target: run.target,
+      instruction: "Keep my point.",
+      coachQuestion: "What matters?",
+      userAnswer: "",
+      proposal: "Another version.",
+      state: "saved",
+      provider: "mock",
+    });
+    first.parkedGroups.push({
+      id: "group-one",
+      name: "Unfinished",
+      collapsed: true,
+    });
+    const aside = newSection("Example", "Keep this side note.");
+    aside.placement = "parked";
+    aside.parkedGroupId = "group-one";
+    first.sections.push(aside);
+    first.brief.customNotes = "Human writing guidance stays here.";
+    first.sections[0].modelOverride = { providerId: "mock", modelId: "plain" };
+    const stored = await (
+      await request(`/api/documents/${first.id}`, "PUT", first)
+    ).json();
+    expect(
+      (await request("/api/documents/archive", "POST", { ids: [first.id] }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await (await request("/api/documents")).json()).map(
+        (item: any) => item.id,
+      ),
+    ).toEqual([second.id]);
+    expect(
+      (await (await request("/api/documents/archived")).json()).map(
+        (item: any) => item.id,
+      ),
+    ).toEqual([first.id]);
+    expect(
+      (await request(`/api/documents/${first.id}`, "PUT", stored)).status,
+    ).toBe(409);
+    await stop();
+    await start();
+    expect(
+      (await (await request("/api/documents/archived")).json())[0],
+    ).toEqual(stored);
+    expect(
+      (
+        await (
+          await request("/api/documents/restore", "POST", { ids: [first.id] })
+        ).json()
+      ).count,
+    ).toBe(1);
+    expect(
+      (
+        await (
+          await request("/api/documents/restore", "POST", { ids: [first.id] })
+        ).json()
+      ).count,
+    ).toBe(0);
+    expect(
+      (await (await request(`/api/documents/${first.id}`)).json()).sections[0]
+        .variants[0].label,
+    ).toBe("Earlier");
+    const restored = await (await request(`/api/documents/${first.id}`)).json();
+    expect(restored).toEqual(stored);
+    expect(restored.sources[0].text).toBe("A source survives.");
+    expect(restored.sections[0].workbench.runs[0].response.diagnosis).toBe(
+      "A saved thought.",
+    );
+    expect(restored.history[0].proposal).toBe("Another version.");
+    expect(restored.sections[1].parkedGroupId).toBe("group-one");
+    expect(restored.sections[0].modelOverride.modelId).toBe("plain");
+  });
+  it("bulk archive and permanent deletion leave unselected documents untouched", async () => {
+    const docs = await Promise.all(
+      ["A", "B", "C"].map(async (title) =>
+        (await request("/api/documents", "POST", { title })).json(),
+      ),
+    );
+    expect(
+      (
+        await request("/api/documents/archive", "POST", {
+          ids: [docs[0].id, "missing"],
+        })
+      ).status,
+    ).toBe(404);
+    expect(await (await request("/api/documents/archived")).json()).toEqual([]);
+    expect(
+      (
+        await (
+          await request("/api/documents/archive", "POST", {
+            ids: docs.slice(0, 2).map((doc) => doc.id),
+          })
+        ).json()
+      ).count,
+    ).toBe(2);
+    expect(
+      (await (await request("/api/documents")).json()).map(
+        (item: any) => item.id,
+      ),
+    ).toEqual([docs[2].id]);
+    expect(
+      (
+        await request("/api/documents/bulk", "DELETE", {
+          ids: docs.slice(0, 2).map((doc) => doc.id),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      await (await request("/api/documents/archived")).json(),
+    ).toHaveLength(2);
+    expect(
+      (
+        await (
+          await request("/api/documents/bulk", "DELETE", {
+            ids: docs.slice(0, 2).map((doc) => doc.id),
+            confirmation: "DELETE",
+          })
+        ).json()
+      ).count,
+    ).toBe(2);
+    expect(await (await request("/api/documents/archived")).json()).toEqual([]);
+    expect(
+      (await (await request("/api/documents")).json()).map(
+        (item: any) => item.id,
+      ),
+    ).toEqual([docs[2].id]);
+    await stop();
+    await start();
+    expect(
+      (await (await request("/api/documents")).json()).map(
+        (item: any) => item.id,
+      ),
+    ).toEqual([docs[2].id]);
   });
   it("duplicates imports safely without overwriting the original", async () => {
     const ai = await fixture();

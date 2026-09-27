@@ -35,6 +35,7 @@ export class Repository {
     this.db = new DatabaseSync(resolve(dataDir, "workbench.sqlite"));
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS archived_documents (document_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK (id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS library (id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS provider_catalog (id TEXT PRIMARY KEY, body TEXT NOT NULL);`);
@@ -42,7 +43,15 @@ export class Repository {
   list(): Document[] {
     return this.db
       .prepare(
-        "SELECT body FROM documents ORDER BY json_extract(body, '$.updatedAt') DESC, id",
+        "SELECT body FROM documents WHERE NOT EXISTS (SELECT 1 FROM archived_documents WHERE document_id=documents.id) ORDER BY json_extract(body, '$.updatedAt') DESC, id",
+      )
+      .all()
+      .map((row) => documentSchema.parse(JSON.parse(String(row.body))));
+  }
+  listArchived(): Document[] {
+    return this.db
+      .prepare(
+        "SELECT body FROM documents JOIN archived_documents ON archived_documents.document_id=documents.id ORDER BY archived_at DESC, documents.id",
       )
       .all()
       .map((row) => documentSchema.parse(JSON.parse(String(row.body))));
@@ -70,6 +79,12 @@ export class Repository {
       throw new APIError(400, "Document ID must match the route");
     // No awaits between read and atomic compare-and-swap; a second process is guarded by SQL too.
     const old = this.get(id);
+    if (
+      this.db
+        .prepare("SELECT 1 FROM archived_documents WHERE document_id=?")
+        .get(id)
+    )
+      throw new APIError(409, "Restore this document before editing it.");
     if (old.revision !== doc.revision)
       throw new APIError(409, "Document changed. Reload before saving.");
     const saved: Document = {
@@ -87,9 +102,66 @@ export class Repository {
       throw new APIError(409, "Document changed. Reload before saving.");
     return saved;
   }
+  archive(ids: string[]): number {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      let count = 0;
+      for (const id of new Set(ids)) {
+        this.get(id);
+        count += Number(
+          this.db
+            .prepare(
+              "INSERT OR IGNORE INTO archived_documents (document_id, archived_at) VALUES (?, ?)",
+            )
+            .run(id, new Date().toISOString()).changes,
+        );
+      }
+      this.db.exec("COMMIT");
+      return count;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  restore(ids: string[]): number {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      let count = 0;
+      for (const id of new Set(ids)) {
+        this.get(id);
+        count += Number(
+          this.db
+            .prepare("DELETE FROM archived_documents WHERE document_id=?")
+            .run(id).changes,
+        );
+      }
+      this.db.exec("COMMIT");
+      return count;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  deleteMany(ids: string[]): number {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const unique = [...new Set(ids)];
+      unique.forEach((id) => this.get(id));
+      for (const id of unique) {
+        this.db
+          .prepare("DELETE FROM archived_documents WHERE document_id=?")
+          .run(id);
+        this.db.prepare("DELETE FROM documents WHERE id=?").run(id);
+      }
+      this.db.exec("COMMIT");
+      return unique.length;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   delete(id: string): void {
-    const result = this.db.prepare("DELETE FROM documents WHERE id=?").run(id);
-    if (result.changes !== 1) throw new APIError(404, "Document not found");
+    this.deleteMany([id]);
   }
   import(input: Document): Document {
     const doc = documentSchema.parse(input);

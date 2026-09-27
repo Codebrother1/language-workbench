@@ -29,6 +29,9 @@ const createSchema = z.object({
   title: z.string().trim().min(1).max(240).optional(),
   text: z.string().max(500_000).optional(),
 });
+const documentIdsSchema = z
+  .object({ ids: z.array(z.string().min(1)).min(1).max(500) })
+  .strict();
 const loopback = new Set(["localhost", "127.0.0.1", "[::1]"]);
 function validHost(host: string | undefined): boolean {
   if (!host || !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(host))
@@ -126,6 +129,28 @@ export function createApp({
     }),
   );
   app.get("/api/documents", (_req, res) => res.json(repository.list()));
+  app.get("/api/documents/archived", (_req, res) =>
+    res.json(repository.listArchived()),
+  );
+  app.post("/api/documents/archive", (req, res) => {
+    const { ids } = documentIdsSchema.parse(req.body);
+    res.json({ count: repository.archive(ids) });
+  });
+  app.post("/api/documents/restore", (req, res) => {
+    const { ids } = documentIdsSchema.parse(req.body);
+    res.json({ count: repository.restore(ids) });
+  });
+  app.delete("/api/documents/bulk", (req, res) => {
+    const { ids, confirmation } = documentIdsSchema
+      .extend({ confirmation: z.literal("DELETE").optional() })
+      .parse(req.body);
+    if (new Set(ids).size > 1 && confirmation !== "DELETE")
+      throw new APIError(
+        400,
+        "Type DELETE to confirm bulk permanent deletion.",
+      );
+    res.json({ count: repository.deleteMany(ids) });
+  });
   app.post("/api/documents", (req, res) => {
     const input = createSchema.parse(req.body);
     res.status(201).json(repository.create(input.title, input.text));

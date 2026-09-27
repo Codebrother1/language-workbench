@@ -401,6 +401,29 @@ hr {
   font-size: 12px;
   font-weight: 700;
 }
+.manage-documents > ul {
+  list-style: none;
+  padding: 0;
+}
+.managed-document {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.managed-document > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.managed-document small {
+  display: block;
+  color: var(--muted);
+}
+.managed-document .row {
+  margin: 6px 0 0 24px;
+}
+.managed-actions {
+  margin: 12px 0;
+}
 .delete-confirm {
   margin: 10px 0;
   padding: 12px;

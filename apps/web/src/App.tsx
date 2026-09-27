@@ -1335,7 +1335,7 @@ export default function App() {
   } | null>(null);
   const [editorCard, setEditorCard] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{
-    kind: "document" | "section";
+    kind: "document" | "section" | "archive";
     id?: string;
   } | null>(null);
   const [menu, setMenu] = useState(false);
@@ -1954,6 +1954,24 @@ export default function App() {
                   <Files size={15} />
                   Duplicate
                 </Button>
+                <Button
+                  disabled={!w.ready}
+                  onClick={() => {
+                    setConfirmation({ kind: "archive" });
+                    setMenu(false);
+                  }}
+                >
+                  Archive document
+                </Button>
+                <Button
+                  disabled={!w.ready}
+                  onClick={() => {
+                    w.setPanel("documents");
+                    setMenu(false);
+                  }}
+                >
+                  Manage documents
+                </Button>
                 <hr />
                 <Button
                   onClick={() => {
@@ -2376,9 +2394,11 @@ export default function App() {
           title={
             confirmation.kind === "document"
               ? `Delete “${w.doc.title.trim() || "Untitled"}”?`
-              : removing?.placement === "parked"
-                ? `Remove parked thought${removing && customSectionLabel(removing) ? ` “${customSectionLabel(removing)}”` : ""}?`
-                : "Remove section?"
+              : confirmation.kind === "archive"
+                ? `Archive “${w.doc.title.trim() || "Untitled"}”?`
+                : removing?.placement === "parked"
+                  ? `Remove parked thought${removing && customSectionLabel(removing) ? ` “${customSectionLabel(removing)}”` : ""}?`
+                  : "Remove section?"
           }
           close={() => setConfirmation(null)}
           initialFocus="[data-safe-cancel]"
@@ -2386,7 +2406,9 @@ export default function App() {
           <p>
             {confirmation.kind === "document"
               ? `This permanently deletes this document, its references, saved takes and history. Export JSON first if you want a backup.${w.documents.length === 1 ? " A new blank document will be created." : ""}`
-              : `This removes the ${removing?.placement === "parked" ? "parked thought" : "section"} and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session.${w.doc.sections.length === 1 ? " Removing the last section leaves an empty Freeform writing surface." : ""}`}
+              : confirmation.kind === "archive"
+                ? "Archive removes this document from the writing switcher. All writing, takes, sources and history stay intact; restore it in Manage documents. A new blank document opens if this is the last active one."
+                : `This removes the ${removing?.placement === "parked" ? "parked thought" : "section"} and its local workbench. The rest of your writing is untouched. Undo restores it during this editing session.${w.doc.sections.length === 1 ? " Removing the last section leaves an empty Freeform writing surface." : ""}`}
           </p>
           <div className="row end">
             <Button
@@ -2396,18 +2418,24 @@ export default function App() {
               Keep writing
             </Button>
             <Button
-              className="danger solid"
+              className={
+                confirmation.kind === "archive" ? "primary" : "danger solid"
+              }
               onClick={() => {
                 if (confirmation.kind === "document") void w.remove();
+                else if (confirmation.kind === "archive")
+                  void w.archiveDocuments([w.doc.id]);
                 else if (confirmation.id) w.deleteSection(confirmation.id);
                 setConfirmation(null);
               }}
             >
               {confirmation.kind === "document"
                 ? "Delete document"
-                : removing?.placement === "parked"
-                  ? "Delete parked thought"
-                  : "Delete section"}
+                : confirmation.kind === "archive"
+                  ? "Archive document"
+                  : removing?.placement === "parked"
+                    ? "Delete parked thought"
+                    : "Delete section"}
             </Button>
           </div>
         </Dialog>

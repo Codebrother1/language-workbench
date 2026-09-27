@@ -1,19 +1,29 @@
 import type { LibraryNavigation } from "./wayfinding";
 import { PersonalLibrary, ScopedStyleGuides } from "./PersonalLibrary";
 import { ProviderSettings } from "./ProviderSettings";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2, ExternalLink, Copy, RefreshCw } from "lucide-react";
 import {
   contentTypeConfig,
   contentTypes,
   uid,
+  documentText,
+  type Document,
   type Settings,
   type WritingBrief,
   type SourceMaterial,
 } from "./domain";
-import type { Workspace } from "./useWorkspace";
-import { Dialog, Button, ConfirmDelete, Field, Select, safeURL } from "./ui";
-import { sectionMentions } from "./workspace-helpers";
+import { api, type Workspace } from "./useWorkspace";
+import {
+  Dialog,
+  Button,
+  ConfirmDelete,
+  Field,
+  Select,
+  safeURL,
+  download,
+} from "./ui";
+import { sectionMentions, documentBackup } from "./workspace-helpers";
 const words = (value: string) =>
   value
     .split(",")
@@ -518,6 +528,346 @@ function History({ w }: { w: Workspace }) {
     </>
   );
 }
+function ManageDocuments({ w }: { w: Workspace }) {
+  const [archived, setArchived] = useState<Document[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [pending, setPending] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    action: "archive" | "delete";
+    ids: string[];
+  } | null>(null);
+  const [typed, setTyped] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    void api<Document[]>("/documents/archived")
+      .then((docs) => {
+        if (alive) setArchived(docs);
+      })
+      .catch((cause) => {
+        if (alive) setError((cause as Error).message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const all = [
+    ...w.documents.map((doc) => (doc.id === w.doc.id ? w.doc : doc)),
+    ...archived,
+  ];
+  const visibleActive = w.documents.filter((doc) =>
+    doc.title.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const visibleArchived = archived.filter((doc) =>
+    doc.title.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const visible = [...visibleActive, ...visibleArchived];
+  const activeIds = selected.filter((id) =>
+    w.documents.some((doc) => doc.id === id),
+  );
+  const archivedIds = selected.filter((id) =>
+    archived.some((doc) => doc.id === id),
+  );
+  const toggle = (id: string) =>
+    setSelected((ids) =>
+      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id],
+    );
+  const refresh = async () =>
+    setArchived(await api<Document[]>("/documents/archived"));
+  const act = async (
+    action: "archive" | "restore" | "delete",
+    ids: string[],
+  ) => {
+    if (pending || !ids.length) return;
+    setPending(true);
+    setError("");
+    try {
+      const okay =
+        action === "archive"
+          ? await w.archiveDocuments(ids)
+          : action === "restore"
+            ? await w.restoreDocuments(ids)
+            : await w.deleteManagedDocuments(ids);
+      if (okay) {
+        await refresh();
+        setSelected([]);
+        setConfirmation(null);
+        setTyped("");
+      } else
+        setError("Finish the current operation before changing documents.");
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setPending(false);
+    }
+  };
+  const exportDocs = async (ids: string[]) => {
+    if (!ids.length || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      await w.flush();
+      const docs = await Promise.all(
+        ids.map((id) => api<Document>(`/documents/${encodeURIComponent(id)}`)),
+      );
+      download(
+        "language-workbench-documents.json",
+        JSON.stringify(
+          documentBackup(
+            docs,
+            archived.map((doc) => doc.id),
+          ),
+          null,
+          2,
+        ),
+        "application/json",
+      );
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setPending(false);
+    }
+  };
+  const exportOne = async (doc: Document) => {
+    if (pending) return;
+    setPending(true);
+    setError("");
+    try {
+      await w.flush();
+      const latest = await api<Document>(
+        `/documents/${encodeURIComponent(doc.id)}`,
+      );
+      download(
+        `${latest.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "Untitled"}.json`,
+        JSON.stringify(latest, null, 2),
+        "application/json",
+      );
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setPending(false);
+    }
+  };
+  const rows = (docs: Document[], placement: "Active" | "Archived") =>
+    docs.map((doc) => (
+      <li key={doc.id} className="managed-document">
+        <label>
+          <input
+            type="checkbox"
+            aria-label={`Select ${placement.toLowerCase()} document ${doc.title.trim() || "Untitled"} ${doc.id.slice(0, 8)}`}
+            checked={selected.includes(doc.id)}
+            onChange={() => toggle(doc.id)}
+          />
+          <span>
+            <b>{doc.title.trim() || "Untitled"}</b>
+            <small>
+              {documentText(doc).trim().split(/\s+/).filter(Boolean).length}{" "}
+              words · Edited {new Date(doc.updatedAt).toLocaleDateString()} ·{" "}
+              {doc.id.slice(0, 8)}
+            </small>
+          </span>
+        </label>
+        <div className="row wrap">
+          {placement === "Active" ? (
+            <Button
+              disabled={pending}
+              onClick={() =>
+                setConfirmation({ action: "archive", ids: [doc.id] })
+              }
+            >
+              Archive
+            </Button>
+          ) : (
+            <Button
+              disabled={pending}
+              onClick={() => void act("restore", [doc.id])}
+            >
+              Restore
+            </Button>
+          )}
+          <Button disabled={pending} onClick={() => void exportOne(doc)}>
+            Export JSON
+          </Button>
+          {placement === "Archived" && (
+            <Button
+              className="danger"
+              disabled={pending}
+              onClick={() =>
+                setConfirmation({ action: "delete", ids: [doc.id] })
+              }
+            >
+              Delete permanently
+            </Button>
+          )}
+        </div>
+      </li>
+    ));
+  const titles =
+    confirmation?.ids.map(
+      (id) => all.find((doc) => doc.id === id)?.title.trim() || "Untitled",
+    ) ?? [];
+  return (
+    <div className="manage-documents">
+      <p className="panel-intro">
+        Archive removes documents from the writing switcher without deleting
+        their content. Backups here contain documents only, not Personal
+        Library, Style DNA or provider credentials. Multi-document backup import
+        is not available yet; individual Export JSON remains importable.
+      </p>
+      <Field label="Search document titles">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Find a document"
+        />
+      </Field>
+      <div className="row wrap">
+        <Button
+          onClick={() =>
+            setSelected((ids) => [
+              ...new Set([...ids, ...visible.map((doc) => doc.id)]),
+            ])
+          }
+        >
+          Select all visible
+        </Button>
+        <Button onClick={() => setSelected([])}>Clear selection</Button>
+        <b aria-live="polite">{selected.length} selected</b>
+      </div>
+      <div className="row wrap managed-actions">
+        <Button
+          disabled={!activeIds.length || pending}
+          onClick={() => setConfirmation({ action: "archive", ids: activeIds })}
+        >
+          Archive selected
+        </Button>
+        <Button
+          disabled={!archivedIds.length || pending}
+          onClick={() => void act("restore", archivedIds)}
+        >
+          Restore selected
+        </Button>
+        <Button
+          disabled={!selected.length || pending}
+          onClick={() => void exportDocs(selected)}
+        >
+          Export selected
+        </Button>
+        <Button
+          disabled={!all.length || pending}
+          onClick={() => void exportDocs(all.map((doc) => doc.id))}
+        >
+          Export all
+        </Button>
+        <Button
+          className="danger"
+          disabled={!selected.length || pending}
+          onClick={() => setConfirmation({ action: "delete", ids: selected })}
+        >
+          Delete selected permanently
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className="guidance">
+          {error}
+        </p>
+      )}
+      <h3>Active · {w.documents.length}</h3>
+      {visibleActive.length ? (
+        <ul>{rows(visibleActive, "Active")}</ul>
+      ) : (
+        <p className="muted small">No active documents match.</p>
+      )}
+      <h3>Archived · {archived.length}</h3>
+      {visibleArchived.length ? (
+        <ul>{rows(visibleArchived, "Archived")}</ul>
+      ) : (
+        <p className="muted small">
+          {archived.length
+            ? "No archived documents match."
+            : "No archived documents yet."}
+        </p>
+      )}
+      {confirmation && (
+        <div
+          role="alertdialog"
+          aria-label={
+            confirmation.action === "archive"
+              ? "Confirm archive"
+              : "Confirm permanent delete"
+          }
+          className="delete-confirm managed-confirm"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setConfirmation(null);
+              setTyped("");
+            }
+          }}
+        >
+          <b>
+            {confirmation.action === "archive"
+              ? confirmation.ids.length === 1
+                ? `Archive “${titles[0]}”?`
+                : `Archive ${confirmation.ids.length} documents?`
+              : confirmation.ids.length === 1
+                ? `Permanently delete “${titles[0]}”?`
+                : `Permanently delete ${confirmation.ids.length} documents?`}
+          </b>
+          <p>
+            {confirmation.action === "archive"
+              ? "All sections, takes, sources and history are kept. Restore from Archived whenever you need them."
+              : "This permanently deletes the documents and all their saved takes, history and references. Export selected or Export all before deleting if you need a backup."}
+          </p>
+          {confirmation.ids.length > 1 && (
+            <p>
+              {titles.slice(0, 5).join(" · ")}
+              {titles.length > 5 ? ` · and ${titles.length - 5} more` : ""}
+            </p>
+          )}
+          {confirmation.action === "delete" && confirmation.ids.length > 1 && (
+            <Field label="Type DELETE to confirm">
+              <input
+                value={typed}
+                onChange={(event) => setTyped(event.target.value)}
+              />
+            </Field>
+          )}
+          <div className="row wrap">
+            <Button
+              autoFocus
+              onClick={() => {
+                setConfirmation(null);
+                setTyped("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className={
+                confirmation.action === "delete" ? "danger solid" : "primary"
+              }
+              disabled={
+                pending ||
+                (confirmation.action === "delete" &&
+                  confirmation.ids.length > 1 &&
+                  typed !== "DELETE")
+              }
+              onClick={() => void act(confirmation.action, confirmation.ids)}
+            >
+              {confirmation.action === "archive"
+                ? "Archive documents"
+                : "Delete permanently"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function UtilityPanel({
   w,
   libraryNavigation,
@@ -547,6 +897,7 @@ export function UtilityPanel({
     radar: "Language radar",
     history: "Operation history",
     providers: "AI providers & routing",
+    documents: "Manage documents",
     library: "Personal Writing Library",
     guides: "Scoped Style Guides",
   }[w.panel];
@@ -563,6 +914,8 @@ export function UtilityPanel({
         <ScopedStyleGuides w={w} />
       ) : w.panel === "providers" ? (
         <ProviderSettings w={w} />
+      ) : w.panel === "documents" ? (
+        <ManageDocuments w={w} />
       ) : w.panel === "brief" ? (
         <Brief w={w} />
       ) : w.panel === "sources" ? (

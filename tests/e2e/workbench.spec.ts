@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   test,
   expect,
@@ -16,7 +17,10 @@ async function seed(
   request: APIRequestContext,
   text = "First sentence stays. I really utilize tools in order to help. Last sentence stays.",
 ) {
-  const existing = await (await request.get("/api/documents")).json();
+  const existing = [
+    ...(await (await request.get("/api/documents")).json()),
+    ...(await (await request.get("/api/documents/archived")).json()),
+  ];
   for (const d of existing)
     await request.delete("/api/documents/" + d.id, {
       headers: { "Content-Type": "application/json" },
@@ -833,6 +837,322 @@ test("last selected document survives A to B to A, reload and a fresh app view",
   expect([a.id, b.id]).toContain(fallback);
   await page.reload();
   await expect(picker).toHaveValue(fallback);
+});
+
+test("archiving an active document preserves its work and restores it without changing the current draft", async ({
+  page,
+  request,
+}) => {
+  const first = await seed(request);
+  const second = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Still writing", "An active draft.") },
+    })
+  ).json();
+  await open(page);
+  const picker = page.getByLabel("Switch document");
+  await picker.selectOption(first.id);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Early closer");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await save(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  const confirm = page.getByRole("dialog", { name: /Archive/ });
+  await expect(confirm).toContainText(first.title);
+  await expect(
+    confirm.getByRole("button", { name: "Keep writing" }),
+  ).toBeFocused();
+  await confirm.getByRole("button", { name: "Archive document" }).click();
+  await expect(picker).toHaveValue(second.id);
+  await expect(picker.locator(`option[value="${first.id}"]`)).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText(
+    `Archived “${first.title}”`,
+  );
+  await page.reload();
+  await expect(picker).toHaveValue(second.id);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await expect(
+    manage.getByRole("heading", { name: "Active · 1" }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 1" }),
+  ).toBeVisible();
+  const row = manage
+    .locator(".managed-document")
+    .filter({ hasText: first.title });
+  await row.getByRole("button", { name: "Restore" }).click();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 0" }),
+  ).toBeVisible();
+  await manage.getByRole("button", { name: "Close dialog" }).click();
+  await expect(picker).toHaveValue(second.id);
+  await picker.selectOption(first.id);
+  const restored = await (
+    await request.get(`/api/documents/${first.id}`)
+  ).json();
+  expect(restored.sections[2].variants[0]).toMatchObject({
+    label: "Early closer",
+    origin: "human",
+  });
+  expect(restored.sources[0].text).toBe(first.sources[0].text);
+});
+
+test("archiving the last active document makes a blank replacement without reopening the archive", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  await page
+    .getByRole("dialog", { name: /Archive/ })
+    .getByRole("button", { name: "Archive document" })
+    .click();
+  const picker = page.getByLabel("Switch document");
+  await expect(picker).not.toHaveValue(doc.id);
+  await expect(page.getByLabel("Document title")).toHaveValue("Untitled");
+  await page.reload();
+  await expect(picker).not.toHaveValue(doc.id);
+  await expect(picker.locator("option")).toHaveCount(1);
+  expect(
+    (await (await request.get("/api/documents/archived")).json())[0].id,
+  ).toBe(doc.id);
+});
+
+test("archived document permanent removal has a named safe confirmation", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  await page
+    .getByRole("dialog", { name: /Archive/ })
+    .getByRole("button", { name: "Archive document" })
+    .click();
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage
+    .locator(".managed-document")
+    .filter({ hasText: doc.title })
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  const confirmation = manage.getByRole("alertdialog", {
+    name: "Confirm permanent delete",
+  });
+  await expect(confirmation).toContainText(doc.title);
+  await expect(confirmation).toContainText(
+    "saved takes, history and references",
+  );
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await confirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 1" }),
+  ).toBeVisible();
+  await manage
+    .locator(".managed-document")
+    .filter({ hasText: doc.title })
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  await confirmation
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 0" }),
+  ).toBeVisible();
+  expect((await request.get(`/api/documents/${doc.id}`)).status()).toBe(404);
+});
+
+test("bulk archive of every active document creates a blank survivor and bulk restore keeps it selected", async ({
+  page,
+  request,
+}) => {
+  const a = await seed(request);
+  const b = await (
+    await request.post("/api/import", {
+      data: {
+        document: newDocument("Another active piece", "One more draft."),
+      },
+    })
+  ).json();
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await expect(manage.getByText("2 selected")).toBeVisible();
+  await manage.getByRole("button", { name: "Archive selected" }).click();
+  await manage
+    .getByRole("alertdialog", { name: "Confirm archive" })
+    .getByRole("button", { name: "Archive documents" })
+    .click();
+  await expect(
+    manage.getByRole("heading", { name: "Active · 1" }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 2" }),
+  ).toBeVisible();
+  const blankId = await page.getByLabel("Switch document").inputValue();
+  expect(blankId).not.toBe(a.id);
+  expect(blankId).not.toBe(b.id);
+  await page.reload();
+  await expect(page.getByLabel("Switch document")).toHaveValue(blankId);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const reopened = page.getByRole("dialog", { name: "Manage documents" });
+  await reopened.getByRole("button", { name: "Select all visible" }).click();
+  await reopened.getByRole("button", { name: "Restore selected" }).click();
+  await expect(
+    reopened.getByRole("heading", { name: "Active · 3" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Switch document")).toHaveValue(blankId);
+});
+
+test("bulk permanent removal of the last active document opens a fresh blank draft", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage
+    .getByRole("button", { name: "Delete selected permanently" })
+    .click();
+  const confirmation = manage.getByRole("alertdialog", {
+    name: "Confirm permanent delete",
+  });
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await confirmation
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  await expect(
+    manage.getByRole("heading", { name: "Active · 1" }),
+  ).toBeVisible();
+  await manage.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByLabel("Document title")).toHaveValue("Untitled");
+  await expect(page.getByTestId("writing-editor")).toHaveText("");
+  await page.reload();
+  await expect(page.getByLabel("Switch document")).not.toHaveValue(doc.id);
+});
+
+test("Manage documents selects by ID, exports one backup and requires DELETE for bulk permanent removal", async ({
+  page,
+  request,
+}) => {
+  const first = await seed(request);
+  const second = await (
+    await request.post("/api/import", {
+      data: {
+        document: newDocument(first.title, "Another copy of the title."),
+      },
+    })
+  ).json();
+  const remaining = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Keep me", "Writing that remains.") },
+    })
+  ).json();
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await expect(
+    manage.getByRole("heading", { name: "Active · 3" }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 0" }),
+  ).toBeVisible();
+  await manage.getByLabel("Search document titles").fill(first.title);
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await expect(manage.getByText("2 selected")).toBeVisible();
+  const selectedDownload = page.waitForEvent("download");
+  await manage.getByRole("button", { name: "Export selected" }).click();
+  const selectedBackup = JSON.parse(
+    readFileSync(await (await selectedDownload).path()!, "utf8"),
+  );
+  expect(selectedBackup).toMatchObject({
+    format: "language-workbench-document-backup",
+    version: 1,
+  });
+  expect(new Set(selectedBackup.documents.map((doc: any) => doc.id))).toEqual(
+    new Set([first.id, second.id]),
+  );
+  expect(JSON.stringify(selectedBackup)).not.toMatch(
+    /OPENAI_API_KEY|apiKey|credentialSuffix/,
+  );
+  const allDownload = page.waitForEvent("download");
+  await manage.getByRole("button", { name: "Export all" }).click();
+  const allBackup = JSON.parse(
+    readFileSync(await (await allDownload).path()!, "utf8"),
+  );
+  expect(new Set(allBackup.documents.map((doc: any) => doc.id))).toEqual(
+    new Set([first.id, second.id, remaining.id]),
+  );
+  await manage.getByRole("button", { name: "Archive selected" }).click();
+  const archive = manage.getByRole("alertdialog", { name: "Confirm archive" });
+  await expect(archive).toContainText("Archive 2 documents?");
+  await archive.getByRole("button", { name: "Archive documents" }).click();
+  await expect(
+    manage.getByRole("heading", { name: "Active · 1" }),
+  ).toBeVisible();
+  await expect(
+    manage.getByRole("heading", { name: "Archived · 2" }),
+  ).toBeVisible();
+  const archivedDownload = page.waitForEvent("download");
+  await manage.getByRole("button", { name: "Export all" }).click();
+  const archivedBackup = JSON.parse(
+    readFileSync(await (await archivedDownload).path()!, "utf8"),
+  );
+  expect(new Set(archivedBackup.archivedIds)).toEqual(
+    new Set([first.id, second.id]),
+  );
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await expect(manage.getByText("2 selected")).toBeVisible();
+  await manage.getByRole("button", { name: "Restore selected" }).click();
+  await expect(
+    manage.getByRole("heading", { name: "Active · 3" }),
+  ).toBeVisible();
+  await manage.getByRole("button", { name: "Select all visible" }).click();
+  await manage
+    .getByRole("button", { name: "Delete selected permanently" })
+    .click();
+  const deletion = manage.getByRole("alertdialog", {
+    name: "Confirm permanent delete",
+  });
+  await expect(deletion).toContainText("permanently deletes");
+  await expect(deletion.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await expect(
+    deletion.getByRole("button", { name: "Delete permanently" }),
+  ).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(deletion).toHaveCount(0);
+  await manage
+    .getByRole("button", { name: "Delete selected permanently" })
+    .click();
+  await deletion.getByLabel("Type DELETE to confirm").fill("DELETE");
+  await deletion.getByRole("button", { name: "Delete permanently" }).click();
+  await expect(
+    manage.getByRole("heading", { name: "Active · 1" }),
+  ).toBeVisible();
+  expect(
+    (await (await request.get("/api/documents")).json()).map(
+      (doc: any) => doc.id,
+    ),
+  ).toEqual([remaining.id]);
 });
 
 test("document deletion names the document, starts on Cancel, and explains blank replacement", async ({

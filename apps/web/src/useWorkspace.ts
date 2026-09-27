@@ -143,6 +143,7 @@ export type Panel =
   | "radar"
   | "history"
   | "providers"
+  | "documents"
   | "library"
   | "guides"
   | null;
@@ -1041,6 +1042,102 @@ export function useWorkspace() {
       setNotice(`Deleted “${deletedTitle}”.`);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      navigating.current = false;
+      setDocumentSwitching(false);
+    }
+  };
+  const refreshAfterLifecycleChange = async () => {
+    const active = await api<Document[]>("/documents");
+    const surviving = active.find((doc) => doc.id === current.current.id);
+    const next =
+      surviving ?? active[0] ?? (await api<Document>("/documents", "POST", {}));
+    setDocuments(active.length ? active : [next]);
+    if (!surviving) {
+      try {
+        await rememberSelectedDocument(next.id);
+      } catch {
+        setError(
+          "Another document opened, but its selection could not be saved.",
+        );
+      }
+      load(next);
+    }
+  };
+  const archiveDocuments = async (ids: string[]) => {
+    if (requestBusy.current || navigating.current) {
+      setError("Finish the current operation before archiving documents.");
+      return false;
+    }
+    if (!ids.length) return false;
+    navigating.current = true;
+    setDocumentSwitching(true);
+    try {
+      await flush();
+      const { count } = await api<{ count: number }>(
+        "/documents/archive",
+        "POST",
+        { ids },
+      );
+      await refreshAfterLifecycleChange();
+      setNotice(
+        count === 1
+          ? `Archived “${documents.find((doc) => doc.id === ids[0])?.title ?? "Untitled"}”.`
+          : `Archived ${count} documents.`,
+      );
+      return true;
+    } catch (error) {
+      setError("Archive failed: " + (error as Error).message);
+      return false;
+    } finally {
+      navigating.current = false;
+      setDocumentSwitching(false);
+    }
+  };
+  const restoreDocuments = async (ids: string[]) => {
+    if (requestBusy.current || navigating.current) {
+      setError("Finish the current operation before restoring documents.");
+      return false;
+    }
+    if (!ids.length) return false;
+    navigating.current = true;
+    try {
+      const { count } = await api<{ count: number }>(
+        "/documents/restore",
+        "POST",
+        { ids },
+      );
+      await refreshAfterLifecycleChange();
+      setNotice(`Restored ${count} ${count === 1 ? "document" : "documents"}.`);
+      return true;
+    } catch (error) {
+      setError("Restore failed: " + (error as Error).message);
+      return false;
+    } finally {
+      navigating.current = false;
+    }
+  };
+  const deleteManagedDocuments = async (ids: string[]) => {
+    if (requestBusy.current || navigating.current) {
+      setError("Finish the current operation before deleting documents.");
+      return false;
+    }
+    if (!ids.length) return false;
+    navigating.current = true;
+    setDocumentSwitching(true);
+    try {
+      await flush();
+      const { count } = await api<{ count: number }>(
+        "/documents/bulk",
+        "DELETE",
+        { ids, ...(new Set(ids).size > 1 ? { confirmation: "DELETE" } : {}) },
+      );
+      await refreshAfterLifecycleChange();
+      setNotice(`Deleted ${count} ${count === 1 ? "document" : "documents"}.`);
+      return true;
+    } catch (error) {
+      setError("Delete failed: " + (error as Error).message);
+      return false;
     } finally {
       navigating.current = false;
       setDocumentSwitching(false);
@@ -2757,6 +2854,9 @@ export function useWorkspace() {
     navigate,
     create,
     remove,
+    archiveDocuments,
+    restoreDocuments,
+    deleteManagedDocuments,
     importDoc,
     focusSection,
     noteRevisionContext,
