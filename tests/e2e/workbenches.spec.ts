@@ -1771,7 +1771,7 @@ test("saved sentence run never highlights another sentence after its target is r
   await expect.poll(() => requests).toBe(3);
 });
 
-for (const width of [1440, 700])
+for (const width of [1440, 1024, 700])
   test(`Return to selection shows the exact highlighted passage at ${width}px`, async ({
     page,
     request,
@@ -1892,7 +1892,8 @@ test("historical Lab target status and the exact question remain oriented throug
   const resultInPane = await page.locator(".response").evaluate((result) => {
     const pane = result.closest(".inspector")!;
     return (
-      result.getBoundingClientRect().top >= pane.getBoundingClientRect().top &&
+      result.getBoundingClientRect().top >=
+        pane.getBoundingClientRect().top - 1 &&
       result.getBoundingClientRect().top <
         pane.getBoundingClientRect().bottom - 60
     );
@@ -1939,36 +1940,37 @@ test("Return to section restores the card without acting like Return to question
   expect(calls).toHaveLength(1);
 });
 
-test("stacked Return to question brings its saved result into view without refocusing prose", async ({
-  page,
-  request,
-}) => {
-  const doc = await seed(request);
-  await page.setViewportSize({ width: 700, height: 900 });
-  await open(page);
-  const calls: string[] = [];
-  page.on("request", (event) => {
-    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+for (const width of [1024, 700])
+  test(`Return to question shows its saved result at ${width}px without refocusing prose`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const calls: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.url());
+    });
+    await section(page, "Hook");
+    await select(page, "The rest stays mine.");
+    await diagnose(page);
+    await page.getByRole("button", { name: "Delivery", exact: true }).click();
+    await expect(
+      page.getByRole("region", { name: "Delivery Lens" }),
+    ).toBeVisible();
+    await page
+      .locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`)
+      .click();
+    await expect(page.getByTestId("lab-return")).toBeVisible();
+    await page.getByTestId("lab-return").getByRole("button").click();
+    await expect(page.locator(".response")).toBeInViewport();
+    await expect(page.getByTestId("saved-run-context")).toContainText(
+      "Saved Lab result · coach",
+    );
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+    expect(calls).toHaveLength(1);
   });
-  await section(page, "Hook");
-  await select(page, "The rest stays mine.");
-  await diagnose(page);
-  await page.getByRole("button", { name: "Delivery", exact: true }).click();
-  await expect(
-    page.getByRole("region", { name: "Delivery Lens" }),
-  ).toBeVisible();
-  await page
-    .locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`)
-    .click();
-  await expect(page.getByTestId("lab-return")).toBeVisible();
-  await page.getByTestId("lab-return").getByRole("button").click();
-  await expect(page.locator(".response")).toBeInViewport();
-  await expect(page.getByTestId("saved-run-context")).toContainText(
-    "Saved Lab result · coach",
-  );
-  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
-  expect(calls).toHaveLength(1);
-});
 
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({
   page,

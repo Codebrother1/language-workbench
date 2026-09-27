@@ -220,6 +220,9 @@ test("a newcomer can write, make a Hook, add a Point and discover the rest witho
     "I liked the tool but the bill surprised me and I noticed it too late.",
   );
   const original = await page.getByTestId("writing-editor").innerText();
+  await expect(
+    page.getByRole("navigation", { name: "Possible next steps" }),
+  ).toContainText("Make this a hook");
   await page
     .getByRole("button", { name: "Make this a hook", exact: true })
     .click();

@@ -135,6 +135,83 @@ test("selected seventh section restores by identity across reload and deleted se
   ).toBe(selected);
 });
 
+test("reload and document switching orient Workbench and Preview to their selected section", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const id = doc.sections[8].id;
+  const other = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Other draft", "The other document.") },
+    })
+  ).json();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByLabel("Switch document").selectOption(doc.id);
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await save(page);
+  const workbench = page.locator(".dock-workbench .structure");
+  const preview = page.locator(".dock-preview .writing");
+  const card = page.locator(`[data-section-id="${id}"]`);
+  const passage = page
+    .locator(
+      `[data-preview-section-id="${id}"], .dock-preview .writing-editor > section[id="${id}"]`,
+    )
+    .first();
+  await workbench.evaluate((pane) => {
+    pane.scrollTop = 0;
+  });
+  await preview.evaluate((pane) => {
+    pane.scrollTop = 0;
+  });
+  await page.reload();
+  await expect(page.getByLabel("Switch document")).toHaveValue(doc.id);
+  await expect(card).toHaveClass(/active/);
+  await expect
+    .poll(() =>
+      card.evaluate((node, selector) => {
+        const pane = document.querySelector(selector)!;
+        const a = node.getBoundingClientRect(),
+          b = pane.getBoundingClientRect();
+        return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+      }, ".dock-workbench .structure"),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      passage.evaluate((node, selector) => {
+        const pane = document.querySelector(selector)!;
+        const a = node.getBoundingClientRect(),
+          b = pane.getBoundingClientRect();
+        return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+      }, ".dock-preview .writing"),
+    )
+    .toBe(true);
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await page.getByLabel("Switch document").selectOption(other.id);
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveCount(0);
+  await page.getByLabel("Switch document").selectOption(doc.id);
+  await expect
+    .poll(() =>
+      card.evaluate((node, selector) => {
+        const a = node.getBoundingClientRect(),
+          b = document.querySelector(selector)!.getBoundingClientRect();
+        return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+      }, ".dock-workbench .structure"),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      passage.evaluate((node, selector) => {
+        const a = node.getBoundingClientRect(),
+          b = document.querySelector(selector)!.getBoundingClientRect();
+        return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+      }, ".dock-preview .writing"),
+    )
+    .toBe(true);
+});
+
 test("stacked Saved takes returns to the originating card without losing its place", async ({
   page,
   request,
@@ -370,7 +447,11 @@ test("Focus Preview restore brings the selected seventh section back to a readab
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  const workbench = page.locator(".dock-workbench .structure");
   const preview = page.locator(".dock-preview .writing");
+  await workbench.evaluate((pane) => {
+    pane.scrollTop = 0;
+  });
   await preview.evaluate((pane) => {
     pane.scrollTop = 0;
   });
@@ -390,7 +471,18 @@ test("Focus Preview restore brings the selected seventh section back to a readab
       }),
     )
     .toBe(true);
-  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+  const card = page.locator(`[data-section-id="${id}"]`);
+  await expect(card).toHaveClass(/active/);
+  await expect
+    .poll(() =>
+      card.evaluate((node) => {
+        const a = node.getBoundingClientRect(),
+          b = node.closest(".structure")!.getBoundingClientRect();
+        return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+      }),
+    )
+    .toBe(true);
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
 });
 
 test("narrow Focus Preview restore keeps the selected section readable", async ({

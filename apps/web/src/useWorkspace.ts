@@ -732,8 +732,7 @@ export function useWorkspace() {
           );
         }
         restoreSavedRunTarget(active);
-        if (document.activeElement === document.body || editor.view.hasFocus())
-          editor.view.focus();
+        if (editor.view.hasFocus()) editor.view.focus();
         isReady.current = true;
         setReady(true);
         setSaveState("Saved");

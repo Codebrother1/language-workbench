@@ -141,7 +141,8 @@ export function alignedTextDifference(
   push(previous, prefix, false);
   push(current, prefix, false);
   if (
-    oldTokens.length * newTokens.length > 40_000 ||
+    oldTokens.length * newTokens.length > 200_000 ||
+    Math.max(oldTokens.length, newTokens.length) > 750 ||
     Math.max(oldTokens.length, newTokens.length) < 8
   ) {
     push(previous, removed, true);

@@ -453,6 +453,44 @@ test("take comparison emphasizes a changed word without rewriting the draft", as
   );
 });
 
+test("Saved takes identifies its owning section even with duplicate labels at narrow width", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.sections[0].label = "The other thread";
+  doc.sections[2].label = "The other thread";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await page.setViewportSize({ width: 700, height: 900 });
+  await open(page);
+  const owner = page.locator(`[data-section-id="${doc.sections[2].id}"]`);
+  await owner.locator(".section-focus").click();
+  await owner.getByRole("button", { name: "Save take" }).click();
+  await page.getByLabel("Take name (optional)").fill("Kitchen table");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await owner.getByRole("button", { name: "1 take" }).click();
+  await expect(page.locator(".variants > summary")).toContainText(
+    "Saved takes · The other thread · Section 3",
+  );
+  await expect(page.getByTestId("current-draft-state")).toContainText(
+    "In draft: Kitchen table",
+  );
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Leave this ending alone!");
+  await expect(page.getByTestId("current-draft-state")).toHaveText(
+    "Current draft",
+  );
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  await page.reload();
+  await owner.getByRole("button", { name: "1 take" }).click();
+  await expect(page.locator(".variants > summary")).toContainText(
+    "The other thread · Section 3",
+  );
+  await expect(page.getByTestId("current-draft-state")).toHaveText(
+    "Current draft",
+  );
+});
+
 test("substantial take rewrites leave shared phrases unmarked in read-only Compare", async ({
   page,
   request,

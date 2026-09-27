@@ -37,6 +37,7 @@ import {
 import {
   sectionMentions,
   sectionReference,
+  customSectionLabel,
   runDraftState,
   humanTargetLabel,
   resultOutcome,
@@ -163,6 +164,16 @@ export function WritingLabShell({
 }) {
   const { target, response, responseTarget } = w;
   const section = w.doc.sections.find((s) => s.id === target?.sectionId);
+  const sectionName =
+    section && (sectionReference(w.doc, section.id) ?? "Selected section");
+  const sectionIdentity =
+    section &&
+    customSectionLabel(section) &&
+    w.doc.sections.filter(
+      (item) => customSectionLabel(item) === customSectionLabel(section),
+    ).length > 1
+      ? `${sectionName} · Section ${w.doc.sections.findIndex((item) => item.id === section.id) + 1}`
+      : sectionName;
   const currentTakes = section ? currentTakeIds(section) : [];
   const lab = labFor(section?.kind ?? "Freeform", target?.scope ?? "selection");
   const sectionIntent =
@@ -329,21 +340,28 @@ export function WritingLabShell({
   }, [restoreFinding, w.activeRun?.id, responseTarget?.scope]);
   useEffect(() => {
     if (!restoreLabRun || restoreLabRun.runId !== w.activeRun?.id) return;
+    let nextFrame = 0;
     const frame = requestAnimationFrame(() => {
-      const result = responseRef.current;
-      const pane = result?.closest<HTMLElement>(".inspector");
-      if (!result || !pane) return;
-      if (!["auto", "scroll"].includes(getComputedStyle(pane).overflowY)) {
-        result.scrollIntoView({ block: "start", behavior: "smooth" });
-        return;
-      }
-      pane.scrollTop = restoreLabRun.inspectorScrollTop;
-      const top =
-        result.getBoundingClientRect().top - pane.getBoundingClientRect().top;
-      if (top < 50 || top > pane.clientHeight - 120)
-        pane.scrollTop += top - Math.min(pane.clientHeight * 0.25, 140);
+      nextFrame = requestAnimationFrame(() => {
+        const result = responseRef.current;
+        const pane = result?.closest<HTMLElement>(".inspector");
+        if (!result || !pane) return;
+        pane.scrollTop = restoreLabRun.inspectorScrollTop;
+        const top = result.getBoundingClientRect().top;
+        const paneTop = pane.getBoundingClientRect().top;
+        if (
+          top < paneTop + 50 ||
+          top > paneTop + pane.clientHeight - 120 ||
+          top < 50 ||
+          top > window.innerHeight - 120
+        )
+          result.scrollIntoView({ block: "start", behavior: "instant" });
+      });
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(nextFrame);
+    };
   }, [restoreLabRun?.token, w.activeRun?.id]);
   const fullCopy = response
     ? [
@@ -1426,7 +1444,11 @@ export function WritingLabShell({
       {(hasTarget || explicitVariants) && section && !isWholeAnalysis && (
         <details ref={variantsRef} className="variants">
           <summary>
-            Saved takes <span className="count">{section.variants.length}</span>
+            Saved takes ·{" "}
+            <span className="take-owner" title={sectionIdentity ?? ""}>
+              {sectionIdentity}
+            </span>{" "}
+            <span className="count">{section.variants.length}</span>
             <span className="take-state" data-testid="current-draft-state">
               {currentTakes.length
                 ? `In draft: ${section.variants

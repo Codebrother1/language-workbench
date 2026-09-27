@@ -1186,6 +1186,14 @@ hr {
   align-items: center;
   list-style: none;
 }
+.take-owner {
+  min-width: 0;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
 .take-state {
   margin-left: auto;
   max-width: 55%;

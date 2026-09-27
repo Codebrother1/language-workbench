@@ -152,6 +152,34 @@ describe("contained rewrite alignment", () => {
     for (const phrase of ["telemarketer", "at work", "Forty minutes"])
       expect(common).toContain(phrase);
   });
+  it("aligns realistic long rewrites beyond the old cell budget and bounds pathological inputs", () => {
+    const before = `${"earlier ".repeat(20)}The thread with Mom is still there. ${"before ".repeat(12)}"You coming home?" Delivered, never read. ${"ECHO ".repeat(37)}`;
+    const after = `${"later ".repeat(40)}The thread with Mom is still there. ${"different ".repeat(28)}"You coming home?" Delivered, never read. ${"FINALE ".repeat(40)}`;
+    const changed = textDifference(before, after);
+    const oldTokens =
+      changed.removed.match(/\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]+/gu) ?? [];
+    const newTokens =
+      changed.added.match(/\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]+/gu) ?? [];
+    expect(oldTokens.length * newTokens.length).toBeGreaterThan(40_000);
+    const aligned = alignedTextDifference(before, after);
+    const shared = aligned.after
+      .filter((part) => !part.changed)
+      .map((part) => part.text)
+      .join("");
+    expect(shared).toContain("The thread with Mom is still there");
+    expect(shared).toContain("Delivered, never read");
+    expect(aligned.before.map((part) => part.text).join("")).toBe(before);
+    expect(aligned.after.map((part) => part.text).join("")).toBe(after);
+    const hugeBefore = "ALPHA ".repeat(1200),
+      hugeAfter = "OMEGA ".repeat(1200);
+    const start = performance.now();
+    const fallback = alignedTextDifference(hugeBefore, hugeAfter);
+    expect(performance.now() - start).toBeLessThan(1500);
+    expect(fallback.before.filter((part) => part.changed)).toHaveLength(1);
+    expect(fallback.after.filter((part) => part.changed)).toHaveLength(1);
+    expect(fallback.before.map((part) => part.text).join("")).toBe(hugeBefore);
+    expect(fallback.after.map((part) => part.text).join("")).toBe(hugeAfter);
+  });
   it("keeps small punctuation changes precise and identical text unmarked", () => {
     const punctuation = alignedTextDifference("Yeah.", "Yeah!");
     expect(

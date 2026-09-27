@@ -15,6 +15,7 @@ import {
   sectionLocation,
   scrollPreviewToSection,
   scrollPreviewToTarget,
+  revealScrollContainer,
 } from "./editor";
 import { resolveHistoricalTarget } from "./target-drafts";
 import { sectionContentRange } from "./section-boundary";
@@ -87,6 +88,35 @@ function draftPositionLabel(section: WritingSection, index: number): string {
       : opening || section.label;
   const short = name.length > 52 ? name.slice(0, 49).trimEnd() + "…" : name;
   return `After “${short}” · section ${index + 1} ${section.kind}`;
+}
+
+function scrollWorkbenchToSection(
+  id: string,
+  force = false,
+  allowPageScroll = false,
+): boolean {
+  const card = Array.from(
+    document.querySelectorAll<HTMLElement>(".structure-item"),
+  ).find((element) => element.dataset.sectionId === id);
+  const pane = card?.closest<HTMLElement>(".structure");
+  if (!card || !pane || getComputedStyle(card).display === "none") return false;
+  const bounds = pane.getBoundingClientRect(),
+    target = card.getBoundingClientRect();
+  if (!["auto", "scroll"].includes(getComputedStyle(pane).overflowY)) {
+    if (
+      allowPageScroll &&
+      (target.bottom < 60 || target.top > window.innerHeight - 90)
+    )
+      card.scrollIntoView({ block: "center", behavior: "smooth" });
+    return true;
+  }
+  if (force || target.top < bounds.top + 60 || target.top > bounds.bottom - 90)
+    pane.scrollTo({
+      top: pane.scrollTop + target.top - bounds.top - 75,
+      behavior: "smooth",
+    });
+  if (allowPageScroll) revealScrollContainer(pane);
+  return true;
 }
 
 function ShortLabelEditor({
@@ -1466,6 +1496,24 @@ export default function App() {
     );
     if (selected?.placement === "draft") lastDraftId.current = selected.id;
   }, [w.doc.sections, w.selectedSectionId]);
+  const orientationToken = useRef(0);
+  useEffect(() => {
+    if (!w.ready) return;
+    const id = w.doc.sections.some(
+      (section) => section.id === w.doc.selectedSectionId,
+    )
+      ? w.doc.selectedSectionId
+      : w.selectedSectionId;
+    if (!id) return;
+    const token = ++orientationToken.current;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (token !== orientationToken.current) return;
+        scrollWorkbenchToSection(id, false, true);
+        scrollPreviewToSection(id, false, window.innerWidth > 900);
+      }),
+    );
+  }, [w.ready, w.doc.id]);
   const restorePanes = () => {
     const previous = focusContext.current;
     setPreviewFocused(false);
@@ -1501,9 +1549,10 @@ export default function App() {
           selected &&
           w.doc.sections.some((section) => section.id === selected)
         )
-          requestAnimationFrame(() =>
-            scrollPreviewToSection(selected, false, true),
-          );
+          requestAnimationFrame(() => {
+            scrollWorkbenchToSection(selected, false, false);
+            scrollPreviewToSection(selected, false, true);
+          });
       }),
     );
   };
@@ -1715,13 +1764,7 @@ export default function App() {
   useLayoutEffect(() => {
     if (!pendingJump || !workbenchShown || w.layout.primaryView !== "workbench")
       return;
-    const card = Array.from(
-      document.querySelectorAll<HTMLElement>(".structure-item"),
-    ).find((element) => element.dataset.sectionId === pendingJump);
-    const pane = card?.closest<HTMLElement>(".structure");
-    if (!card || !pane || getComputedStyle(card).display === "none") return;
-    pane.scrollTop +=
-      card.getBoundingClientRect().top - pane.getBoundingClientRect().top - 75;
+    if (!scrollWorkbenchToSection(pendingJump, true)) return;
     setPendingJump(null);
   }, [
     pendingJump,

@@ -187,7 +187,8 @@ export function useWayfinding(w: Workspace) {
         w.setPanel(null);
         void w.setPreviewVisible(true);
         setToolNavigation(null);
-        w.editor?.commands.focus();
+        if (section) w.focusSection(section.id, true);
+        else w.editor?.commands.focus();
         return;
       case "paste": {
         if (!w.ready) return;

@@ -199,6 +199,20 @@ export function fromEditor(
     };
   });
 }
+export function revealScrollContainer(pane: HTMLElement): void {
+  const bounds = pane.getBoundingClientRect();
+  const top = Math.min(window.innerHeight * 0.15, 120);
+  if (
+    bounds.top < 0 ||
+    bounds.bottom < top ||
+    bounds.top > window.innerHeight * 0.6
+  )
+    window.scrollTo({
+      top: window.scrollY + bounds.top - top,
+      behavior: "smooth",
+    });
+}
+
 export function scrollPreviewToSection(
   id: string,
   force = false,
@@ -236,8 +250,10 @@ export function scrollPreviewToSection(
     !force &&
     target.top >= bounds.top + Math.min(bounds.height * 0.22, 180) &&
     target.bottom <= bounds.top + bounds.height * 0.7
-  )
+  ) {
+    if (allowPageScroll) revealScrollContainer(pane);
     return false;
+  }
   pane.scrollTo({
     top:
       pane.scrollTop +
@@ -246,6 +262,7 @@ export function scrollPreviewToSection(
       Math.min(bounds.height * 0.3, 220),
     behavior: "smooth",
   });
+  if (allowPageScroll) revealScrollContainer(pane);
   return true;
 }
 
@@ -273,6 +290,7 @@ export function scrollPreviewToTarget(
         Math.min(pane.clientHeight * 0.3, 220),
       behavior: "smooth",
     });
+    revealScrollContainer(pane);
   } else {
     window.scrollTo({
       top: window.scrollY + top - window.innerHeight * 0.3,
