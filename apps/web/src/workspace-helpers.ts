@@ -18,6 +18,14 @@ import {
 
 import { patchTargetDraft, resolveHistoricalTarget } from "./target-drafts";
 
+export function humanTargetLabel(target: EditTarget): string {
+  if (target.scope === "document") return "Whole piece";
+  if (target.scope === "section") return "Whole section";
+  if (target.unit === "quoted_turn") return "Quoted turn";
+  if (target.unit === "sentence") return "Current sentence";
+  return target.scope === "word" ? "Selected word" : "Selected passage";
+}
+
 export function customSectionLabel(section: WritingSection): string | null {
   const label = section.label.trim();
   return label && label !== section.kind ? label : null;

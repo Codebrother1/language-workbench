@@ -219,6 +219,7 @@ export function useWorkspace() {
   const [notice, setNotice] = useState("");
   const [target, setTargetState] = useState<EditTarget | null>(null);
   const targetRef = useRef<EditTarget | null>(null);
+  const explicitFocusIntent = useRef(false);
   const [inspectedTarget, setInspectedTarget] = useState<{
     runId: string;
     sectionId: string;
@@ -360,7 +361,12 @@ export function useWorkspace() {
       while (dirty.current > saved.current) {
         const version = dirty.current,
           snapshot = {
-            ...withFocusTarget(current.current, targetRef.current),
+            ...withFocusTarget(
+              current.current,
+              explicitFocusIntent.current && targetRef.current
+                ? { ...targetRef.current, focusOrigin: "explicit" }
+                : null,
+            ),
             title: current.current.title.trim() || "Untitled",
             revisionTrail: current.current.revisionTrail.map((entry) =>
               entry.savedRevision === null
@@ -378,7 +384,12 @@ export function useWorkspace() {
           if (current.current.id === snapshot.id) {
             persisted.current = result;
             const merged = {
-              ...withFocusTarget(current.current, targetRef.current),
+              ...withFocusTarget(
+                current.current,
+                explicitFocusIntent.current && targetRef.current
+                  ? { ...targetRef.current, focusOrigin: "explicit" }
+                  : null,
+              ),
               revision: result.revision,
               updatedAt: result.updatedAt,
               revisionTrail: current.current.revisionTrail.map(
@@ -473,6 +484,7 @@ export function useWorkspace() {
       next?.sectionId !== inspectionRef.current.sectionId
     )
       changeInspection(null);
+    explicitFocusIntent.current = !!next;
     selectingExplicitTarget.current = true;
     try {
       if (editor && next?.sectionId) {
@@ -512,6 +524,7 @@ export function useWorkspace() {
     if (resolution.status === "exact") {
       changeInspection(null);
       selectExactTarget(resolution.current);
+      if (editor?.view.hasFocus()) editor.view.dom.blur();
       return;
     }
     const owner = current.current.sections.some(
@@ -529,12 +542,14 @@ export function useWorkspace() {
     selectingExplicitTarget.current = true;
     try {
       explicitAnchor.current = null;
+      explicitFocusIntent.current = true;
       setTarget(targetFor(current.current, owner));
       setDocumentWorkbench(false);
       if (editor) highlight(editor, null, true);
     } finally {
       selectingExplicitTarget.current = false;
     }
+    if (editor?.view.hasFocus()) editor.view.dom.blur();
   };
   const update = useCallback(
     (fn: (d: Document) => Document) => {
@@ -584,6 +599,14 @@ export function useWorkspace() {
       )
     )
       changeInspection(null);
+    const draft = t?.sectionId
+      ? getTargetDraft(getWorkbench(current.current, t.sectionId), t)
+      : null;
+    explicitFocusIntent.current =
+      !!t &&
+      (!editor.state.selection.empty ||
+        !!draft?.instruction.trim() ||
+        !!draft?.answer.trim());
     setTarget(
       t?.sectionId && !t.sectionSnapshot
         ? targetFor(current.current, t.sectionId)
@@ -1166,6 +1189,7 @@ export function useWorkspace() {
   const focusSentence = () => {
     if (!editor) return;
     editor.commands.setTextSelection(editor.state.selection.from);
+    explicitFocusIntent.current = true;
     setTarget(cursorTarget(editor, current.current));
     setDocumentWorkbench(false);
   };
@@ -1347,6 +1371,7 @@ export function useWorkspace() {
     const owner = documentWorkbench
       ? null
       : (activeTarget?.sectionId ?? sectionId);
+    if (activeTarget) explicitFocusIntent.current = true;
     patchWorkbench(
       (wb) =>
         patchTargetDraft(wb, activeTarget, {

@@ -11,6 +11,7 @@ import {
   emptyWorkbench,
   documentText,
   sectionText,
+  targetFor,
   modelKey,
 } from "../../packages/domain/src/index";
 const conservative = { providerId: "mock", modelId: "conservative" },
@@ -729,6 +730,13 @@ test("quoted-turn target stays distinct from a sentence and remains historical a
     text: '"Yeah. I\'m good."',
     sectionId: first,
   });
+  await page.reload();
+  await expect(page.locator(".target-box")).toContainText("QUOTED TURN");
+  await page.locator(".local-history > summary").click();
+  await expect(page.locator(".local-history .run-entry")).toContainText(
+    "Quoted turn",
+  );
+  await page.locator(".local-history > summary").click();
   await select(page, "Yeah.");
   await page.keyboard.insertText("Nope.");
   await save(page);
@@ -749,12 +757,18 @@ test("quoted-turn target stays distinct from a sentence and remains historical a
   await page.locator(`[data-section-id="${first}"] .section-focus`).click();
   await page.locator(".local-history > summary").click();
   await page.getByRole("button", { name: "Inspect this run" }).click();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
   await expect(page.locator(".response-original")).toContainText(
     '"Yeah. I\'m good."',
   );
-  await expect(page.getByTestId("target-resolution")).toContainText(
-    /Target changed|located reliably/,
+  await expect(page.locator(".response-original .eyebrow")).toContainText(
+    "Original quoted turn",
   );
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    "Target changed since this run",
+  );
+  await page.getByRole("button", { name: "Return to current passage" }).click();
+  await expect(page.locator(".target-box")).toContainText("QUOTED TURN");
   expect(
     (
       await page.locator(`[id="${first}"] .target-highlight`).allTextContents()
@@ -762,6 +776,50 @@ test("quoted-turn target stays distinct from a sentence and remains historical a
   ).not.toContain("Sure");
   storedDoc = await stored(request, imported.id);
   expect(documentText(storedDoc)).toContain('"Nope. I\'m good."');
+});
+
+test("incidental caret typing does not persist a phantom selected passage", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const doc = newDocument(
+    "Cursor is not a selection",
+    "A beginning. Another sentence.",
+  );
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  await open(page);
+  await page.locator(`[id="${imported.sections[0].id}"] p`).click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" Added without selecting.");
+  await save(page);
+  expect((await stored(request, imported.id)).focusTarget).toBeNull();
+  await page.reload();
+  await expect(page.locator(".target-box")).not.toContainText(
+    "SELECTED PASSAGE",
+  );
+  await select(page, "beginning");
+  await save(page);
+  expect((await stored(request, imported.id)).focusTarget).toMatchObject({
+    scope: "word",
+    unit: "selection",
+    text: "beginning",
+  });
+  await page.reload();
+  await expect(page.locator(".target-box")).toContainText("SELECTED WORD");
+  const legacy = await stored(request, imported.id);
+  const end = sectionText(legacy.sections[0]).indexOf(".") + 1;
+  legacy.focusTarget = {
+    ...targetFor(legacy, legacy.sections[0].id, "selection", 0, end),
+    unit: "sentence",
+  };
+  await request.put(`/api/documents/${legacy.id}`, { data: legacy });
+  await page.reload();
+  await expect(page.locator(".target-box")).toContainText("WHOLE SECTION");
 });
 
 test("shared-piece quality notes and a requested revision question remain review-only", async ({
@@ -1194,6 +1252,9 @@ test("saved sentence run never highlights another sentence after its target is r
   expect(requests).toBe(1);
   await expect(page.getByRole("alert")).toContainText("Select a new target");
   await expect(page.getByTestId("lab-return")).toBeVisible();
+  await page.getByTestId("lab-return").getByRole("button").click();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await expect(page.locator(".response-original")).toContainText(original);
   await page.getByRole("button", { name: "Return to current passage" }).click();
   await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
   expect(requests).toBe(1);

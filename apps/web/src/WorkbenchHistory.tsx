@@ -2,7 +2,11 @@ import { useEffect, useRef } from "react";
 import type { Workspace } from "./useWorkspace";
 import { Button } from "./ui";
 import { modelLabel } from "./ModelControls";
-import { sectionMentions, runDraftState } from "./workspace-helpers";
+import {
+  sectionMentions,
+  runDraftState,
+  humanTargetLabel,
+} from "./workspace-helpers";
 export function WorkbenchHistory({
   w,
   open = false,
@@ -51,7 +55,8 @@ export function WorkbenchHistory({
               display(run.response.question || run.response.diagnosis)}
           </p>
           <span className="small muted">
-            {run.response.proposals.length} candidates · {run.target.scope}
+            {run.response.proposals.length} candidates ·{" "}
+            {humanTargetLabel(run.target)}
           </span>
           <Button className="full" onClick={() => w.selectRun(run.id)}>
             Inspect this run

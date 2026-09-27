@@ -20,6 +20,7 @@ import {
   isDeliveryTarget,
   sectionReference,
   sectionMentions,
+  humanTargetLabel,
   runDraftState,
   type RunCapture,
 } from "./workspace-helpers";
@@ -49,6 +50,26 @@ function fixture() {
   };
   return { doc, a, b, capture, response };
 }
+
+describe("writer-facing target names", () => {
+  it("keeps quoted turns, sentences, selected passages and sections distinct", () => {
+    const { capture } = fixture();
+    const target = capture.target;
+    expect(humanTargetLabel(target)).toBe("Whole section");
+    expect(
+      humanTargetLabel({ ...target, scope: "selection", unit: "sentence" }),
+    ).toBe("Current sentence");
+    expect(
+      humanTargetLabel({ ...target, scope: "selection", unit: "quoted_turn" }),
+    ).toBe("Quoted turn");
+    expect(
+      humanTargetLabel({ ...target, scope: "selection", unit: "selection" }),
+    ).toBe("Selected passage");
+    expect(
+      humanTargetLabel({ ...target, scope: "word", unit: "selection" }),
+    ).toBe("Selected word");
+  });
+});
 
 describe("writer-facing section references", () => {
   it("resolves custom labels, roles, numbered Freeform cards and only known IDs", () => {

@@ -1438,8 +1438,18 @@ export default function App() {
   const returnToLab = (sectionId: string, runId: string) => {
     if (!w.doc.sections.some((section) => section.id === sectionId)) return;
     w.noteRevisionContext(runId, sectionId);
-    jumpToSection(sectionId);
+    const section = w.doc.sections.find((item) => item.id === sectionId)!;
+    if (section.parkedGroupId)
+      w.setParkedGroupCollapsed(section.parkedGroupId, false);
+    if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
+    if (w.layout.primaryView !== "workbench")
+      void w.setPrimaryView("workbench");
+    setPreviewFocused(false);
+    setParkedFocusId(null);
+    setReadingMode(false);
     w.inspectSectionRun(sectionId, runId);
+    if (w.editor?.view.hasFocus()) w.editor.view.dom.blur();
+    setPendingJump(sectionId);
     requestAnimationFrame(() => scrollPreviewToSection(sectionId));
   };
   const returnToFinding = () => {

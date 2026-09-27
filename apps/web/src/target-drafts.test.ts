@@ -311,6 +311,31 @@ describe("target-scoped directions", () => {
 });
 
 describe("focus metadata and snapshot restoration", () => {
+  it("does not revive a legacy incidental sentence without Lab intent", () => {
+    const doc = newDocument(
+      "Legacy cursor",
+      "First sentence. Second sentence.",
+    );
+    const saved = {
+      ...targetFor(doc, doc.sections[0].id, "selection", 16, 32),
+      unit: "sentence" as const,
+    };
+    doc.focusTarget = saved;
+    expect(restoreFocusTarget(doc)).toEqual(targetFor(doc, doc.sections[0].id));
+    doc.sections[0].workbench = patchTargetDraft(emptyWorkbench(), saved, {
+      instruction: "A deliberate Lab question",
+    });
+    expect(restoreFocusTarget(doc)).toMatchObject({
+      unit: "sentence",
+      text: saved.text,
+    });
+    doc.sections[0].workbench = emptyWorkbench();
+    doc.focusTarget = { ...saved, focusOrigin: "explicit" };
+    expect(restoreFocusTarget(doc)).toMatchObject({
+      unit: "sentence",
+      text: saved.text,
+    });
+  });
   it("persists focus in a PUT snapshot without mutating canonical input", () => {
     const { doc, word } = fixture();
     const snapshot = withFocusTarget(doc, word);

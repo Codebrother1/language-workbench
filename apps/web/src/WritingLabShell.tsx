@@ -31,6 +31,7 @@ import {
   sectionMentions,
   sectionReference,
   runDraftState,
+  humanTargetLabel,
 } from "./workspace-helpers";
 
 function ReferencedText({
@@ -131,16 +132,11 @@ export function WritingLabShell({
   const isWholeAnalysis = Boolean(
     response && responseTarget?.scope === "document",
   );
-  const targetLabel =
-    target?.unit === "quoted_turn"
-      ? "quoted turn"
-      : target?.scope === "word"
-        ? "word"
-        : target?.scope === "selection" && w.editor?.state.selection.empty
-          ? "sentence"
-          : target?.scope === "section"
-            ? "section"
-            : "passage";
+  const targetLabel = target
+    ? humanTargetLabel(target)
+        .toLowerCase()
+        .replace(/^(?:current|selected|whole) /, "")
+    : "passage";
   const relevantActions = lab.actions.slice(0, 5);
   const responseSection = w.doc.sections.find(
     (s) => s.id === responseTarget?.sectionId,
@@ -506,15 +502,7 @@ export function WritingLabShell({
             <div className="row between wrap">
               <span className="eyebrow">
                 <Focus size={14} /> Working on ·
-                {targetLabel === "sentence"
-                  ? "CURRENT SENTENCE"
-                  : targetLabel === "section"
-                    ? "WHOLE SECTION"
-                    : targetLabel === "quoted turn"
-                      ? "QUOTED TURN"
-                      : targetLabel === "word"
-                        ? "SELECTED WORD"
-                        : "SELECTED PASSAGE"}
+                {humanTargetLabel(target).toUpperCase()}
               </span>
               {section && (
                 <span className="muted small" title={section.label}>
@@ -793,10 +781,7 @@ export function WritingLabShell({
             <div className="response-original">
               <div className="row between">
                 <span className="eyebrow">
-                  Original{" "}
-                  {responseTarget.scope === "selection"
-                    ? "passage"
-                    : responseTarget.scope}
+                  Original {humanTargetLabel(responseTarget).toLowerCase()}
                 </span>
                 <Button
                   className="icon"

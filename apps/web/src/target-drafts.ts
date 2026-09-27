@@ -238,6 +238,27 @@ export function restoreFocusTarget(
   if (saved?.documentId === doc.id) {
     if (saved.scope === "document") return documentTarget(doc);
     if (saved.sectionId && doc.sections.some((s) => s.id === saved.sectionId)) {
+      if (
+        saved.scope === "selection" &&
+        saved.unit === "sentence" &&
+        !saved.focusOrigin
+      ) {
+        const workbench = doc.sections.find(
+          (section) => section.id === saved.sectionId,
+        )?.workbench;
+        const draft = workbench?.targetDrafts?.[targetDraftKey(saved)];
+        const deliberateDraft =
+          draft?.target.sectionId === saved.sectionId &&
+          !!(draft.instruction.trim() || draft.answer.trim());
+        const deliberateRun = workbench?.runs.some(
+          (run) =>
+            run.target.sectionId === saved.sectionId &&
+            run.target.sectionSnapshot === saved.sectionSnapshot &&
+            targetDraftKey(run.target) === targetDraftKey(saved),
+        );
+        if (!deliberateDraft && !deliberateRun)
+          return targetFor(doc, saved.sectionId);
+      }
       try {
         validateTarget(doc, saved);
         return { ...saved, documentRevision: doc.revision };
