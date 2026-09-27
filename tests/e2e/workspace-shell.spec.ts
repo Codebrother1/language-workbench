@@ -88,6 +88,53 @@ test("desktop shell fits viewport while panes scroll independently and narrow pa
   );
 });
 
+test("selected seventh section restores by identity across reload and deleted selection falls back", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const seventh = doc.sections[6].id;
+  await request.post("/api/import", {
+    data: { document: newDocument("More recently modified", "Another draft.") },
+  });
+  await page.goto("/");
+  await page.getByLabel("Switch document").selectOption(doc.id);
+  await page.locator(`[data-section-id="${seventh}"] .section-focus`).click();
+  await save(page);
+  await page.reload();
+  await expect(page.getByLabel("Switch document")).toHaveValue(doc.id);
+  await expect(page.locator(`[data-section-id="${seventh}"]`)).toHaveClass(
+    /active/,
+  );
+  expect(
+    (await (await request.get(`/api/documents/${doc.id}`)).json())
+      .selectedSectionId,
+  ).toBe(seventh);
+  await page.locator(`[data-section-id="${seventh}"] .section-focus`).click();
+  await page
+    .locator(`[data-section-id="${seventh}"] .section-options > summary`)
+    .click();
+  await page
+    .locator(`[data-section-id="${seventh}"]`)
+    .getByRole("button", { name: "Remove section" })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete section" })
+    .click();
+  await save(page);
+  await page.reload();
+  await expect(page.locator(`[data-section-id="${seventh}"]`)).toHaveCount(0);
+  const active = page.locator(".structure-item.active");
+  await expect(active).toHaveCount(1);
+  const selected = await active.getAttribute("data-section-id");
+  expect(selected).not.toBe(seventh);
+  expect(
+    (await (await request.get(`/api/documents/${doc.id}`)).json())
+      .selectedSectionId,
+  ).toBe(selected);
+});
+
 test("stacked Saved takes returns to the originating card without losing its place", async ({
   page,
   request,
@@ -312,6 +359,56 @@ test("Preview focus temporarily expands and restores the exact saved pane arrang
   expect(
     (await (await request.get("/api/settings")).json()).layout.paneWidths,
   ).toEqual(settings.layout.paneWidths);
+});
+
+test("Focus Preview restore brings the selected seventh section back to a readable preview position", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const id = doc.sections[6].id;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  const preview = page.locator(".dock-preview .writing");
+  await preview.evaluate((pane) => {
+    pane.scrollTop = 0;
+  });
+  await page.getByRole("button", { name: "Focus preview" }).click();
+  await page.getByRole("button", { name: "Restore panes" }).click();
+  const section = page.locator(
+    `.dock-preview .writing-editor > section[id="${id}"]`,
+  );
+  await expect
+    .poll(() =>
+      section.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const pane = element.closest(".writing")!.getBoundingClientRect();
+        return (
+          rect.top >= pane.top + 15 && rect.top < pane.top + pane.height * 0.65
+        );
+      }),
+    )
+    .toBe(true);
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+});
+
+test("narrow Focus Preview restore keeps the selected section readable", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const id = doc.sections[6].id;
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/");
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await page.getByRole("button", { name: "Focus preview" }).click();
+  await page.getByRole("button", { name: "Restore panes" }).click();
+  const section = page.locator(
+    `.dock-preview .writing-editor > section[id="${id}"]`,
+  );
+  await expect(section).toBeInViewport();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
 });
 
 test("parked navigation, editing, reinclusion and narrow writing keep the single editor", async ({

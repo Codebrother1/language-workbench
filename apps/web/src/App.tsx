@@ -1326,6 +1326,12 @@ export default function App() {
     documentId: string;
     sectionId: string;
     runId: string;
+    inspectorScrollTop: number;
+  } | null>(null);
+  const [restoreLabRun, setRestoreLabRun] = useState<{
+    runId: string;
+    inspectorScrollTop: number;
+    token: number;
   } | null>(null);
   const [findingVisit, setFindingVisit] = useState<{
     documentId: string;
@@ -1388,6 +1394,9 @@ export default function App() {
               documentId: w.doc.id,
               sectionId: run.target.sectionId!,
               runId: run.id,
+              inspectorScrollTop:
+                document.querySelector<HTMLElement>(".inspector")?.scrollTop ??
+                0,
             },
       );
   }, [w.activeRun?.id, w.selectedSectionId, w.doc.id]);
@@ -1413,6 +1422,7 @@ export default function App() {
         documentId: w.doc.id,
         sectionId: previous.sectionId,
         runId: previous.runId,
+        inspectorScrollTop: previous.inspectorScroll,
       });
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
@@ -1426,6 +1436,14 @@ export default function App() {
           );
           if (node) node.scrollTop = top;
         }
+        const selected = w.selectedSectionId ?? previous.sectionId;
+        if (
+          selected &&
+          w.doc.sections.some((section) => section.id === selected)
+        )
+          requestAnimationFrame(() =>
+            scrollPreviewToSection(selected, false, true),
+          );
       }),
     );
   };
@@ -1471,6 +1489,14 @@ export default function App() {
   ) => {
     const section = w.doc.sections.find((item) => item.id === id);
     if (!section) return;
+    if (w.activeRun?.target.sectionId === w.selectedSectionId)
+      setLabOrigin({
+        documentId: w.doc.id,
+        sectionId: w.selectedSectionId!,
+        runId: w.activeRun.id,
+        inspectorScrollTop:
+          document.querySelector<HTMLElement>(".inspector")?.scrollTop ?? 0,
+      });
     const run = w.doc.workbench?.runs.find((item) => item.id === anchor?.runId);
     const finding = run?.response.findings[anchor?.findingIndex ?? -1];
     if (run && finding && anchor) {
@@ -1571,6 +1597,12 @@ export default function App() {
     setReadingMode(false);
     w.inspectSectionRun(sectionId, runId);
     if (w.editor?.view.hasFocus()) w.editor.view.dom.blur();
+    setRestoreLabRun({
+      runId,
+      inspectorScrollTop:
+        labOrigin?.runId === runId ? labOrigin.inspectorScrollTop : 0,
+      token: Date.now(),
+    });
     setPendingJump(sectionId);
     requestAnimationFrame(() => scrollPreviewToSection(sectionId));
   };
@@ -1660,7 +1692,7 @@ export default function App() {
   useLayoutEffect(() => {
     if (!previewFocused) return;
     const id = parkedFocusId ?? w.selectedSectionId;
-    if (id) requestAnimationFrame(() => scrollPreviewToSection(id, true));
+    if (id) requestAnimationFrame(() => scrollPreviewToSection(id, true, true));
   }, [previewFocused, parkedFocusId, w.selectedSectionId]);
   const writeInCard = (id: string, point?: { x: number; y: number }) => {
     pendingCardCaret.current = point ? { id, ...point } : null;
@@ -2265,6 +2297,7 @@ export default function App() {
               findingVisit?.documentId === w.doc.id ? findingVisit : null
             }
             restoreFinding={restoreFinding}
+            restoreLabRun={restoreLabRun}
             onReturnFinding={returnToFinding}
             labOrigin={labOrigin?.documentId === w.doc.id ? labOrigin : null}
             onReturnToLab={returnToLab}

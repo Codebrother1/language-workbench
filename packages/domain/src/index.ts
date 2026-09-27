@@ -259,6 +259,7 @@ export const documentSchema = z
     history: z.array(iterationSchema).default([]),
     revisionTrail: z.array(revisionTrailEntrySchema).max(100).default([]),
     focusTarget: editTargetSchema.nullable().optional(),
+    selectedSectionId: z.string().nullable().optional(),
     defaultModel: modelRefSchema.nullable().optional(),
     workbench: sectionWorkbenchSchema.optional(),
   })

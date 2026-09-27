@@ -180,6 +180,7 @@ function sameSavedContentExceptFocus(a: Document, b: Document): boolean {
         revision: 0,
         updatedAt: "",
         focusTarget: null,
+        selectedSectionId: null,
       }),
     );
   return withoutFocus(a) === withoutFocus(b);
@@ -374,6 +375,9 @@ export function useWorkspace() {
               explicitFocusIntent.current && targetRef.current
                 ? { ...targetRef.current, focusOrigin: "explicit" }
                 : null,
+              targetRef.current?.sectionId ??
+                current.current.selectedSectionId ??
+                null,
             ),
             title: current.current.title.trim() || "Untitled",
             revisionTrail: current.current.revisionTrail.map((entry) =>
@@ -397,6 +401,9 @@ export function useWorkspace() {
                 explicitFocusIntent.current && targetRef.current
                   ? { ...targetRef.current, focusOrigin: "explicit" }
                   : null,
+                targetRef.current?.sectionId ??
+                  current.current.selectedSectionId ??
+                  null,
               ),
               revision: result.revision,
               updatedAt: result.updatedAt,
@@ -559,6 +566,25 @@ export function useWorkspace() {
     }
     if (editor?.view.hasFocus()) editor.view.dom.blur();
   };
+  const restoreSavedRunTarget = (next: Document) => {
+    const restored = restoreFocusTarget(next);
+    selectExactTarget(restored);
+    if (!restored?.sectionId) return;
+    const workbench = getWorkbench(next, restored.sectionId);
+    const run = workbench.runs.find(
+      (item) => item.id === workbench.activeRunId,
+    );
+    if (!run || !["selection", "word"].includes(run.target.scope)) return;
+    const resolution = resolveHistoricalTarget(next, run.target);
+    if (resolution.status === "exact") return;
+    changeInspection({
+      runId: run.id,
+      sectionId: restored.sectionId,
+      resolution,
+      confirmed: false,
+    });
+    if (editor) highlight(editor, null, true);
+  };
   const update = useCallback(
     (fn: (d: Document) => Document) => {
       const next = {
@@ -703,7 +729,7 @@ export function useWorkspace() {
             }),
           );
         }
-        selectExactTarget(restoreFocusTarget(active));
+        restoreSavedRunTarget(active);
         if (document.activeElement === document.body || editor.view.hasFocus())
           editor.view.focus();
         isReady.current = true;
@@ -927,7 +953,7 @@ export function useWorkspace() {
         }),
       );
     }
-    selectExactTarget(restoreFocusTarget(next));
+    restoreSavedRunTarget(next);
     // Restoring saved metadata is not a user edit.
     saved.current = dirty.current;
     setSaveState("Saved");
@@ -1380,17 +1406,39 @@ export function useWorkspace() {
     localHistory.find((run) => run.id === currentWorkbench.activeRunId) ?? null;
   const response = activeRun?.response ?? null;
   const responseTarget = activeRun?.target ?? null;
+  const activeResolution =
+    activeRun && ["selection", "word"].includes(activeRun.target.scope)
+      ? resolveHistoricalTarget(doc, activeRun.target)
+      : null;
   const inspectedRunTarget =
-    inspectedTarget && activeRun?.id === inspectedTarget.runId
+    activeRun &&
+    activeResolution &&
+    activeRun.target.sectionId &&
+    (inspectedTarget?.runId === activeRun.id ||
+      activeResolution.status !== "exact")
       ? {
-          ...inspectedTarget,
-          resolution: resolveHistoricalTarget(doc, activeRun.target),
+          runId: activeRun.id,
+          sectionId: activeRun.target.sectionId,
+          resolution: activeResolution,
+          confirmed:
+            inspectedTarget?.runId === activeRun.id
+              ? inspectedTarget.confirmed
+              : false,
         }
       : null;
   const { controls, lens, oneOffModel, compareModels, proposalStates } =
     currentWorkbench;
   const draftTarget = documentWorkbench ? null : target;
-  const { instruction, answer } = getTargetDraft(currentWorkbench, draftTarget);
+  const historicalDraftTarget =
+    inspectedRunTarget &&
+    !inspectedRunTarget.confirmed &&
+    inspectedRunTarget.resolution.status !== "exact"
+      ? activeRun?.target
+      : null;
+  const { instruction, answer } = getTargetDraft(
+    currentWorkbench,
+    historicalDraftTarget ?? draftTarget,
+  );
   const canCoachTarget = hasCoachContext(doc, target, instruction);
   const isLensTarget =
     !documentWorkbench &&
@@ -1440,11 +1488,14 @@ export function useWorkspace() {
     key: "instruction" | "answer",
     value: SetStateAction<string>,
   ) => {
-    const activeTarget = documentWorkbench ? null : targetRef.current;
+    const activeTarget = documentWorkbench
+      ? null
+      : (historicalDraftTarget ?? targetRef.current);
     const owner = documentWorkbench
       ? null
       : (activeTarget?.sectionId ?? sectionId);
-    if (activeTarget) explicitFocusIntent.current = true;
+    if (activeTarget && !historicalDraftTarget)
+      explicitFocusIntent.current = true;
     patchWorkbench(
       (wb) =>
         patchTargetDraft(wb, activeTarget, {

@@ -77,6 +77,7 @@ export function WritingLabShell({
   onJumpSection,
   findingVisit,
   restoreFinding,
+  restoreLabRun,
   onReturnFinding,
   labOrigin,
   onReturnToLab,
@@ -102,6 +103,11 @@ export function WritingLabShell({
   restoreFinding?: {
     runId: string;
     findingIndex: number;
+    inspectorScrollTop: number;
+    token: number;
+  } | null;
+  restoreLabRun?: {
+    runId: string;
     inspectorScrollTop: number;
     token: number;
   } | null;
@@ -279,6 +285,24 @@ export function WritingLabShell({
     });
     return () => cancelAnimationFrame(frame);
   }, [restoreFinding, w.activeRun?.id, responseTarget?.scope]);
+  useEffect(() => {
+    if (!restoreLabRun || restoreLabRun.runId !== w.activeRun?.id) return;
+    const frame = requestAnimationFrame(() => {
+      const result = responseRef.current;
+      const pane = result?.closest<HTMLElement>(".inspector");
+      if (!result || !pane) return;
+      if (!["auto", "scroll"].includes(getComputedStyle(pane).overflowY)) {
+        result.scrollIntoView({ block: "start", behavior: "smooth" });
+        return;
+      }
+      pane.scrollTop = restoreLabRun.inspectorScrollTop;
+      const top =
+        result.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      if (top < 50 || top > pane.clientHeight - 120)
+        pane.scrollTop += top - Math.min(pane.clientHeight * 0.25, 140);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [restoreLabRun?.token, w.activeRun?.id]);
   const fullCopy = response
     ? [
         responseTarget?.scope !== "document" && responseTarget?.text

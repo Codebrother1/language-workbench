@@ -199,7 +199,11 @@ export function fromEditor(
     };
   });
 }
-export function scrollPreviewToSection(id: string, force = false): boolean {
+export function scrollPreviewToSection(
+  id: string,
+  force = false,
+  allowPageScroll = false,
+): boolean {
   const pane = document.querySelector<HTMLElement>(".dock-preview .writing");
   if (!pane || getComputedStyle(pane).display === "none") return false;
   const node = Array.from(
@@ -212,6 +216,20 @@ export function scrollPreviewToSection(id: string, force = false): boolean {
       getComputedStyle(element).display !== "none",
   );
   if (!node) return false;
+  if (
+    allowPageScroll &&
+    !["auto", "scroll"].includes(getComputedStyle(pane).overflowY)
+  ) {
+    const target = node.getBoundingClientRect();
+    if (
+      !force &&
+      target.top >= window.innerHeight * 0.2 &&
+      target.bottom <= window.innerHeight * 0.75
+    )
+      return false;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+    return true;
+  }
   const bounds = pane.getBoundingClientRect();
   const target = node.getBoundingClientRect();
   if (

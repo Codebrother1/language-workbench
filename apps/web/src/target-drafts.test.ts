@@ -311,6 +311,24 @@ describe("target-scoped directions", () => {
 });
 
 describe("focus metadata and snapshot restoration", () => {
+  it("restores selected section identity without reviving a stale text selection", () => {
+    const doc = newDocument("Long draft", "Section 1.");
+    for (let index = 2; index <= 7; index++)
+      doc.sections.push(newSection("Point", `Section ${index}.`));
+    const seventh = doc.sections[6];
+    doc.selectedSectionId = seventh.id;
+    doc.focusTarget = null;
+    expect(restoreFocusTarget(doc)).toEqual(targetFor(doc, seventh.id));
+    doc.focusTarget = targetFor(doc, doc.sections[0].id, "selection", 0, 7);
+    expect(restoreFocusTarget(doc)).toEqual(targetFor(doc, seventh.id));
+    doc.focusTarget = {
+      ...targetFor(doc, seventh.id, "selection", 0, 7),
+      text: "stale",
+    };
+    expect(restoreFocusTarget(doc)).toEqual(targetFor(doc, seventh.id));
+    doc.sections.pop();
+    expect(restoreFocusTarget(doc)).toEqual(targetFor(doc, doc.sections[0].id));
+  });
   it("does not revive a legacy incidental sentence without Lab intent", () => {
     const doc = newDocument(
       "Legacy cursor",

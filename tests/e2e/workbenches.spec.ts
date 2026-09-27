@@ -1746,6 +1746,136 @@ test("saved sentence run never highlights another sentence after its target is r
   await expect.poll(() => requests).toBe(3);
 });
 
+test("historical Lab target status and the exact question remain oriented through reload", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  for (const item of await (await request.get("/api/documents")).json())
+    await request.delete(`/api/documents/${item.id}`);
+  const first = "Before stayed stable. ";
+  const original = "Sentence A carried the point.";
+  const changed = "Sentence B now carries the point.";
+  const last = " After stayed stable. Unrelated C remains here.";
+  const doc = newDocument("Historical selection", first + original + last);
+  doc.sections.push(newSection("Freeform", "A neighboring section to visit."));
+  const imported = await (
+    await request.post("/api/import", { data: { document: doc } })
+  ).json();
+  let calls = 0;
+  await page.route("**/api/ai", (route) => {
+    calls++;
+    return route.fulfill({
+      json: {
+        provider: "mock",
+        diagnosis: "The original sentence held a point.",
+        mechanism: "The cadence matters.",
+        question: "Which line should remain?",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      },
+    });
+  });
+  await open(page);
+  await select(page, original);
+  await page
+    .getByLabel("Your direction", { exact: true })
+    .fill("Review this exact line.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.locator(".diagnosis")).toContainText(
+    "The original sentence held a point.",
+  );
+  await save(page);
+  const runId = (await stored(request, imported.id)).sections[0].workbench
+    ?.activeRunId;
+  await select(page, original);
+  await page.keyboard.insertText(changed);
+  await save(page);
+  await page.reload();
+  await expect(page.locator(".response-original")).toContainText(original);
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    "Target changed since this run",
+  );
+  await expect(page.getByTestId("target-resolution")).toContainText(changed);
+  await expect(
+    page.locator(`[id="${imported.sections[0].id}"] .target-highlight`),
+  ).toHaveCount(0);
+  await page
+    .locator(`[data-section-id="${imported.sections[1].id}"] .section-focus`)
+    .click();
+  await page.locator(".inspector").evaluate((pane) => {
+    pane.scrollTop = 0;
+  });
+  await expect(page.getByTestId("lab-return")).toBeVisible();
+  await page.getByTestId("lab-return").getByRole("button").click();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await expect(page.locator(".diagnosis")).toContainText(
+    "The original sentence held a point.",
+  );
+  await expect(page.getByLabel("Your direction", { exact: true })).toHaveValue(
+    "Review this exact line.",
+  );
+  await expect(page.locator(".response")).toContainText(
+    "Which line should remain?",
+  );
+  expect(
+    (await stored(request, imported.id)).sections[0].workbench.activeRunId,
+  ).toBe(runId);
+  expect(
+    (await stored(request, imported.id)).sections[0].workbench.runs.some(
+      (run: any) => run.id === runId,
+    ),
+  ).toBe(true);
+  expect(calls).toBe(1);
+  const resultInPane = await page.locator(".response").evaluate((result) => {
+    const pane = result.closest(".inspector")!;
+    return (
+      result.getBoundingClientRect().top >= pane.getBoundingClientRect().top &&
+      result.getBoundingClientRect().top <
+        pane.getBoundingClientRect().bottom - 60
+    );
+  });
+  expect(resultInPane).toBe(true);
+  await select(page, "Before stayed stable.");
+  await page.keyboard.insertText("Different opening.");
+  await select(page, "After stayed stable.");
+  await page.keyboard.insertText("Different ending.");
+  await save(page);
+  await page.reload();
+  await expect(page.getByTestId("target-resolution")).toContainText(
+    "can’t be located reliably",
+  );
+  await expect(
+    page.locator(`[id="${imported.sections[0].id}"] .target-highlight`),
+  ).toHaveCount(0);
+  expect(calls).toBe(1);
+});
+
+test("stacked Return to question brings its saved result into view without refocusing prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await page.setViewportSize({ width: 700, height: 900 });
+  await open(page);
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await section(page, "Hook");
+  await diagnose(page);
+  await page
+    .locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`)
+    .click();
+  await expect(page.getByTestId("lab-return")).toBeVisible();
+  await page.getByTestId("lab-return").getByRole("button").click();
+  await expect(page.locator(".response")).toBeInViewport();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  expect(calls).toHaveLength(1);
+});
+
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({
   page,
   request,

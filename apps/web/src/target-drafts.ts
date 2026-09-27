@@ -235,8 +235,14 @@ export function restoreFocusTarget(
   doc: Document,
   saved: EditTarget | null | undefined = doc.focusTarget,
 ): EditTarget | null {
+  if (saved?.documentId === doc.id && saved.scope === "document")
+    return documentTarget(doc);
+  const selected = doc.sections.find(
+    (section) => section.id === doc.selectedSectionId,
+  );
+  if (selected && saved?.sectionId !== selected.id)
+    return targetFor(doc, selected.id);
   if (saved?.documentId === doc.id) {
-    if (saved.scope === "document") return documentTarget(doc);
     if (saved.sectionId && doc.sections.some((s) => s.id === saved.sectionId)) {
       if (
         saved.scope === "selection" &&
@@ -267,16 +273,19 @@ export function restoreFocusTarget(
       }
     }
   }
-  return doc.sections[0] ? targetFor(doc, doc.sections[0].id) : null;
+  const fallback = selected ?? doc.sections[0];
+  return fallback ? targetFor(doc, fallback.id) : null;
 }
 
 /** Merge at the persistence boundary, not inside editor selection callbacks. */
 export function withFocusTarget(
   doc: Document,
   target: EditTarget | null,
+  selectedSectionId?: string | null,
 ): Document {
   return {
     ...doc,
+    ...(selectedSectionId !== undefined ? { selectedSectionId } : {}),
     focusTarget: target?.documentId === doc.id ? { ...target } : null,
   };
 }

@@ -179,6 +179,9 @@ export class Repository {
       focusTarget: doc.focusTarget
         ? remapTarget(doc.focusTarget)
         : doc.focusTarget,
+      selectedSectionId: doc.selectedSectionId
+        ? (sectionIds.get(doc.selectedSectionId) ?? null)
+        : doc.selectedSectionId,
       id,
       revision: 0,
       createdAt: now,

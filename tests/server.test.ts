@@ -132,6 +132,7 @@ describe("local API and SQLite persistence", () => {
   it("duplicates imports safely without overwriting the original", async () => {
     const ai = await fixture();
     const original = ai.readContext.document;
+    original.selectedSectionId = original.sections[0].id;
     original.history.push({
       id: "historical",
       createdAt: original.createdAt,
@@ -158,6 +159,7 @@ describe("local API and SQLite persistence", () => {
     const imported = await response.json();
     expect(imported.id).not.toBe(original.id);
     expect(imported.sections[0].id).not.toBe(original.sections[0].id);
+    expect(imported.selectedSectionId).toBe(imported.sections[0].id);
     expect(imported.history[0].target.documentId).toBe(imported.id);
     expect(imported.sections[0].variants[0].target.sectionId).toBe(
       imported.sections[0].id,
