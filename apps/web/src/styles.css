@@ -401,6 +401,23 @@ hr {
   font-size: 12px;
   font-weight: 700;
 }
+.save-take-form {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.save-take-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.save-take-form input {
+  width: 100%;
+}
 .include-picker select {
   width: 100%;
 }

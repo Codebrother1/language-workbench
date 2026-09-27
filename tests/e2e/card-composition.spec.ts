@@ -364,14 +364,12 @@ test("saved Lab work on a card reopens variants and staged Structure without cha
   const first = page.locator(`[data-section-id="${imported.sections[0].id}"]`);
   const second = page.locator(`[data-section-id="${imported.sections[1].id}"]`);
   await expect(second.locator(".card-saved-work")).toHaveCount(0);
-  await first.getByRole("button", { name: "1 variant" }).click();
+  await first.getByRole("button", { name: "1 take" }).click();
   await expect(page.locator(".inspector details.variants")).toHaveAttribute(
     "open",
     "",
   );
-  await expect(page.getByLabel("Variant text")).toHaveValue(
-    "A separate choice.",
-  );
+  await expect(page.getByLabel("Take text")).toHaveValue("A separate choice.");
   await first.getByRole("button", { name: "Structure work" }).click();
   await expect(
     page.locator(".inspector details.structure-tool"),

@@ -1329,7 +1329,12 @@ export function WritingLabShell({
       {(hasTarget || explicitVariants) && section && !isWholeAnalysis && (
         <details ref={variantsRef} className="variants">
           <summary>
-            Variants <span className="count">{section.variants.length}</span>
+            {section.variants.some((v) => v.origin === "human")
+              ? section.variants.some((v) => v.origin !== "human")
+                ? "Saved takes & variants"
+                : "Saved takes"
+              : "Variants"}{" "}
+            <span className="count">{section.variants.length}</span>
           </summary>
           {section.variants.length === 0 ? (
             <p className="muted small">
@@ -1343,14 +1348,21 @@ export function WritingLabShell({
               const currentText = sectionText(section);
               return (
                 <article key={v.id} className="variant">
-                  {v.model && (
-                    <p className="small muted">
-                      {modelLabel(w.catalog, v.model)}
-                    </p>
-                  )}
-                  <Field label={v.origin + " variant"}>
+                  <p className="small muted">
+                    {v.origin === "human"
+                      ? "Saved by you"
+                      : v.origin === "original"
+                        ? "Original before apply"
+                        : "AI proposal"}
+                    {v.model ? ` · ${modelLabel(w.catalog, v.model)}` : ""}
+                  </p>
+                  <Field
+                    label={v.origin === "human" ? "Take name" : "Variant name"}
+                  >
                     <input
-                      aria-label="Variant label"
+                      aria-label={
+                        v.origin === "human" ? "Take name" : "Variant label"
+                      }
                       value={v.label}
                       onChange={(e) =>
                         w.update((d) => ({
@@ -1372,7 +1384,9 @@ export function WritingLabShell({
                     />
                   </Field>
                   <textarea
-                    aria-label="Variant text"
+                    aria-label={
+                      v.origin === "human" ? "Take text" : "Variant text"
+                    }
                     value={v.text}
                     rows={3}
                     onChange={(e) =>
@@ -1441,7 +1455,11 @@ export function WritingLabShell({
                       data-testid="variant-comparison"
                     >
                       <b>
-                        Original target snapshot
+                        {v.origin === "human"
+                          ? "When this take was saved"
+                          : v.origin === "original"
+                            ? "Original before apply"
+                            : "Original target"}
                         {originalText === currentText
                           ? " · Current draft text"
                           : ""}
@@ -1455,13 +1473,20 @@ export function WritingLabShell({
                       )}
                       {v.text !== originalText && v.text !== currentText ? (
                         <>
-                          <b>Saved variant / take</b>
+                          <b>
+                            {v.origin === "human"
+                              ? `${v.label} · Saved by you`
+                              : "Saved variant / take"}
+                          </b>
                           <p data-testid="compare-take">{v.text}</p>
                         </>
                       ) : (
                         <small>
-                          Saved{" "}
-                          {v.origin === "original" ? "original" : "variant"}{" "}
+                          {v.origin === "human"
+                            ? `${v.label} · Saved by you`
+                            : v.origin === "original"
+                              ? "Original before apply"
+                              : "Saved variant"}{" "}
                           matches the{" "}
                           {v.text === originalText
                             ? "original target"

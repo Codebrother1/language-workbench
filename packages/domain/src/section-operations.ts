@@ -2,6 +2,7 @@ import {
   draftSections,
   parkedSections,
   sectionText,
+  targetFor,
   uid,
   type Document,
   type EditTarget,
@@ -27,6 +28,44 @@ export function insertSectionAt(
       structuredClone(section),
       ...doc.sections.slice(index),
     ],
+  };
+}
+
+export function saveSectionTake(
+  doc: Document,
+  sectionId: string,
+  name = "",
+): Document {
+  const index = sectionIndex(doc, sectionId);
+  const section = doc.sections[index];
+  const text = sectionText(section);
+  if (!text.trim())
+    throw new Error("Write in this section before saving a take.");
+  if (
+    section.variants.some(
+      (variant) => variant.origin === "human" && variant.text === text,
+    )
+  )
+    throw new Error("This take is already saved.");
+  let number =
+    section.variants.filter((variant) => variant.origin === "human").length + 1;
+  while (section.variants.some((variant) => variant.label === `Take ${number}`))
+    number++;
+  const take = {
+    id: uid(),
+    label: name.trim().slice(0, 80) || `Take ${number}`,
+    text,
+    target: targetFor(doc, sectionId),
+    origin: "human" as const,
+    createdAt: new Date().toISOString(),
+  };
+  return {
+    ...doc,
+    sections: doc.sections.map((item) =>
+      item.id === sectionId
+        ? { ...item, variants: [...item.variants, take] }
+        : item,
+    ),
   };
 }
 

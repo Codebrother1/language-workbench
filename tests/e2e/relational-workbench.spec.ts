@@ -164,7 +164,7 @@ test("empty Segue storyboard + neighbors → coaching → relational comparison 
   );
   await expect(compare.getByTestId("compare-original")).toHaveCount(1);
   await expect(compare.getByTestId("compare-original")).toContainText(
-    "Original target snapshot",
+    "Original before apply",
   );
   await expect(compare.getByTestId("compare-version")).toHaveCount(1);
   await compare.getByRole("button", { name: "Back to this Segue" }).click();

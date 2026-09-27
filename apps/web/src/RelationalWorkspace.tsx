@@ -134,6 +134,9 @@ export function RelationalCompare({
       .join("");
   if (!section) return null;
   const canonicalText = sectionText(section);
+  const currentTakeNames = section.variants
+    .filter((take) => take.origin === "human" && take.text === canonicalText)
+    .map((take) => take.label);
   const originalVariant = section.variants
     .filter((variant) => variant.origin === "original")
     .at(-1);
@@ -147,11 +150,15 @@ export function RelationalCompare({
         (variant) =>
           variant.origin !== "original" || variant.text !== originalText,
       )
+      .sort(
+        (a, b) => Number(b.origin === "human") - Number(a.origin === "human"),
+      )
       .map((v) => ({
         id: v.id,
         label: v.label,
         text: v.text,
         model: v.model,
+        origin: v.origin,
         type: "variant" as const,
       })),
     ...(w.response?.proposals ?? []).map((p) => ({
@@ -159,6 +166,7 @@ export function RelationalCompare({
       label: p.label,
       text: p.text,
       model: w.response?.model,
+      origin: "ai" as const,
       type: "proposal" as const,
     })),
   ];
@@ -180,7 +188,11 @@ export function RelationalCompare({
         ...new Set(
           allCandidates
             .filter((other) => other.text === candidate.text)
-            .map((other) => modelLabel(w.catalog, other.model)),
+            .map((other) =>
+              other.origin === "human"
+                ? "Saved by you"
+                : modelLabel(w.catalog, other.model),
+            ),
         ),
       ],
     }));
@@ -247,7 +259,9 @@ export function RelationalCompare({
             className="comparison-version"
             data-testid="compare-original"
           >
-            <span className="eyebrow">Original target snapshot</span>
+            <span className="eyebrow">
+              {originalVariant ? "Original before apply" : "Original target"}
+            </span>
             <p>{originalText}</p>
           </article>
         )}
@@ -259,6 +273,9 @@ export function RelationalCompare({
           <p data-testid="compare-canonical">
             {canonicalText || "Empty — still waiting for your words."}
           </p>
+          {!!currentTakeNames.length && (
+            <small>Also saved as {currentTakeNames.join(" · ")}</small>
+          )}
           {section.notes && <p className="small muted">{section.notes}</p>}
           <Button onClick={() => w.copy(sectionText(section))}>
             Copy current
@@ -275,7 +292,11 @@ export function RelationalCompare({
               data-testid="compare-version"
             >
               <span className="eyebrow">
-                {c.type === "variant" ? "Saved variant / take" : "AI proposal"}{" "}
+                {c.origin === "human"
+                  ? "Saved take"
+                  : c.type === "variant"
+                    ? "Saved variant"
+                    : "AI proposal"}{" "}
                 · {display(c.label)}
               </span>
               <small>{c.sources.join(" · ")}</small>

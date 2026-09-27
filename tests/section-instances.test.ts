@@ -21,6 +21,7 @@ import {
 } from "../packages/domain/src/index";
 import {
   duplicateSection,
+  saveSectionTake,
   insertSectionAt,
   insertParkedSection,
   parkSection,
@@ -299,6 +300,79 @@ describe("insertSectionAt", () => {
         null,
       ),
     ).toThrow("ID already exists");
+  });
+});
+
+describe("human-authored section takes", () => {
+  it("captures exact prose without changing draft, role or run history and refuses identical human takes", () => {
+    const doc = newDocument("Dialogue", "Yeah.");
+    const original = JSON.stringify(doc);
+    const calm = saveSectionTake(freeze(doc), doc.sections[0].id, "  Calm  ");
+    expect(JSON.stringify(doc)).toBe(original);
+    expect(calm.sections[0].variants[0]).toMatchObject({
+      label: "Calm",
+      text: "Yeah.",
+      origin: "human",
+      target: {
+        scope: "section",
+        sectionId: doc.sections[0].id,
+        text: "Yeah.",
+      },
+    });
+    expect(calm.sections[0].content).toEqual(doc.sections[0].content);
+    expect(calm.history).toEqual([]);
+    expect(() => saveSectionTake(calm, doc.sections[0].id)).toThrow(
+      "This take is already saved",
+    );
+    const louder = {
+      ...calm,
+      sections: calm.sections.map((section) => ({
+        ...section,
+        content: paragraphs("Yeah!"),
+      })),
+    };
+    const next = saveSectionTake(louder, doc.sections[0].id, "Louder");
+    expect(next.sections[0].variants.map((v) => [v.label, v.text])).toEqual([
+      ["Calm", "Yeah."],
+      ["Louder", "Yeah!"],
+    ]);
+    const third = {
+      ...next,
+      sections: next.sections.map((section) => ({
+        ...section,
+        content: paragraphs("Yeah!!"),
+      })),
+    };
+    expect(
+      saveSectionTake(third, doc.sections[0].id).sections[0].variants.at(-1)
+        ?.label,
+    ).toBe("Take 3");
+  });
+  it("keeps takes with their owner when duplicated, parked or removed", () => {
+    const base = newDocument("Takes", "Keep this version.");
+    base.sections.push(newSection("Closer", "Another section."));
+    const id = base.sections[0].id;
+    const doc = saveSectionTake(base, id, "Before cut");
+    const copy = duplicateSection(doc, id).sections[1];
+    expect(copy.variants[0]).toMatchObject({
+      label: "Before cut",
+      origin: "human",
+      text: "Keep this version.",
+      target: { sectionId: copy.id },
+    });
+    expect(doc.sections[0].variants[0].target.sectionId).toBe(id);
+    const parked = parkSection(doc, id);
+    expect(
+      parked.sections.find((section) => section.id === id)?.variants,
+    ).toEqual(doc.sections[0].variants);
+    const included = includeSectionAt(parked, id, null);
+    expect(
+      included.sections.find((section) => section.id === id)?.variants,
+    ).toEqual(doc.sections[0].variants);
+    const removed = removeSection(doc, id, newSection("Freeform"));
+    expect(
+      removed.sections.every((section) => section.variants.length === 0),
+    ).toBe(true);
   });
 });
 

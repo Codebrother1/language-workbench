@@ -186,6 +186,18 @@ function ParkedGroupHeading({
   );
 }
 type SavedWorkKind = "variants" | "structure" | "history";
+function savedWorkLabel(section: WritingSection): string {
+  const takes = section.variants.filter(
+    (variant) => variant.origin === "human",
+  ).length;
+  const other = section.variants.length - takes;
+  return [
+    takes ? `${takes} ${takes === 1 ? "take" : "takes"}` : "",
+    other ? `${other} ${other === 1 ? "variant" : "variants"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 function Structure({
   w,
   onRemove,
@@ -216,6 +228,8 @@ function Structure({
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [includeId, setIncludeId] = useState<string | null>(null);
   const [includePosition, setIncludePosition] = useState("");
+  const [saveTakeId, setSaveTakeId] = useState<string | null>(null);
+  const [takeName, setTakeName] = useState("");
   const structureRef = useRef<HTMLElement>(null);
   const thoughtRef = useRef<HTMLTextAreaElement>(null);
   const draftStart = useRef<HTMLDivElement>(null);
@@ -601,8 +615,7 @@ function Structure({
                         <Button
                           onClick={() => onOpenSavedWork(s.id, "variants")}
                         >
-                          {s.variants.length}{" "}
-                          {s.variants.length === 1 ? "variant" : "variants"}
+                          {savedWorkLabel(s)}
                         </Button>
                       )}
                       {(s.workbench?.structure?.thoughtA ||
@@ -807,7 +820,48 @@ function Structure({
                           </Button>
                         </>
                       )}
+                      <Button
+                        onClick={() => {
+                          setSaveTakeId(s.id);
+                          setTakeName("");
+                        }}
+                      >
+                        Save take
+                      </Button>
                     </div>
+                  )}
+                  {saveTakeId === s.id && w.target?.sectionId === s.id && (
+                    <form
+                      className="save-take-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        if (w.saveTake(s.id, takeName)) {
+                          setSaveTakeId(null);
+                          setTakeName("");
+                        }
+                      }}
+                    >
+                      <label>
+                        Take name (optional)
+                        <input
+                          value={takeName}
+                          maxLength={80}
+                          onChange={(event) => setTakeName(event.target.value)}
+                          placeholder="Calm, Before cut…"
+                        />
+                      </label>
+                      <div className="row wrap">
+                        <Button type="submit" className="primary">
+                          Save this take
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={() => setSaveTakeId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </form>
                   )}
                   {s.placement === "parked" && includeId === s.id && (
                     <div

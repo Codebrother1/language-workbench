@@ -237,6 +237,211 @@ test("sentence diagnosis reads globally but proposal, copy and acceptance stay l
     "First sentence stays.",
   );
 });
+test("human Save take preserves two manual closers and switches them without a model call", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  const calls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/ai")) calls.push(r.url());
+  });
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Calm");
+  await page.getByRole("button", { name: "Save this take" }).click();
+  await expect(
+    page.getByRole("button", { name: "1 take", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByRole("button", { name: "Save this take" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "This take is already saved",
+  );
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Leave this ending alone!");
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Louder");
+  await page.getByRole("button", { name: "Save this take" }).click();
+  await page.getByRole("button", { name: "2 takes", exact: true }).click();
+  const saved = page.locator(".variants .variant");
+  await expect(saved).toHaveCount(2);
+  await expect(saved.nth(0).getByLabel("Take name")).toHaveValue("Calm");
+  await expect(saved.nth(1).getByLabel("Take name")).toHaveValue("Louder");
+  await saved.nth(0).getByRole("button", { name: "Activate" }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "Leave this ending alone.",
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "Leave this ending alone!",
+  );
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "Leave this ending alone.",
+  );
+  await saved.nth(1).getByRole("button", { name: "Activate" }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "Leave this ending alone!",
+  );
+  await saved.nth(0).getByRole("button", { name: "Compare" }).click();
+  await expect(page.getByTestId("compare-current")).toHaveText(
+    "Leave this ending alone!",
+  );
+  await select(page, "Leave this ending alone!");
+  await page.keyboard.insertText("Leave this ending alone!!");
+  await expect(page.getByTestId("compare-current")).toHaveText(
+    "Leave this ending alone!!",
+  );
+  await expect(page.getByTestId("compare-original")).toHaveText(
+    "Leave this ending alone.",
+  );
+  await saved.nth(0).getByRole("button", { name: "Activate" }).click();
+  await expect(saved).toHaveCount(3);
+  await expect(saved.nth(2).getByLabel("Take name")).toHaveValue("Take 3");
+  await save(page);
+  const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(stored.sections[2]).toMatchObject({
+    id: doc.sections[2].id,
+    kind: "Closer",
+    label: "Closer",
+    notes: "",
+    placement: "draft",
+  });
+  expect(stored.sections.slice(0, 2).map((s: any) => s.content)).toEqual(
+    doc.sections.slice(0, 2).map((s) => s.content),
+  );
+  expect(
+    stored.sections[2].variants.map((v: any) => [v.label, v.origin]),
+  ).toEqual([
+    ["Calm", "human"],
+    ["Louder", "human"],
+    ["Take 3", "human"],
+  ]);
+  expect(calls).toEqual([]);
+  await page.reload();
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "3 takes", exact: true }).click();
+  await expect(page.locator(".variants .variant")).toHaveCount(3);
+});
+
+test("saved take stays with its section through rename, role, reorder, park, include and duplicate", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const id = doc.sections[2].id;
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByRole("button", { name: "Save this take" }).click();
+  await page.getByRole("button", { name: "1 take", exact: true }).click();
+  await expect(
+    page.locator(".variants .variant").getByLabel("Take name"),
+  ).toHaveValue("Take 1");
+  await page
+    .locator(".variants .variant")
+    .getByLabel("Take name")
+    .fill("Before cut");
+  await page
+    .locator(`[data-section-id="${id}"] .section-options > summary`)
+    .click();
+  await page.getByLabel("Label", { exact: true }).fill("Ending note");
+  await page.getByLabel("Semantic kind").selectOption("Point");
+  await page.getByRole("button", { name: "Move section up" }).click();
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await page.getByRole("button", { name: "Park thought" }).click();
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await page.getByRole("button", { name: "Include in draft" }).click();
+  await page.getByLabel("Draft position").selectOption("__end__");
+  await page.getByRole("button", { name: "Include here" }).click();
+  await save(page);
+  const retained = (
+    await (await request.get(`/api/documents/${doc.id}`)).json()
+  ).sections.find((section: any) => section.id === id);
+  expect(retained).toMatchObject({
+    label: "Ending note",
+    kind: "Point",
+    placement: "draft",
+    variants: [
+      { label: "Before cut", origin: "human", target: { sectionId: id } },
+    ],
+  });
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  const options = page.locator(`[data-section-id="${id}"] .section-options`);
+  if (
+    !(await options.evaluate((element) => (element as HTMLDetailsElement).open))
+  )
+    await options.locator("summary").click();
+  await page.getByRole("button", { name: "Duplicate section" }).click();
+  await save(page);
+  const stored = (await (await request.get(`/api/documents/${doc.id}`)).json())
+    .sections;
+  const copy = stored.find(
+    (section: any) => section.label === "Ending note — copy",
+  );
+  expect(copy.variants[0]).toMatchObject({
+    label: "Before cut",
+    origin: "human",
+    target: { sectionId: copy.id },
+  });
+  expect(copy.variants[0].id).not.toBe(retained.variants[0].id);
+  expect(stored.find((section: any) => section.id === id).variants[0].id).toBe(
+    retained.variants[0].id,
+  );
+  await page.locator(`[data-section-id="${copy.id}"] .section-focus`).click();
+  await page
+    .locator(`[data-section-id="${copy.id}"] .card-saved-work`)
+    .getByRole("button", { name: "1 take", exact: true })
+    .click();
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Copy variant" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("Leave this ending alone.");
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Delete variant" })
+    .click();
+  await save(page);
+  const after = (await (await request.get(`/api/documents/${doc.id}`)).json())
+    .sections;
+  expect(after.find((section: any) => section.id === copy.id).variants).toEqual(
+    [],
+  );
+  expect(after.find((section: any) => section.id === id).variants[0].id).toBe(
+    retained.variants[0].id,
+  );
+});
+
+test("splitting leaves saved takes only on the original half", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const id = doc.sections[2].id;
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Before split");
+  await page.getByRole("button", { name: "Save this take" }).click();
+  await select(page, "alone.", true);
+  await page.getByRole("button", { name: "Split section at cursor" }).click();
+  await save(page);
+  const sections = (
+    await (await request.get(`/api/documents/${doc.id}`)).json()
+  ).sections;
+  const index = sections.findIndex((section: any) => section.id === id);
+  expect(sections[index].variants).toMatchObject([
+    { label: "Before split", origin: "human", target: { sectionId: id } },
+  ]);
+  expect(sections[index + 1].variants).toEqual([]);
+  expect(sections[index + 1].id).not.toBe(id);
+});
+
 test("word inspection and section lab use exact targets; critique never edits", async ({
   page,
   request,

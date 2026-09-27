@@ -15,6 +15,7 @@ import {
   type RevisionTrailEntry,
   type WritingSection,
   insertSectionAt,
+  saveSectionTake,
   insertParkedSection,
   parkSection,
   includeSectionAt,
@@ -1211,6 +1212,19 @@ export function useWorkspace() {
       setError((error as Error).message);
     }
   };
+  const saveTake = (id: string, name = "") => {
+    try {
+      update((doc) => saveSectionTake(doc, id, name));
+      const take = current.current.sections
+        .find((section) => section.id === id)
+        ?.variants.at(-1);
+      setNotice(`Saved take · ${take?.label ?? "Take"}`);
+      return true;
+    } catch (error) {
+      setNotice((error as Error).message);
+      return false;
+    }
+  };
   const deleteSection = (id: string) => {
     try {
       const oldIndex = current.current.sections.findIndex((s) => s.id === id);
@@ -2042,7 +2056,7 @@ export function useWorkspace() {
     if (activeRun)
       update((d) => editRunProposal(d, sectionId, activeRun.id, id, text));
   };
-  const applyText = (t: EditTarget, text: string) => {
+  const applyText = (t: EditTarget, text: string, captureOriginal = true) => {
     if (!editor) throw new Error("Editor unavailable");
     if (t.scope === "document")
       throw new Error("Document analysis cannot replace your writing.");
@@ -2124,23 +2138,25 @@ export function useWorkspace() {
         t.scope === "section" ? 0 : t.start,
         t.scope === "section" ? undefined : t.start + text.length,
       );
-      const original: Variant = {
-        id: uid(),
-        label: "Original target",
-        text: t.text,
-        target: acceptedTarget,
-        sourceTarget: t,
-        origin: "original",
-        createdAt: new Date().toISOString(),
-      };
-      update((d) => ({
-        ...d,
-        sections: d.sections.map((s) =>
-          s.id === t.sectionId
-            ? { ...s, variants: [...s.variants, original] }
-            : s,
-        ),
-      }));
+      if (captureOriginal) {
+        const original: Variant = {
+          id: uid(),
+          label: "Original target",
+          text: t.text,
+          target: acceptedTarget,
+          sourceTarget: t,
+          origin: "original",
+          createdAt: new Date().toISOString(),
+        };
+        update((d) => ({
+          ...d,
+          sections: d.sections.map((s) =>
+            s.id === t.sectionId
+              ? { ...s, variants: [...s.variants, original] }
+              : s,
+          ),
+        }));
+      }
       explicitAnchor.current = {
         from: editor.state.selection.from,
         to: editor.state.selection.to,
@@ -2156,7 +2172,11 @@ export function useWorkspace() {
       restoreScroll();
       requestAnimationFrame(restoreScroll);
     }
-    setNotice("Applied only to the target. Original saved as a variant.");
+    setNotice(
+      captureOriginal
+        ? "Applied only to the target. Original saved as a variant."
+        : "Activated take in this section. Your other writing is unchanged.",
+    );
   };
   const decide = (id: string, state: "accepted" | "rejected" | "saved") => {
     try {
@@ -2209,11 +2229,57 @@ export function useWorkspace() {
   };
   const activate = (v: Variant) => {
     try {
-      applyText(v.target, v.text);
+      if (v.origin !== "human") return applyText(v.target, v.text);
+      const section = current.current.sections.find(
+        (item) => item.id === v.target.sectionId,
+      );
+      const take = section?.variants.find(
+        (item) => item.id === v.id && item.origin === "human",
+      );
+      if (
+        !section ||
+        !take ||
+        v.target.documentId !== current.current.id ||
+        v.target.scope !== "section" ||
+        v.target.start !== 0 ||
+        v.target.end !== v.target.sectionSnapshot.length ||
+        v.target.text !== v.target.sectionSnapshot
+      )
+        throw new Error("This take no longer belongs to an available section.");
+      const currentText = sectionText(section);
+      if (currentText === take.text)
+        return setNotice("This take is already current.");
+      const needsTake =
+        !!currentText.trim() &&
+        !section.variants.some(
+          (item) => item.origin !== "ai" && item.text === currentText,
+        );
+      const leaving = needsTake
+        ? saveSectionTake(current.current, section.id)
+            .sections.find((item) => item.id === section.id)!
+            .variants.at(-1)!
+        : null;
+      applyText(targetFor(current.current, section.id), take.text, false);
+      if (leaving)
+        update((doc) => ({
+          ...doc,
+          sections: doc.sections.map((item) =>
+            item.id === section.id
+              ? { ...item, variants: [...item.variants, leaving] }
+              : item,
+          ),
+        }));
+      setNotice(
+        leaving
+          ? `Activated ${take.label}. Previous draft saved as ${leaving.label}.`
+          : `Activated ${take.label}.`,
+      );
     } catch (e) {
       setError(
-        (e as Error).message +
-          " Copy the variant, then make a fresh selection to use it manually.",
+        v.origin === "human"
+          ? (e as Error).message
+          : (e as Error).message +
+              " Copy the variant, then make a fresh selection to use it manually.",
       );
     }
   };
@@ -2469,6 +2535,7 @@ export function useWorkspace() {
     requestSectionInsertion,
     insertSection,
     duplicateSection,
+    saveTake,
     deleteSection,
     library,
     libraryReady,
