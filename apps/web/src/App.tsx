@@ -11,7 +11,12 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DockDivider, type PaneWidths } from "./DockDivider";
 import { EditorContent } from "@tiptap/react";
 import { Selection, TextSelection } from "@tiptap/pm/state";
-import { sectionLocation, scrollPreviewToSection } from "./editor";
+import {
+  sectionLocation,
+  scrollPreviewToSection,
+  scrollPreviewToTarget,
+} from "./editor";
+import { resolveHistoricalTarget } from "./target-drafts";
 import { sectionContentRange } from "./section-boundary";
 import {
   PanelLeft,
@@ -81,7 +86,7 @@ function draftPositionLabel(section: WritingSection, index: number): string {
       ? section.label.trim()
       : opening || section.label;
   const short = name.length > 52 ? name.slice(0, 49).trimEnd() + "…" : name;
-  return `Before ${index + 1}. “${short}” · ${section.kind}`;
+  return `After “${short}” · section ${index + 1} ${section.kind}`;
 }
 
 function ShortLabelEditor({
@@ -933,8 +938,13 @@ function Structure({
                         }
                       >
                         <option value="">Choose an exact position…</option>
-                        {draft.map((item, index) => (
-                          <option key={item.id} value={item.id}>
+                        {draft.length > 0 && (
+                          <option value={draft[0].id}>
+                            At beginning of draft
+                          </option>
+                        )}
+                        {draft.slice(0, -1).map((item, index) => (
+                          <option key={item.id} value={draft[index + 1].id}>
                             {draftPositionLabel(item, index)}
                           </option>
                         ))}
@@ -1633,6 +1643,43 @@ export default function App() {
       token: Date.now(),
     });
   };
+  const returnToSection = (sectionId: string, runId: string) => {
+    const section = w.doc.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+    w.noteRevisionContext(runId, sectionId);
+    if (section.parkedGroupId)
+      w.setParkedGroupCollapsed(section.parkedGroupId, false);
+    if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
+    if (w.layout.primaryView !== "workbench")
+      void w.setPrimaryView("workbench");
+    setPreviewFocused(false);
+    w.prepareSectionTarget(sectionId);
+    setPendingJump(sectionId);
+  };
+  const returnToSelection = (sectionId: string, runId: string) => {
+    const section = w.doc.sections.find((item) => item.id === sectionId);
+    const run = section?.workbench?.runs.find((item) => item.id === runId);
+    if (!section || !run || run.target.documentId !== w.doc.id) return;
+    w.noteRevisionContext(runId, sectionId);
+    const resolution = resolveHistoricalTarget(w.doc, run.target);
+    if (section.parkedGroupId)
+      w.setParkedGroupCollapsed(section.parkedGroupId, false);
+    if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
+    if (w.layout.primaryView !== "workbench")
+      void w.setPrimaryView("workbench");
+    setPreviewFocused(false);
+    setParkedFocusId(null);
+    setReadingMode(false);
+    w.inspectSectionRun(sectionId, runId);
+    if (w.editor?.view.hasFocus()) w.editor.view.dom.blur();
+    if (resolution.status === "exact")
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (!w.editor || !scrollPreviewToTarget(w.editor, resolution.current))
+            scrollPreviewToSection(sectionId, false, true);
+        }),
+      );
+  };
   const returnToLab = (sectionId: string, runId: string) => {
     if (!w.doc.sections.some((section) => section.id === sectionId)) return;
     w.noteRevisionContext(runId, sectionId);
@@ -1654,7 +1701,6 @@ export default function App() {
       token: Date.now(),
     });
     setPendingJump(sectionId);
-    requestAnimationFrame(() => scrollPreviewToSection(sectionId));
   };
   const returnToFinding = () => {
     if (!findingVisit || findingVisit.documentId !== w.doc.id) return;
@@ -2407,6 +2453,8 @@ export default function App() {
             onReturnFinding={returnToFinding}
             labOrigin={labOrigin?.documentId === w.doc.id ? labOrigin : null}
             onReturnToLab={returnToLab}
+            onReturnToSelection={returnToSelection}
+            onReturnToSection={returnToSection}
             onOpenTrailFinding={openTrailFinding}
             takeOriginSectionId={
               takeReturn?.documentId === w.doc.id ? takeReturn.sectionId : null

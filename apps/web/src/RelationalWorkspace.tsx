@@ -3,7 +3,7 @@ import { draftSections, sectionText, type WritingSection } from "./domain";
 import type { Workspace } from "./useWorkspace";
 import { Button, Dialog } from "./ui";
 import { modelLabel } from "./ModelControls";
-import { sectionMentions, textDifference } from "./workspace-helpers";
+import { sectionMentions, alignedTextDifference } from "./workspace-helpers";
 export function NeighborContext({
   section,
   label,
@@ -145,7 +145,9 @@ export function RelationalCompare({
     originalVariant?.text ??
     (w.responseTarget?.sectionId === section.id ? w.responseTarget.text : null);
   const draftDiff =
-    originalText === null ? null : textDifference(originalText, canonicalText);
+    originalText === null
+      ? null
+      : alignedTextDifference(originalText, canonicalText);
   const allCandidates = [
     ...section.variants
       .filter(
@@ -265,13 +267,19 @@ export function RelationalCompare({
               {originalVariant ? "Original before apply" : "Original target"}
             </span>
             <p>
-              {draftDiff!.prefix}
-              {draftDiff!.removed && (
-                <mark className="compare-removed" title="Earlier wording">
-                  {draftDiff!.removed}
-                </mark>
+              {draftDiff!.before.map((part, index) =>
+                part.changed ? (
+                  <mark
+                    key={index}
+                    className="compare-removed"
+                    title="Earlier wording"
+                  >
+                    {part.text}
+                  </mark>
+                ) : (
+                  part.text
+                ),
               )}
-              {draftDiff!.suffix}
             </p>
           </article>
         )}
@@ -283,13 +291,19 @@ export function RelationalCompare({
           <p data-testid="compare-canonical">
             {draftDiff && originalText !== canonicalText ? (
               <>
-                {draftDiff.prefix}
-                {draftDiff.added && (
-                  <mark className="compare-added" title="Current wording">
-                    {draftDiff.added}
-                  </mark>
+                {draftDiff.after.map((part, index) =>
+                  part.changed ? (
+                    <mark
+                      key={index}
+                      className="compare-added"
+                      title="Current wording"
+                    >
+                      {part.text}
+                    </mark>
+                  ) : (
+                    part.text
+                  ),
                 )}
-                {draftDiff.suffix}
               </>
             ) : (
               canonicalText || "Empty — still waiting for your words."
@@ -307,7 +321,15 @@ export function RelationalCompare({
           const containsKnownId = sectionMentions(w.doc, c.text).some(
             (part) => part.sectionId,
           );
-          const difference = textDifference(canonicalText, c.text);
+          const difference = alignedTextDifference(canonicalText, c.text);
+          const removed = difference.before
+            .filter((part) => part.changed)
+            .map((part) => part.text)
+            .join(" … ");
+          const added = difference.after
+            .filter((part) => part.changed)
+            .map((part) => part.text)
+            .join(" … ");
           return (
             <article
               key={c.id}
@@ -352,12 +374,8 @@ export function RelationalCompare({
                 aria-label="Text difference from current draft"
               >
                 Changed:{" "}
-                {difference.removed && (
-                  <del className="compare-removed">{difference.removed}</del>
-                )}{" "}
-                {difference.added && (
-                  <ins className="compare-added">{difference.added}</ins>
-                )}
+                {removed && <del className="compare-removed">{removed}</del>}{" "}
+                {added && <ins className="compare-added">{added}</ins>}
               </small>
               <div className="row wrap">
                 <Button onClick={() => w.copy(display(c.text))}>

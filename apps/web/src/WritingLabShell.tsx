@@ -42,7 +42,8 @@ import {
   resultOutcome,
   writerResultReason,
   currentTakeIds,
-  textDifference,
+  alignedTextDifference,
+  type DiffPart,
   labActionLabel,
 } from "./workspace-helpers";
 
@@ -76,6 +77,32 @@ function ReferencedText({
   );
 }
 
+function DiffText({
+  parts,
+  kind,
+}: {
+  parts: DiffPart[];
+  kind: "added" | "removed";
+}) {
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.changed ? (
+          <mark
+            key={index}
+            className={`compare-${kind}`}
+            title={kind === "added" ? "Changed wording" : "Earlier wording"}
+          >
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  );
+}
+
 export function WritingLabShell({
   w,
   navigation,
@@ -88,6 +115,8 @@ export function WritingLabShell({
   onReturnFinding,
   labOrigin,
   onReturnToLab,
+  onReturnToSelection,
+  onReturnToSection,
   onOpenTrailFinding,
   takeOriginSectionId,
   onReturnToTakeSection,
@@ -121,6 +150,8 @@ export function WritingLabShell({
   onReturnFinding: () => void;
   labOrigin?: { documentId: string; sectionId: string; runId: string } | null;
   onReturnToLab: (sectionId: string, runId: string) => void;
+  onReturnToSelection: (sectionId: string, runId: string) => void;
+  onReturnToSection: (sectionId: string, runId: string) => void;
   onOpenTrailFinding: (runId: string, findingIndex: number) => void;
   takeOriginSectionId?: string | null;
   onReturnToTakeSection: () => void;
@@ -796,6 +827,12 @@ export function WritingLabShell({
       )}
       {response && (
         <section className="response" ref={responseRef} aria-live="polite">
+          {restoreLabRun?.runId === w.activeRun?.id && (
+            <p className="small muted" data-testid="saved-run-context">
+              Saved Lab result · {w.activeRun?.action} ·{" "}
+              {humanTargetLabel(w.activeRun!.target)}
+            </p>
+          )}
           <div className="row between">
             <span className="eyebrow">
               {responseTarget?.scope === "document"
@@ -938,7 +975,16 @@ export function WritingLabShell({
                   <Button
                     className="text-button"
                     onClick={() =>
-                      onReturnToLab(responseTarget.sectionId!, w.activeRun!.id)
+                      responseTarget.scope === "selection" ||
+                      responseTarget.scope === "word"
+                        ? onReturnToSelection(
+                            responseTarget.sectionId!,
+                            w.activeRun!.id,
+                          )
+                        : onReturnToSection(
+                            responseTarget.sectionId!,
+                            w.activeRun!.id,
+                          )
                     }
                   >
                     {w.doc.sections.find(
@@ -1406,8 +1452,11 @@ export function WritingLabShell({
                 v.sourceTarget?.text ??
                 (v.origin === "original" ? v.text : v.target.text);
               const currentText = sectionText(section);
-              const draftDiff = textDifference(originalText, currentText);
-              const takeDiff = textDifference(currentText, v.text);
+              const draftDiff = alignedTextDifference(
+                originalText,
+                currentText,
+              );
+              const takeDiff = alignedTextDifference(currentText, v.text);
               return (
                 <article key={v.id} className="variant">
                   {currentTakes.includes(v.id) && (
@@ -1548,31 +1597,13 @@ export function WritingLabShell({
                           : ""}
                       </b>
                       <p data-testid="compare-original">
-                        {draftDiff.prefix}
-                        {draftDiff.removed && (
-                          <mark
-                            className="compare-removed"
-                            title="Earlier wording"
-                          >
-                            {draftDiff.removed}
-                          </mark>
-                        )}
-                        {draftDiff.suffix}
+                        <DiffText parts={draftDiff.before} kind="removed" />
                       </p>
                       {originalText !== currentText && (
                         <>
                           <b>Current draft text</b>
                           <p data-testid="compare-current">
-                            {draftDiff.prefix}
-                            {draftDiff.added && (
-                              <mark
-                                className="compare-added"
-                                title="Current wording"
-                              >
-                                {draftDiff.added}
-                              </mark>
-                            )}
-                            {draftDiff.suffix}
+                            <DiffText parts={draftDiff.after} kind="added" />
                           </p>
                         </>
                       )}
@@ -1586,16 +1617,7 @@ export function WritingLabShell({
                                 : `${v.label} · AI proposal saved as take`}
                           </b>
                           <p data-testid="compare-take">
-                            {takeDiff.prefix}
-                            {takeDiff.added && (
-                              <mark
-                                className="compare-added"
-                                title="Saved take wording"
-                              >
-                                {takeDiff.added}
-                              </mark>
-                            )}
-                            {takeDiff.suffix}
+                            <DiffText parts={takeDiff.after} kind="added" />
                           </p>
                         </>
                       ) : (

@@ -1708,6 +1708,9 @@ test("saved sentence run never highlights another sentence after its target is r
   await expect(page.getByTestId("target-resolution")).toContainText(
     replacement,
   );
+  await expect(
+    page.getByRole("button", { name: "Return to selection" }),
+  ).toHaveCount(0);
   await expect(page.locator(".local-history .run-entry")).not.toContainText(
     "Earlier section",
   );
@@ -1755,6 +1758,9 @@ test("saved sentence run never highlights another sentence after its target is r
     "can’t be located reliably",
   );
   await expect(
+    page.getByRole("button", { name: "Return to selection" }),
+  ).toHaveCount(0);
+  await expect(
     page.getByRole("button", { name: "Return to current passage" }),
   ).toHaveCount(0);
   await expect(page.locator(`[id="${id}"] .target-highlight`)).toHaveCount(0);
@@ -1764,6 +1770,33 @@ test("saved sentence run never highlights another sentence after its target is r
   await page.getByRole("button", { name: /Diagnose this/ }).click();
   await expect.poll(() => requests).toBe(3);
 });
+
+for (const width of [1440, 700])
+  test(`Return to selection shows the exact highlighted passage at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const calls: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.url());
+    });
+    await section(page, "Hook");
+    await select(page, "The rest stays mine.");
+    await diagnose(page);
+    await expect(
+      page.getByRole("button", { name: "Return to selection" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Return to selection" }).click();
+    const highlight = page.locator(
+      `[id="${doc.sections[0].id}"] .target-highlight`,
+    );
+    await expect(highlight).toContainText("The rest stays mine.");
+    await expect(highlight).toBeInViewport();
+    expect(calls).toHaveLength(1);
+  });
 
 test("historical Lab target status and the exact question remain oriented through reload", async ({
   page,
@@ -1821,6 +1854,14 @@ test("historical Lab target status and the exact question remain oriented throug
   await expect(
     page.locator(`[id="${imported.sections[0].id}"] .target-highlight`),
   ).toHaveCount(0);
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.getByRole("button", { name: "Return to current passage" }).click();
+  const mapped = page.locator(
+    `[id="${imported.sections[0].id}"] .target-highlight`,
+  );
+  await expect(mapped).toContainText(changed);
+  await expect(mapped).toBeInViewport();
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page
     .locator(`[data-section-id="${imported.sections[1].id}"] .section-focus`)
     .click();
@@ -1872,6 +1913,32 @@ test("historical Lab target status and the exact question remain oriented throug
   expect(calls).toBe(1);
 });
 
+test("Return to section restores the card without acting like Return to question", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await section(page, "Hook");
+  await diagnose(page);
+  await page
+    .locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`)
+    .click();
+  await page.getByTestId("lab-return").getByRole("button").click();
+  await page
+    .getByRole("button", { name: "Return to section", exact: true })
+    .click();
+  await expect(
+    page.locator(`[data-section-id="${doc.sections[0].id}"]`),
+  ).toHaveClass(/active/);
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  expect(calls).toHaveLength(1);
+});
+
 test("stacked Return to question brings its saved result into view without refocusing prose", async ({
   page,
   request,
@@ -1884,13 +1951,21 @@ test("stacked Return to question brings its saved result into view without refoc
     if (event.url().endsWith("/api/ai")) calls.push(event.url());
   });
   await section(page, "Hook");
+  await select(page, "The rest stays mine.");
   await diagnose(page);
+  await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Delivery Lens" }),
+  ).toBeVisible();
   await page
     .locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`)
     .click();
   await expect(page.getByTestId("lab-return")).toBeVisible();
   await page.getByTestId("lab-return").getByRole("button").click();
   await expect(page.locator(".response")).toBeInViewport();
+  await expect(page.getByTestId("saved-run-context")).toContainText(
+    "Saved Lab result · coach",
+  );
   await expect(page.getByTestId("writing-editor")).not.toBeFocused();
   expect(calls).toHaveLength(1);
 });

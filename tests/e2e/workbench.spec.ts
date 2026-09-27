@@ -453,6 +453,81 @@ test("take comparison emphasizes a changed word without rewriting the draft", as
   );
 });
 
+test("substantial take rewrites leave shared phrases unmarked in read-only Compare", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const before =
+    "The telemarketer called at work. Forty minutes later, I hung up and went back to my desk.";
+  const after =
+    "That telemarketer kept talking at work. Forty minutes vanished while I tried to finish my shift.";
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText(before);
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Before rewrite");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await page
+    .locator(`.writing-editor > section[id="${doc.sections[2].id}"]`)
+    .evaluate((element, text) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const nodes: Node[] = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      const whole = nodes.map((node) => node.textContent).join("");
+      const start = whole.indexOf(text);
+      if (start < 0) throw new Error("Saved wording is not in the section");
+      let offset = 0,
+        from: [Node, number] | null = null,
+        to: [Node, number] | null = null;
+      for (const node of nodes) {
+        const length = node.textContent?.length ?? 0;
+        if (!from && start >= offset && start < offset + length)
+          from = [node, start - offset];
+        if (start + text.length <= offset + length) {
+          to = [node, start + text.length - offset];
+          break;
+        }
+        offset += length;
+      }
+      if (!from || !to) throw new Error("Could not select the saved wording");
+      const range = document.createRange();
+      range.setStart(...from);
+      range.setEnd(...to);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      (element.closest(".writing-editor") as HTMLElement).focus();
+      document.dispatchEvent(new Event("selectionchange"));
+    }, before);
+  await page.keyboard.insertText(after);
+  await page.getByRole("button", { name: "1 take" }).click();
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Compare" })
+    .click();
+  const original = page.getByTestId("compare-original"),
+    current = page.getByTestId("compare-current");
+  await expect(original).toHaveText(before);
+  await expect(current).toHaveText(after);
+  for (const phrase of ["telemarketer", "at work", "Forty minutes"]) {
+    await expect(current).toContainText(phrase);
+    expect(
+      (await current.locator(".compare-added").allTextContents()).join(""),
+    ).not.toContain(phrase);
+    expect(
+      (await original.locator(".compare-removed").allTextContents()).join(""),
+    ).not.toContain(phrase);
+  }
+  await expect(page.getByTestId("writing-editor")).toContainText(after);
+  await save(page);
+  expect(
+    (await (await request.get(`/api/documents/${doc.id}`)).json()).sections[2]
+      .variants[0].text,
+  ).toBe(before);
+});
+
 test("take activation copy does not append punctuation to a writer's name", async ({
   page,
   request,

@@ -132,6 +132,63 @@ test("parked thought removal names its owner and session Undo restores group and
   expect(restored.placement).toBe("parked");
 });
 
+test("Place in draft offers After-X choices with stable IDs, beginning and end", async ({
+  page,
+  request,
+}) => {
+  const doc = await fresh(request);
+  doc.sections[0].label = "Future tense";
+  doc.sections[0].content = newSection("Freeform", "A first section.").content;
+  const second = newSection("Point", "Voicemails belong next.");
+  second.label = "Twin";
+  const third = newSection("Point", "Another twin ending.");
+  third.label = "Twin";
+  const parked = newSection("Freeform", "A side thought stays unchanged.");
+  parked.placement = "parked";
+  parked.notes = "Keep this nearby.";
+  doc.sections.push(second, third, parked);
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await page.goto("/");
+  const card = page.locator(`[data-section-id="${parked.id}"]`);
+  const place = async (value: string, expectedIndex: number) => {
+    await card.locator(".section-focus").click();
+    await card.getByRole("button", { name: "Include in draft" }).click();
+    await card.getByLabel("Draft position").selectOption(value);
+    await card.getByRole("button", { name: "Include here" }).click();
+    await save(page);
+    const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(
+      stored.sections.findIndex((item: any) => item.id === parked.id),
+    ).toBe(expectedIndex);
+    expect(stored.sections[expectedIndex]).toMatchObject({
+      id: parked.id,
+      notes: "Keep this nearby.",
+      placement: "draft",
+    });
+  };
+  await card.locator(".section-focus").click();
+  await card.getByRole("button", { name: "Include in draft" }).click();
+  const options = await card
+    .getByLabel("Draft position")
+    .locator("option")
+    .allTextContents();
+  expect(options).toContain("At beginning of draft");
+  expect(options).toContain("After “Future tense” · section 1 Freeform");
+  expect(options).toContain("After “Twin” · section 2 Point");
+  expect(options).toContain("At end of draft");
+  await card.getByLabel("Draft position").selectOption(second.id);
+  await card.getByRole("button", { name: "Include here" }).click();
+  await save(page);
+  expect(
+    (await (await request.get(`/api/documents/${doc.id}`)).json()).sections[1]
+      .id,
+  ).toBe(parked.id);
+  await card.getByRole("button", { name: "Park thought" }).click();
+  await place(doc.sections[0].id, 0);
+  await card.getByRole("button", { name: "Park thought" }).click();
+  await place("__end__", 3);
+});
+
 test("draft and parked capture, groups, reinclusion, labels and export share one section list", async ({
   page,
   request,
@@ -264,10 +321,11 @@ test("draft and parked capture, groups, reinclusion, labels and export share one
     .getByLabel("Draft position")
     .locator("option")
     .allTextContents();
+  expect(options).toContain("At beginning of draft");
+  expect(options).toContain("After “Threshold” · section 1 Freeform");
   expect(options).toContain(
-    "Before 2. “I thought someone was waiting.” · Freeform",
+    "After “I thought someone was waiting.” · section 2 Freeform",
   );
-  expect(options).toContain("Before 1. “Threshold” · Freeform");
   await grouped.getByLabel("Draft position").selectOption(doc.sections[1].id);
   await grouped.getByRole("button", { name: "Include here" }).click();
   await expect(grouped).toHaveAttribute("data-placement", "draft");

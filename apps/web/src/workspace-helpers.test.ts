@@ -26,6 +26,7 @@ import {
   documentBackup,
   duplicateDocumentCue,
   textDifference,
+  alignedTextDifference,
   runDraftState,
   resultOutcome,
   writerResultReason,
@@ -132,6 +133,48 @@ describe("lightweight text comparison", () => {
       added: "",
       suffix: "",
     });
+  });
+});
+
+describe("contained rewrite alignment", () => {
+  it("keeps shared words and phrases visibly unchanged without reordering either text", () => {
+    const before =
+      "The telemarketer called at work. Forty minutes later, I hung up and went back to my desk.";
+    const after =
+      "That telemarketer kept talking at work. Forty minutes vanished while I tried to finish my shift.";
+    const aligned = alignedTextDifference(before, after);
+    expect(aligned.before.map((part) => part.text).join("")).toBe(before);
+    expect(aligned.after.map((part) => part.text).join("")).toBe(after);
+    const common = aligned.after
+      .filter((part) => !part.changed)
+      .map((part) => part.text)
+      .join("");
+    for (const phrase of ["telemarketer", "at work", "Forty minutes"])
+      expect(common).toContain(phrase);
+  });
+  it("keeps small punctuation changes precise and identical text unmarked", () => {
+    const punctuation = alignedTextDifference("Yeah.", "Yeah!");
+    expect(
+      punctuation.before
+        .filter((part) => part.changed)
+        .map((part) => part.text),
+    ).toEqual(["."]);
+    expect(
+      punctuation.after.filter((part) => part.changed).map((part) => part.text),
+    ).toEqual(["!"]);
+    expect(
+      alignedTextDifference("Same.", "Same.").after.every(
+        (part) => !part.changed,
+      ),
+    ).toBe(true);
+    expect(
+      alignedTextDifference("Yeah", "yeah").after.some((part) => part.changed),
+    ).toBe(true);
+    expect(
+      alignedTextDifference("at  work", "at work").before.some(
+        (part) => part.changed,
+      ),
+    ).toBe(true);
   });
 });
 

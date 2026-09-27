@@ -249,6 +249,39 @@ export function scrollPreviewToSection(
   return true;
 }
 
+export function scrollPreviewToTarget(
+  editor: Editor,
+  target: EditTarget,
+): boolean {
+  const range = targetRange(editor, target);
+  const section =
+    target.sectionId &&
+    editor.view.dom.querySelector<HTMLElement>(
+      `section[id="${CSS.escape(target.sectionId)}"]`,
+    );
+  if (!range || !section || getComputedStyle(section).display === "none")
+    return false;
+  const pane = section.closest<HTMLElement>(".writing, .structure");
+  if (!pane) return false;
+  const top = editor.view.coordsAtPos(range.from).top;
+  if (["auto", "scroll"].includes(getComputedStyle(pane).overflowY)) {
+    pane.scrollTo({
+      top:
+        pane.scrollTop +
+        top -
+        pane.getBoundingClientRect().top -
+        Math.min(pane.clientHeight * 0.3, 220),
+      behavior: "smooth",
+    });
+  } else {
+    window.scrollTo({
+      top: window.scrollY + top - window.innerHeight * 0.3,
+      behavior: "smooth",
+    });
+  }
+  return true;
+}
+
 export function sectionLocation(editor: Editor, id: string) {
   let found: { node: PMNode; pos: number } | null = null;
   editor.state.doc.forEach((node, pos) => {

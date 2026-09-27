@@ -78,6 +78,7 @@ import {
   highlight,
   sectionLocation,
   scrollPreviewToSection,
+  scrollPreviewToTarget,
   positionMap,
   targetRange,
   clipboardPlainText,
@@ -1659,6 +1660,13 @@ export function useWorkspace() {
     update((d) => updateWorkbench(d, sectionId, (wb) => inspectRun(wb, runId)));
     inspectHistoricalTarget(run);
   };
+  const revealCurrentPassage = (passage: EditTarget) =>
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!editor || !scrollPreviewToTarget(editor, passage))
+          scrollPreviewToSection(passage.sectionId!, false, true);
+      }),
+    );
   const useCurrentPassage = () => {
     const inspection = inspectionRef.current;
     if (!inspection) return;
@@ -1673,7 +1681,7 @@ export function useWorkspace() {
     }
     selectExactTarget(resolution.current);
     changeInspection({ ...inspection, resolution, confirmed: true });
-    scrollPreviewToSection(inspection.sectionId);
+    revealCurrentPassage(resolution.current);
   };
   const returnToCurrentPassage = () => {
     const inspection = inspectionRef.current;
@@ -1686,7 +1694,7 @@ export function useWorkspace() {
     changeInspection({ ...inspection, resolution, confirmed: false });
     if (resolution.status !== "changed") return;
     selectExactTarget(resolution.current);
-    scrollPreviewToSection(inspection.sectionId);
+    revealCurrentPassage(resolution.current);
   };
   const selectRun = (id: string) => {
     const run = getWorkbench(current.current, sectionId).runs.find(

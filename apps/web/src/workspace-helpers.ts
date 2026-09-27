@@ -122,6 +122,65 @@ export function textDifference(
   };
 }
 
+export type DiffPart = { text: string; changed: boolean };
+export function alignedTextDifference(
+  before: string,
+  after: string,
+): { before: DiffPart[]; after: DiffPart[] } {
+  const { prefix, removed, added, suffix } = textDifference(before, after);
+  const oldTokens = removed.match(/\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]+/gu) ?? [];
+  const newTokens = added.match(/\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]+/gu) ?? [];
+  const previous: DiffPart[] = [],
+    current: DiffPart[] = [];
+  const push = (parts: DiffPart[], text: string, changed: boolean) => {
+    if (!text) return;
+    const last = parts.at(-1);
+    if (last?.changed === changed) last.text += text;
+    else parts.push({ text, changed });
+  };
+  push(previous, prefix, false);
+  push(current, prefix, false);
+  if (
+    oldTokens.length * newTokens.length > 40_000 ||
+    Math.max(oldTokens.length, newTokens.length) < 8
+  ) {
+    push(previous, removed, true);
+    push(current, added, true);
+  } else {
+    const scores = oldTokens.map(() => new Uint16Array(newTokens.length + 1));
+    scores.push(new Uint16Array(newTokens.length + 1));
+    for (let i = oldTokens.length - 1; i >= 0; i--)
+      for (let j = newTokens.length - 1; j >= 0; j--)
+        scores[i][j] =
+          oldTokens[i] === newTokens[j]
+            ? scores[i + 1][j + 1] +
+              (/^[\p{L}\p{N}]+$/u.test(oldTokens[i]) ? 3 : 1)
+            : Math.max(scores[i + 1][j], scores[i][j + 1]);
+    let i = 0,
+      j = 0;
+    while (i < oldTokens.length || j < newTokens.length) {
+      if (
+        i < oldTokens.length &&
+        j < newTokens.length &&
+        oldTokens[i] === newTokens[j] &&
+        scores[i][j] > scores[i + 1][j] &&
+        scores[i][j] > scores[i][j + 1]
+      ) {
+        push(previous, oldTokens[i++], false);
+        push(current, newTokens[j++], false);
+      } else if (
+        i < oldTokens.length &&
+        (j === newTokens.length || scores[i + 1][j] >= scores[i][j + 1])
+      )
+        push(previous, oldTokens[i++], true);
+      else push(current, newTokens[j++], true);
+    }
+  }
+  push(previous, suffix, false);
+  push(current, suffix, false);
+  return { before: previous, after: current };
+}
+
 export function currentTakeIds(section: WritingSection): string[] {
   const prose = sectionText(section);
   return section.variants
