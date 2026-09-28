@@ -12,6 +12,9 @@ import {
 import { MockProvider } from "../apps/server/src/mock-provider";
 import {
   documentTarget,
+  documentText,
+  documentSchema,
+  newDocument,
   targetFor,
   emptyWorkbench,
   newSection,
@@ -99,6 +102,293 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await stop();
   rmSync(directory, { recursive: true, force: true });
+});
+
+describe("saved Lab follow-up thread", () => {
+  it("keeps a run's conversation through restart, archive, restore and duplicate without leaking across documents", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Conversation",
+        text: "The passage remains mine.",
+      })
+    ).json();
+    const other = await (
+      await request("/api/documents", "POST", {
+        title: "Other",
+        text: "Unrelated piece.",
+      })
+    ).json();
+    const run = {
+      id: "run-a",
+      target: targetFor(doc, doc.sections[0].id),
+      createdAt: doc.createdAt,
+      stage: "diagnose",
+      action: "coach",
+      instruction: "What is the line doing?",
+      answer: "",
+      controls: {},
+      model: { providerId: "mock", modelId: "plain" },
+      response: {
+        provider: "mock",
+        diagnosis: "An older note.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      },
+      conversation: [
+        {
+          id: "turn-w",
+          role: "writer",
+          text: "Where is the evidence?",
+          createdAt: doc.createdAt,
+        },
+        {
+          id: "turn-a",
+          role: "assistant",
+          text: "The passage remains mine.",
+          createdAt: doc.createdAt,
+          provider: "openai",
+          model: { providerId: "openai", modelId: "test-model" },
+        },
+      ],
+    };
+    doc.sections[0].workbench = {
+      ...emptyWorkbench(),
+      runs: [run],
+      activeRunId: run.id,
+    };
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    await request("/api/documents/archive", "POST", { ids: [doc.id] });
+    await stop();
+    await start();
+    const archived = await (await request(`/api/documents/${doc.id}`)).json();
+    expect(
+      archived.sections[0].workbench.runs[0].conversation.map(
+        (turn: any) => turn.text,
+      ),
+    ).toEqual(run.conversation.map((turn) => turn.text));
+    await request("/api/documents/restore", "POST", { ids: [doc.id] });
+    const duplicate = await (
+      await request("/api/import", "POST", { document: archived })
+    ).json();
+    expect(
+      duplicate.sections[0].workbench.runs[0].conversation.map(
+        (turn: any) => turn.text,
+      ),
+    ).toEqual(run.conversation.map((turn) => turn.text));
+    expect(duplicate.sections[0].workbench.runs[0].id).not.toBe(run.id);
+    expect(duplicate.sections[0].workbench.runs[0].conversation[0].id).not.toBe(
+      "turn-w",
+    );
+    expect(
+      (await (await request(`/api/documents/${other.id}`)).json()).sections[0]
+        .workbench,
+    ).toBeUndefined();
+    expect(documentText(duplicate)).toBe(documentText(doc));
+  });
+  it("requires a saved local run and refuses unsafe historical follow-ups without changing prose", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Follow-up",
+        text: "Before the bridge stays. The middle repeats. After the bridge stays.",
+      })
+    ).json();
+    const original = doc.sections[0].content;
+    const text = "The middle repeats.";
+    const start = original[0].content[0].text.indexOf(text);
+    const target = targetFor(
+      doc,
+      doc.sections[0].id,
+      "selection",
+      start,
+      start + text.length,
+    );
+    const run = {
+      id: "saved-run",
+      createdAt: doc.createdAt,
+      target,
+      stage: "diagnose",
+      action: "coach",
+      instruction: "Why does the turn flatten?",
+      answer: "",
+      controls: {},
+      model: { providerId: "mock", modelId: "conservative" },
+      response: {
+        provider: "mock",
+        diagnosis: "Original diagnosis.",
+        mechanism: "Original mechanism.",
+        question: "What matters?",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      },
+      conversation: [
+        {
+          id: "writer-1",
+          role: "writer",
+          text: "Show me the evidence.",
+          createdAt: doc.createdAt,
+        },
+      ],
+    };
+    doc.sections[0].workbench = {
+      ...emptyWorkbench(),
+      runs: [run],
+      activeRunId: run.id,
+    };
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    const body = {
+      documentId: doc.id,
+      runId: run.id,
+      question: "Show me the evidence.",
+    };
+    expect(
+      (
+        await request("/api/ai/follow-up", "POST", {
+          ...body,
+          runId: "unknown",
+        })
+      ).status,
+    ).toBe(404);
+    const offline = await (
+      await request("/api/ai/follow-up", "POST", body)
+    ).json();
+    expect(offline.diagnosis).toBe("");
+    expect(offline.missingIngredients.join(" ")).toMatch(
+      /Offline cannot answer/,
+    );
+    expect(
+      (
+        await request("/api/ai", "POST", {
+          readContext: (await fixture()).readContext,
+          editTarget: target,
+          action: "coach",
+          stage: "diagnose",
+          followUp: {
+            runId: run.id,
+            question: body.question,
+            originalInstruction: run.instruction,
+            originalResult: {
+              diagnosis: "forged",
+              mechanism: "",
+              question: "",
+            },
+            turns: [],
+            targetStatus: "exact",
+          },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      documentText(await (await request(`/api/documents/${doc.id}`)).json()),
+    ).toBe(documentText(doc));
+    doc.sections[0].content = paragraphs(
+      "Before the bridge stays. The middle lingers. After the bridge stays.",
+    );
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    const changed = await (
+      await request("/api/ai/follow-up", "POST", body)
+    ).json();
+    expect(changed.missingIngredients.join(" ")).toMatch(
+      /Offline cannot answer/,
+    );
+    doc.sections[0].workbench.runs[0].conversation[0].text =
+      "Give me three alternatives.";
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    const options = { ...body, question: "Give me three alternatives." };
+    expect((await request("/api/ai/follow-up", "POST", options)).status).toBe(
+      409,
+    );
+    doc.sections[0].content = paragraphs("An entirely different passage.");
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    expect((await request("/api/ai/follow-up", "POST", options)).status).toBe(
+      409,
+    );
+  });
+  it("defaults older runs to an empty bounded conversation and preserves writer/assistant turns", () => {
+    const doc = newDocument("Lab thread", "The first line stays.");
+    const run = {
+      id: "run-one",
+      createdAt: doc.createdAt,
+      target: targetFor(doc, doc.sections[0].id),
+      stage: "diagnose" as const,
+      action: "coach",
+      instruction: "Why is this flat?",
+      answer: "",
+      controls: {},
+      model: null,
+      response: {
+        provider: "mock",
+        diagnosis: "An earlier reading.",
+        mechanism: "",
+        question: "What should change?",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      },
+    };
+    doc.sections[0].workbench = { ...emptyWorkbench(), runs: [run] };
+    const older = documentSchema.parse(doc);
+    expect(older.sections[0].workbench?.runs[0].conversation).toEqual([]);
+    const turns = [
+      {
+        id: "w",
+        role: "writer",
+        text: "What evidence?",
+        createdAt: doc.createdAt,
+      },
+      {
+        id: "a",
+        role: "assistant",
+        text: "The first line stays.",
+        createdAt: doc.createdAt,
+        provider: "openai",
+        model: { providerId: "openai", modelId: "test-model" },
+      },
+    ];
+    const saved = documentSchema.parse({
+      ...doc,
+      sections: [
+        {
+          ...doc.sections[0],
+          workbench: {
+            ...doc.sections[0].workbench,
+            runs: [{ ...run, conversation: turns }],
+          },
+        },
+      ],
+    });
+    expect(saved.sections[0].workbench?.runs[0].conversation).toEqual(turns);
+    expect(() =>
+      documentSchema.parse({
+        ...doc,
+        sections: [
+          {
+            ...doc.sections[0],
+            workbench: {
+              ...doc.sections[0].workbench,
+              runs: [
+                {
+                  ...run,
+                  conversation: Array.from({ length: 25 }, (_, index) => ({
+                    id: `turn-${index}`,
+                    role: "writer",
+                    text: "A question",
+                    createdAt: doc.createdAt,
+                  })),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });
 
 describe("local API and SQLite persistence", () => {

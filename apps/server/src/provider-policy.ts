@@ -28,7 +28,7 @@ Return only the requested structured object. Provider is openai. Diagnosis descr
 /** Lens is a local lexical operation even when launched from a section action. */
 export function validateWritingRequest(request: AIRequest): void {
   const structure = request.structure;
-  if (request.action === "structure" && !structure)
+  if (request.action === "structure" && !structure && !request.followUp)
     throw new Error("Structure action requires a structure draft");
   if (structure && request.lens)
     throw new Error("Structure and lexical lens cannot be combined");
@@ -419,6 +419,7 @@ export function validateProviderResponse(
   const output = aiResponseSchema.parse(raw);
   output.provider = provider;
   const noProposals =
+    (request.followUp !== undefined && request.stage === "diagnose") ||
     (request.structure !== undefined && request.structure.mode !== "tighten") ||
     request.lens?.mode === "explore" ||
     request.lens?.view === "delivery" ||

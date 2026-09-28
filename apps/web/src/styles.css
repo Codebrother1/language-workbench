@@ -1059,6 +1059,55 @@ hr {
 .response > .provider {
   margin-bottom: 12px;
 }
+.lab-follow-up {
+  margin-top: 22px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.lab-follow-up h3 {
+  margin: 0 0 9px;
+  font-size: 13px;
+}
+.lab-follow-up .follow-up-turn {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.follow-up-turn time,
+.follow-up-turn small,
+.follow-up-age small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.follow-up-turn p,
+.follow-up-age p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.follow-up-age {
+  border-left: 2px solid var(--accent);
+  padding: 8px 10px;
+  color: var(--muted);
+}
+.follow-up-compose {
+  margin-top: 14px;
+}
+.follow-up-compose textarea {
+  min-height: 65px;
+}
+.lab-evidence {
+  background: var(--accent-light);
+  color: var(--text);
+}
+.follow-up-option {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+}
+.follow-up-option .row {
+  margin-top: 8px;
+}
 .diagnosis {
   font-size: 12px;
   margin: 5px 0 12px;

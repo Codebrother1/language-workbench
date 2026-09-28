@@ -2236,6 +2236,181 @@ export function useWorkspace() {
     }
     return operate(stage, override);
   };
+  const askCurrentPassage = (runId: string): Promise<void> => {
+    const run = current.current.sections
+      .flatMap((section) => section.workbench?.runs ?? [])
+      .find((item) => item.id === runId);
+    const resolution =
+      run && resolveHistoricalTarget(current.current, run.target);
+    if (!run || !resolution || resolution.status !== "changed")
+      return Promise.resolve();
+    const currentTarget = resolution.current;
+    selectExactTarget(currentTarget);
+    changeInspection(null);
+    update((doc) =>
+      updateWorkbench(doc, currentTarget.sectionId, (local) =>
+        patchTargetDraft(local, currentTarget, {
+          instruction: run.instruction,
+        }),
+      ),
+    );
+    return operate("diagnose", undefined, undefined, false, currentTarget);
+  };
+  const askFollowUp = async (
+    runId: string,
+    text?: string,
+  ): Promise<boolean> => {
+    if (requestBusy.current || navigating.current) return false;
+    const documentId = current.current.id;
+    const owner = current.current.sections.find((section) =>
+      section.workbench?.runs.some((run) => run.id === runId),
+    );
+    const run = owner?.workbench?.runs.find((item) => item.id === runId);
+    if (
+      !owner ||
+      !run?.model ||
+      run.target.scope === "document" ||
+      activeRun?.id !== runId
+    )
+      return false;
+    const resolution = resolveHistoricalTarget(current.current, run.target);
+    if (resolution.status === "unresolved") {
+      setError(
+        "The original passage cannot be located safely. Select a new target for a new run.",
+      );
+      return false;
+    }
+    const last = run.conversation.at(-1);
+    const question = last?.role === "writer" ? last.text : (text?.trim() ?? "");
+    if (!question) return false;
+    if (question.length > 3000) {
+      setError(
+        "Keep this follow-up under 3,000 characters. Your question has not been sent.",
+      );
+      return false;
+    }
+    if (last?.role !== "writer" && run.conversation.length >= 23) {
+      setError(
+        "This conversation is full. Start a new Lab run for another question; no turns were removed.",
+      );
+      return false;
+    }
+    const wb = getWorkbench(current.current, owner.id);
+    const chosen =
+      wb.oneOffModel ??
+      (wb.runChain && sameFocusTarget(wb.runChain.target, run.target)
+        ? wb.runChain.model
+        : null) ??
+      run.chainModel ??
+      run.model;
+    requestBusy.current = true;
+    setBusy(true);
+    setRunning({ label: "Following up…", models: [chosen] });
+    setError("");
+    if (last?.role !== "writer")
+      update((doc) =>
+        updateWorkbench(doc, owner.id, (local) => ({
+          ...local,
+          runs: local.runs.map((item) =>
+            item.id === runId
+              ? {
+                  ...item,
+                  conversation: [
+                    ...item.conversation,
+                    {
+                      id: uid(),
+                      role: "writer",
+                      text: question,
+                      createdAt: new Date().toISOString(),
+                    },
+                  ],
+                }
+              : item,
+          ),
+        })),
+      );
+    try {
+      await flush();
+      const result = await api<AIResponse>("/ai/follow-up", "POST", {
+        documentId,
+        runId,
+        question,
+        modelOverride: chosen,
+      });
+      if (
+        !result.diagnosis.trim() &&
+        !result.proposals.some((item) => item.explanation.trim())
+      ) {
+        setError(
+          result.missingIngredients.join(" ") ||
+            "No follow-up answer was returned. Your question was kept for retry.",
+        );
+        return false;
+      }
+      if (
+        current.current.id !== documentId ||
+        !current.current.sections.some((section) =>
+          section.workbench?.runs.some((item) => item.id === runId),
+        )
+      )
+        return false;
+      update((doc) =>
+        updateWorkbench(doc, owner.id, (local) => ({
+          ...local,
+          oneOffModel:
+            wb.oneOffModel &&
+            local.oneOffModel &&
+            modelKey(local.oneOffModel) === modelKey(wb.oneOffModel)
+              ? null
+              : local.oneOffModel,
+          runChain: wb.oneOffModel
+            ? { model: chosen, target: run.target }
+            : local.runChain,
+          runs: local.runs.map((item) =>
+            item.id === runId
+              ? {
+                  ...item,
+                  conversation: [
+                    ...item.conversation,
+                    {
+                      id: uid(),
+                      role: "assistant",
+                      text:
+                        [result.diagnosis, result.mechanism]
+                          .filter(Boolean)
+                          .join("\n\n") ||
+                        result.proposals
+                          .map((item) => item.explanation)
+                          .filter(Boolean)
+                          .join("\n\n"),
+                      createdAt: new Date().toISOString(),
+                      provider: result.provider,
+                      model: result.model ?? chosen,
+                      ...(result.proposals.length
+                        ? {
+                            proposals: result.proposals.map((proposal) => ({
+                              ...proposal,
+                              id: uid(),
+                            })),
+                          }
+                        : {}),
+                    },
+                  ],
+                }
+              : item,
+          ),
+        })),
+      );
+      return true;
+    } catch (error) {
+      setError((error as Error).message);
+      return false;
+    } finally {
+      requestBusy.current = false;
+      setBusy(false);
+      setRunning(null);
+    }
+  };
   const askLens = (mode: LensOptions["mode"], explicitTarget?: EditTarget) =>
     lens.view === "delivery" && mode === "replace"
       ? setError(
@@ -2391,6 +2566,58 @@ export function useWorkspace() {
         ? "Applied only to the target. Original before apply saved as a take."
         : "Activated take in this section. Your other writing is unchanged.",
     );
+  };
+  const saveFollowUpOption = (runId: string, proposalId: string) => {
+    const owner = current.current.sections.find((section) =>
+      section.workbench?.runs.some((run) => run.id === runId),
+    );
+    const run = owner?.workbench?.runs.find((item) => item.id === runId);
+    const turn = run?.conversation.find((item) =>
+      item.proposals?.some((proposal) => proposal.id === proposalId),
+    );
+    const proposal = turn?.proposals?.find((item) => item.id === proposalId);
+    if (!owner || !run || !proposal) return;
+    if (
+      owner.variants.some(
+        (variant) => variant.runId === runId && variant.text === proposal.text,
+      )
+    ) {
+      setNotice("This option is already saved with this run.");
+      return;
+    }
+    const variant: Variant = {
+      id: uid(),
+      label: proposal.label,
+      text: proposal.text,
+      target: run.target,
+      origin: "ai",
+      model: turn!.model ?? run.model!,
+      runId,
+      createdAt: new Date().toISOString(),
+    };
+    update((doc) => ({
+      ...doc,
+      sections: doc.sections.map((section) =>
+        section.id === owner.id
+          ? { ...section, variants: [...section.variants, variant] }
+          : section,
+      ),
+    }));
+    setNotice("Saved option as a variant. Your draft is unchanged.");
+  };
+  const useFollowUpOption = (runId: string, proposalId: string) => {
+    const run = current.current.sections
+      .flatMap((section) => section.workbench?.runs ?? [])
+      .find((item) => item.id === runId);
+    const proposal = run?.conversation
+      .flatMap((turn) => turn.proposals ?? [])
+      .find((item) => item.id === proposalId);
+    if (!run || !proposal) return;
+    try {
+      applyText(run.target, proposal.text);
+    } catch (error) {
+      setError((error as Error).message);
+    }
   };
   const decide = (id: string, state: "accepted" | "rejected" | "saved") => {
     try {
@@ -2881,6 +3108,10 @@ export function useWorkspace() {
     splitSection,
     mergeSection,
     ask,
+    askFollowUp,
+    askCurrentPassage,
+    saveFollowUpOption,
+    useFollowUpOption,
     proposalText,
     decide,
     activate,

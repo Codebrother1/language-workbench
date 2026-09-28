@@ -414,6 +414,7 @@ export function makeRun(
     action: capture.action,
     instruction: capture.instruction,
     answer: capture.answer,
+    conversation: [],
     controls: { ...capture.controls },
     model: response.model ?? capture.model,
     ...(capture.chainModel ? { chainModel: capture.chainModel } : {}),

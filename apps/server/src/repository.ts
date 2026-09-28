@@ -245,6 +245,14 @@ export class Repository {
           ...r,
           id: runIds.get(r.id)!,
           target: remapTarget(r.target),
+          conversation: r.conversation.map((turn) => ({
+            ...turn,
+            id: uid(),
+            proposals: turn.proposals?.map((proposal) => ({
+              ...proposal,
+              id: uid(),
+            })),
+          })),
           response: {
             ...r.response,
             proposals: r.response.proposals.map((p) => ({

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   test,
   expect,
@@ -710,6 +711,351 @@ test("distinct saved Lab questions keep separate follow-up answers", async ({
   await expect(page.getByLabel("Your material")).toHaveValue(
     "My second answer.",
   );
+});
+
+test("a selected passage keeps ordered follow-ups with its saved run through reload and another run", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const calls: string[] = [];
+  await page.route("**/api/ai/follow-up", (route) => {
+    const question = route.request().postDataJSON().question as string;
+    calls.push(question);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: conservative,
+        routeSource: "action",
+        diagnosis: `Because “His ass is larping” is repeated: ${question}`,
+        mechanism: "The original contrast is still the evidence.",
+        question: "",
+        missingIngredients: [],
+        proposals: [],
+        findings: [],
+        lexical: [],
+      }),
+    });
+  });
+  await open(page);
+  await select(page, "His ass is larping.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  const thread = page.getByTestId("lab-follow-up");
+  await expect(thread).toContainText("Selected passage");
+  await expect(thread).toContainText("Hook");
+  await save(page);
+  const original = await stored(request, doc.id);
+  expect(original.sections[0].workbench.runs[0].target.text).toBe(
+    "His ass is larping.",
+  );
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("What evidence supports that?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-assistant")).toContainText(
+    "His ass is larping",
+  );
+  await expect(thread.locator(".lab-evidence")).toContainText(
+    "His ass is larping",
+  );
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("Where does it lose force?");
+  await thread.getByLabel("Ask a follow-up about this passage").press("Enter");
+  await expect(thread.getByTestId("follow-up-writer")).toHaveCount(2);
+  await expect(thread.getByTestId("follow-up-assistant")).toHaveCount(2);
+  await save(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const exported = JSON.parse(
+    readFileSync((await (await download).path())!, "utf8"),
+  );
+  expect(exported.sections[0].workbench.runs[0].conversation).toHaveLength(4);
+  await page.reload();
+  await section(page, "Hook");
+  await expect(page.getByTestId("follow-up-writer")).toHaveCount(2);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(
+    page.getByTestId("lab-follow-up").getByTestId("follow-up-writer"),
+  ).toHaveCount(0);
+  await page.locator(".local-history > summary").click();
+  const count = calls.length;
+  await page.getByRole("button", { name: "Inspect this run" }).last().click();
+  await expect(page.getByTestId("follow-up-writer")).toHaveCount(2);
+  expect(calls).toHaveLength(count);
+  const saved = await stored(request, doc.id);
+  expect(
+    saved.sections[0].workbench.runs.map((run: any) => run.conversation.length),
+  ).toEqual([4, 0]);
+  expect(
+    saved.sections[0].workbench.runs[0].conversation.map((turn: any) => [
+      turn.role,
+      turn.text.includes("Where does it lose force?"),
+    ]),
+  ).toEqual([
+    ["writer", false],
+    ["assistant", false],
+    ["writer", true],
+    ["assistant", true],
+  ]);
+  expect(documentText(saved)).toBe(documentText(doc));
+});
+
+test("changed and unresolved targets preserve historical conversation without silent retargeting", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const calls: string[] = [];
+  await page.route("**/api/ai/follow-up", (route) => {
+    calls.push(route.request().postDataJSON().question);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: conservative,
+        diagnosis: "The original ‘His ass is larping’ is the evidence.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        proposals: [],
+        lexical: [],
+      }),
+    });
+  });
+  await open(page);
+  await select(page, "His ass is larping.");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  const thread = page.getByTestId("lab-follow-up");
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("What is the original doing?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-assistant")).toHaveCount(1);
+  await select(page, "His ass is larping.");
+  await page.keyboard.insertText("His ass is wandering.");
+  await expect(thread).toContainText("Target changed since this run");
+  await expect(thread).toContainText("Original passage: His ass is larping.");
+  await expect(thread).toContainText("Current passage: His ass is wandering.");
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("What was the earlier turn doing?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-assistant")).toHaveCount(2);
+  await thread
+    .getByRole("button", { name: "Ask about current passage in a new run" })
+    .click();
+  await expect(thread.getByTestId("follow-up-writer")).toHaveCount(0);
+  await save(page);
+  const saved = await stored(request, doc.id);
+  expect(saved.sections[0].workbench.runs[0].conversation.length).toBe(4);
+  expect(calls).toEqual([
+    "What is the original doing?",
+    "What was the earlier turn doing?",
+  ]);
+  await section(page, "Hook");
+  await page.locator(".local-history > summary").click();
+  await page.getByRole("button", { name: "Inspect this run" }).last().click();
+  await expect(page.getByTestId("follow-up-writer")).toHaveCount(2);
+  await select(page, "His ass is wandering.");
+  await page.keyboard.insertText("An entirely different passage.");
+  await select(page, "The rest stays mine.");
+  await page.keyboard.insertText("No common context remains.");
+  await expect(page.getByTestId("lab-follow-up")).toContainText(
+    "cannot be located safely",
+  );
+  await expect(
+    page.getByRole("button", { name: "Send follow-up" }),
+  ).toBeDisabled();
+});
+
+test("explicit follow-up alternatives remain options until a writer saves or uses one", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const requestModels: string[] = [];
+  await page.route("**/api/ai/follow-up", (route) => {
+    const chosen = route.request().postDataJSON().modelOverride.modelId;
+    requestModels.push(chosen);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: chosen === "plain" ? plain : conservative,
+        diagnosis: "A local reading of the selected section.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals:
+          chosen === "plain"
+            ? [
+                {
+                  id: "p-1",
+                  label: "A quieter turn",
+                  text: "The rest stays mine.",
+                  explanation: "Only a preview.",
+                },
+              ]
+            : [],
+      }),
+    });
+  });
+  await open(page);
+  await section(page, "Hook");
+  await models(page);
+  await page
+    .getByLabel("Run with", { exact: true })
+    .selectOption(modelKey(plain));
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-model")).toContainText("plain");
+  const thread = page.getByTestId("lab-follow-up");
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("Give me three alternatives.");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.locator(".follow-up-option")).toHaveCount(1);
+  expect(requestModels).toEqual(["plain"]);
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+  await page
+    .getByLabel("Run with", { exact: true })
+    .selectOption(modelKey(conservative));
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("What is the tradeoff?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-assistant")).toHaveCount(2);
+  await expect(thread.getByTestId("follow-up-assistant").first()).toContainText(
+    "Offline plain",
+  );
+  await expect(thread.getByTestId("follow-up-assistant").last()).toContainText(
+    "Offline conservative",
+  );
+  expect(requestModels).toEqual(["plain", "conservative"]);
+  await thread.getByRole("button", { name: "Save option" }).click();
+  await save(page);
+  expect(
+    (await stored(request, doc.id)).sections[0].variants.at(-1),
+  ).toMatchObject({ origin: "ai", text: "The rest stays mine." });
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+  await thread.getByRole("button", { name: "Use option explicitly" }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "The rest stays mine.",
+  );
+  await save(page);
+  expect(documentText(await stored(request, doc.id))).not.toBe(
+    documentText(doc),
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "His ass is larping.",
+  );
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await expect(page.getByTestId("writing-editor")).toContainText(
+    "The rest stays mine.",
+  );
+});
+
+test("follow-up uses a native multiline textarea and does not send composing Enter", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await page.route("**/api/ai/follow-up", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: conservative,
+        diagnosis: "The exact target still matters.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals: [],
+      }),
+    }),
+  );
+  await open(page);
+  await section(page, "Hook");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  const input = page.getByLabel("Ask a follow-up about this passage");
+  await input.fill("What changes");
+  await input.press("Shift+Enter");
+  await input.pressSequentially("if I pause?");
+  await expect(input).toHaveValue("What changes\nif I pause?");
+  await input.dispatchEvent("keydown", {
+    key: "Enter",
+    isComposing: true,
+    bubbles: true,
+  });
+  await expect(page.getByTestId("follow-up-writer")).toHaveCount(0);
+  await input.press("Enter");
+  await expect(page.getByTestId("follow-up-writer")).toContainText(
+    "if I pause?",
+  );
+  await expect(page.getByTestId("follow-up-assistant")).toHaveCount(1);
+});
+
+test("Offline follow-up keeps the writer question for retry without fabricating an answer", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await section(page, "Hook");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  const thread = page.getByTestId("lab-follow-up");
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("What does this mean in my wording?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-writer")).toContainText(
+    "What does this mean in my wording?",
+  );
+  await expect(thread.getByTestId("follow-up-assistant")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText("Offline cannot answer");
+  await expect(
+    thread.getByRole("button", { name: "Retry saved follow-up" }),
+  ).toBeVisible();
+  await save(page);
+  await page.reload();
+  await section(page, "Hook");
+  await expect(page.getByTestId("follow-up-writer")).toContainText(
+    "What does this mean in my wording?",
+  );
+  await expect(page.getByTestId("follow-up-assistant")).toHaveCount(0);
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+  await page.route("**/api/ai/follow-up", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: conservative,
+        diagnosis: "The original wording is still the target.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals: [],
+      }),
+    }),
+  );
+  await page.getByRole("button", { name: "Retry saved follow-up" }).click();
+  await expect(page.getByTestId("follow-up-writer")).toHaveCount(1);
+  await expect(page.getByTestId("follow-up-assistant")).toHaveCount(1);
 });
 
 test("common Lab approaches name the action without changing the selected prose", async ({
@@ -1971,6 +2317,55 @@ for (const width of [1024, 700])
     await expect(page.getByTestId("writing-editor")).not.toBeFocused();
     expect(calls).toHaveLength(1);
   });
+
+test("Return to question restores the saved follow-up near the Inspector position on stacked panes", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await page.setViewportSize({ width: 700, height: 900 });
+  let calls = 0;
+  page.on("request", (event) => {
+    if (/\/api\/ai(?:\/follow-up)?$/.test(event.url())) calls++;
+  });
+  await page.route("**/api/ai/follow-up", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: conservative,
+        diagnosis: "The exact earlier phrase was doing the work.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals: [],
+      }),
+    }),
+  );
+  await open(page);
+  await section(page, "Hook");
+  await select(page, "The rest stays mine.");
+  await diagnose(page);
+  const thread = page.getByTestId("lab-follow-up");
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("Which part is doing the work?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-assistant")).toBeVisible();
+  await thread.scrollIntoViewIfNeeded();
+  await page
+    .locator(`[data-section-id="${doc.sections[1].id}"] .section-focus`)
+    .click();
+  await expect(page.getByTestId("lab-return")).toBeVisible();
+  const count = calls;
+  await page.getByTestId("lab-return").getByRole("button").click();
+  await expect(page.getByTestId("follow-up-assistant")).toBeInViewport();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  expect(calls).toBe(count);
+});
 
 test("Ask about candidate stays attached to its original word when the cursor moves", async ({
   page,

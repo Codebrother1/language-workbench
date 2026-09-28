@@ -23,9 +23,11 @@ import {
   structuralMechanisms,
   sectionText,
   type WritingAction,
+  type WorkbenchRun,
   type AIResponse,
 } from "./domain";
 import type { Workspace } from "./useWorkspace";
+import { resolveHistoricalTarget } from "./target-drafts";
 import {
   Button,
   ConfirmDelete,
@@ -101,6 +103,202 @@ function DiffText({
         ),
       )}
     </>
+  );
+}
+
+function FollowUpEvidence({
+  text,
+  original,
+}: {
+  text: string;
+  original: string;
+}) {
+  return (
+    <>
+      {text.split(/(“[^”\n]{3,180}”|"[^"\n]{3,180}")/g).map((part, index) => {
+        const quote = part.slice(1, -1);
+        return (part.startsWith("“") || part.startsWith('"')) &&
+          original.includes(quote) ? (
+          <mark
+            className="lab-evidence"
+            key={index}
+            title="Quoted from the original passage"
+          >
+            {part}
+          </mark>
+        ) : (
+          <span key={index}>{part}</span>
+        );
+      })}
+    </>
+  );
+}
+
+function FollowUpThread({ w, run }: { w: Workspace; run: WorkbenchRun }) {
+  const [draft, setDraft] = useState("");
+  useEffect(() => setDraft(""), [run.id]);
+  const resolution = resolveHistoricalTarget(w.doc, run.target);
+  const owner = run.target.sectionId;
+  const identity = owner
+    ? (sectionReference(w.doc, owner) ?? "Section no longer available")
+    : null;
+  const pending = run.conversation.at(-1)?.role === "writer";
+  const full = run.conversation.length >= 24;
+  const send = async () => {
+    if (await w.askFollowUp(run.id, draft)) setDraft("");
+  };
+  return (
+    <section
+      className="lab-follow-up"
+      data-testid="lab-follow-up"
+      aria-label="Follow-up conversation"
+    >
+      <h3>
+        Follow-up · {humanTargetLabel(run.target)}
+        {identity ? ` · ${identity}` : ""}
+      </h3>
+      {run.instruction.trim() && (
+        <p className="small">
+          <b>Original question:</b> {run.instruction}
+        </p>
+      )}
+      {resolution.status === "changed" && (
+        <div className="follow-up-age" role="status">
+          <b>Target changed since this run</b>
+          <p>Original passage: {run.target.text}</p>
+          <p>Current passage: {resolution.current.text}</p>
+          <small>
+            Follow-ups here discuss the original passage, not the current
+            wording.
+          </small>
+          <Button onClick={() => w.askCurrentPassage(run.id)}>
+            Ask about current passage in a new run
+          </Button>
+        </div>
+      )}
+      {resolution.status === "unresolved" && (
+        <p className="follow-up-age" role="status">
+          The original passage cannot be located safely. This conversation is
+          historical; select a new target to ask again.
+        </p>
+      )}
+      {run.conversation.map((turn) => (
+        <article
+          key={turn.id}
+          className="follow-up-turn"
+          data-testid={`follow-up-${turn.role}`}
+        >
+          <div className="row between">
+            <b>{turn.role === "writer" ? "Your follow-up" : "Response"}</b>
+            <time>
+              {new Date(turn.createdAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </time>
+          </div>
+          <p className="preserve">
+            <FollowUpEvidence text={turn.text} original={run.target.text} />
+          </p>
+          {turn.role === "assistant" && (
+            <div className="row wrap">
+              {turn.model && (
+                <small>
+                  {modelLabel(w.catalog, turn.model)} · {turn.provider}
+                </small>
+              )}
+              <Button className="text-button" onClick={() => w.copy(turn.text)}>
+                Copy response
+              </Button>
+            </div>
+          )}
+          {turn.proposals?.map((proposal) => (
+            <div className="follow-up-option" key={proposal.id}>
+              <b>Option · {proposal.label}</b>
+              <p className="preserve">{proposal.text}</p>
+              <small>{proposal.explanation}</small>
+              <div className="row wrap">
+                <Button onClick={() => w.copy(proposal.text)}>
+                  Copy option
+                </Button>
+                <Button
+                  onClick={() => w.saveFollowUpOption(run.id, proposal.id)}
+                >
+                  Save option
+                </Button>
+                <Button
+                  disabled={
+                    resolution.status !== "exact" ||
+                    w.busy ||
+                    !w.doc.sections.some(
+                      (section) =>
+                        section.id === run.target.sectionId &&
+                        sectionText(section) === run.target.sectionSnapshot,
+                    )
+                  }
+                  onClick={() => w.useFollowUpOption(run.id, proposal.id)}
+                >
+                  Use option explicitly
+                </Button>
+              </div>
+            </div>
+          ))}
+        </article>
+      ))}
+      {pending && (
+        <Button
+          disabled={w.busy || resolution.status === "unresolved"}
+          onClick={() => void w.askFollowUp(run.id)}
+        >
+          Retry saved follow-up
+        </Button>
+      )}
+      {!pending && !full && (
+        <div className="follow-up-compose">
+          <Field label="Ask a follow-up about this passage">
+            <textarea
+              rows={3}
+              maxLength={3000}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing &&
+                  event.keyCode !== 229
+                ) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+              placeholder="Ask about the original passage…"
+            />
+          </Field>
+          {(w.oneOffModel ?? w.chainModel ?? run.model)?.providerId ===
+            "mock" && (
+            <small className="muted">
+              Offline cannot answer open follow-ups. Choose a configured model
+              with Run with if you need an answer; no paid fallback is used.
+            </small>
+          )}
+          <Button
+            disabled={
+              !draft.trim() || w.busy || resolution.status === "unresolved"
+            }
+            onClick={() => void send()}
+          >
+            Send follow-up
+          </Button>
+        </div>
+      )}
+      {full && !pending && (
+        <small>
+          This conversation holds twelve follow-ups. Start a new Lab run for
+          another question; nothing was removed.
+        </small>
+      )}
+    </section>
   );
 }
 
@@ -279,19 +477,30 @@ export function WritingLabShell({
   const responseRef = useRef<HTMLElement>(null);
   const variantsRef = useRef<HTMLDetailsElement>(null);
   const wasBusy = useRef(false);
+  const wasFollowingUp = useRef(false);
   useEffect(() => {
     // Scroll only the Inspector on completion; never focus or scroll the document.
+    if (w.busy && w.running?.label === "Following up…")
+      wasFollowingUp.current = true;
     if (wasBusy.current && !w.busy && responseRef.current) {
       const panel = responseRef.current.closest(".inspector");
+      const destination = wasFollowingUp.current
+        ? (Array.from(
+            responseRef.current.querySelectorAll<HTMLElement>(
+              ".follow-up-turn",
+            ),
+          ).at(-1) ?? responseRef.current)
+        : responseRef.current;
       if (panel)
         panel.scrollTo({
           top:
             panel.scrollTop +
-            responseRef.current.getBoundingClientRect().top -
+            destination.getBoundingClientRect().top -
             panel.getBoundingClientRect().top -
             16,
           behavior: "smooth",
         });
+      wasFollowingUp.current = false;
     }
     wasBusy.current = w.busy;
   }, [w.busy]);
@@ -347,6 +556,11 @@ export function WritingLabShell({
         const pane = result?.closest<HTMLElement>(".inspector");
         if (!result || !pane) return;
         pane.scrollTop = restoreLabRun.inspectorScrollTop;
+        if (
+          w.activeRun?.conversation.length &&
+          restoreLabRun.inspectorScrollTop > 0
+        )
+          return;
         const top = result.getBoundingClientRect().top;
         const paneTop = pane.getBoundingClientRect().top;
         if (
@@ -1359,6 +1573,9 @@ export function WritingLabShell({
               </article>
             );
           })}
+          {w.activeRun?.model && responseTarget?.scope !== "document" && (
+            <FollowUpThread w={w} run={w.activeRun} />
+          )}
         </section>
       )}
       {(hasTarget || isWholeAnalysis) && (

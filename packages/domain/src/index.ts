@@ -118,6 +118,16 @@ export const editTargetSchema = z.object({
 });
 export type EditTarget = z.infer<typeof editTargetSchema>;
 export type SelectionTarget = EditTarget;
+export const labConversationTurnSchema = z.object({
+  id: z.string().min(1),
+  role: z.enum(["writer", "assistant"]),
+  text: z.string().trim().min(1).max(10000),
+  createdAt: z.string().min(1),
+  model: modelRefSchema.optional(),
+  provider: z.string().optional(),
+  proposals: aiResponseSchema.shape.proposals.optional(),
+});
+export type LabConversationTurn = z.infer<typeof labConversationTurnSchema>;
 export const workbenchRunSchema = z.object({
   structure: structureRequestSchema.optional(),
   lens: lensOptionsSchema.optional(),
@@ -131,6 +141,7 @@ export const workbenchRunSchema = z.object({
   controls: z.record(z.union([z.string(), z.number(), z.boolean()])),
   model: modelRefSchema.nullable(),
   chainModel: modelRefSchema.optional(),
+  conversation: z.array(labConversationTurnSchema).max(24).default([]),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -479,6 +490,20 @@ export const aiRequestSchema = z.object({
   variantCount: z.number().int().min(1).max(5).default(2),
   modelOverride: modelRefSchema.nullable().optional(),
   lens: lensOptionsSchema.optional(),
+  followUp: z
+    .object({
+      runId: z.string().min(1),
+      question: z.string().trim().min(1).max(3000),
+      originalInstruction: z.string(),
+      originalResult: z.object({
+        diagnosis: z.string(),
+        mechanism: z.string(),
+        question: z.string(),
+      }),
+      turns: z.array(labConversationTurnSchema).max(24),
+      targetStatus: z.enum(["exact", "changed"]),
+    })
+    .optional(),
 });
 export type AIRequest = z.infer<typeof aiRequestSchema>;
 export type AIState =
@@ -653,8 +678,128 @@ export function validateTarget(doc: Document, target: EditTarget): void {
   )
     throw new Error("Section target must span that section");
 }
+export type TargetResolution =
+  | { status: "exact" | "changed"; current: EditTarget }
+  | { status: "unresolved"; current: null };
+export function resolveHistoricalTarget(
+  doc: Document,
+  target: EditTarget,
+): TargetResolution {
+  const unresolved: TargetResolution = { status: "unresolved", current: null };
+  if (target.documentId !== doc.id || !target.sectionId) return unresolved;
+  const section = doc.sections.find((item) => item.id === target.sectionId);
+  if (!section) return unresolved;
+  const text = sectionText(section);
+  if (target.scope === "section")
+    return {
+      status: text === target.sectionSnapshot ? "exact" : "changed",
+      current: targetFor(doc, section.id),
+    };
+  if (target.scope !== "selection" && target.scope !== "word")
+    return unresolved;
+  const old = target.sectionSnapshot;
+  if (!target.text || old.slice(target.start, target.end) !== target.text)
+    return unresolved;
+  const currentTarget = (start: number, end: number): EditTarget => ({
+    ...targetFor(
+      doc,
+      section.id,
+      target.scope === "word" && /\s/.test(text.slice(start, end))
+        ? "selection"
+        : target.scope,
+      start,
+      end,
+    ),
+    ...(target.unit ? { unit: target.unit } : {}),
+  });
+  if (text.slice(target.start, target.end) === target.text)
+    return {
+      status: "exact",
+      current: currentTarget(target.start, target.end),
+    };
+  const left = old.slice(Math.max(0, target.start - 32), target.start);
+  const right = old.slice(target.end, target.end + 32);
+  const unique = (anchor: string) => {
+    const index = text.indexOf(anchor);
+    return anchor.trim().length >= 8 &&
+      index >= 0 &&
+      text.indexOf(anchor, index + 1) < 0
+      ? index
+      : -1;
+  };
+  const literal = text.indexOf(target.text);
+  if (
+    literal >= 0 &&
+    text.indexOf(target.text, literal + 1) < 0 &&
+    ((left.trim().length >= 8 &&
+      text.slice(Math.max(0, literal - left.length), literal) === left) ||
+      (right.trim().length >= 8 &&
+        text.slice(
+          literal + target.text.length,
+          literal + target.text.length + right.length,
+        ) === right))
+  )
+    return {
+      status: "exact",
+      current: currentTarget(literal, literal + target.text.length),
+    };
+  const leftIndex = target.start === 0 ? -1 : unique(left);
+  const rightIndex = target.end === old.length ? -1 : unique(right);
+  if (
+    (target.start > 0 && leftIndex < 0) ||
+    (target.end < old.length && rightIndex < 0) ||
+    (leftIndex < 0 && rightIndex < 0)
+  )
+    return unresolved;
+  const start = leftIndex < 0 ? 0 : leftIndex + left.length;
+  const end = rightIndex < 0 ? text.length : rightIndex;
+  const passage = text.slice(start, end);
+  if (end <= start || passage.length > target.text.length * 3 + 60)
+    return unresolved;
+  if (
+    (leftIndex < 0 || rightIndex < 0) &&
+    (passage.match(/[.!?](?:\s|$)/g) ?? []).length !==
+      (target.text.match(/[.!?](?:\s|$)/g) ?? []).length
+  )
+    return unresolved;
+  return { status: "changed", current: currentTarget(start, end) };
+}
 export function validateAIRequest(req: AIRequest): void {
-  validateTarget(req.readContext.document, req.editTarget);
+  if (req.followUp) {
+    const target = req.editTarget;
+    if (
+      target.documentId !== req.readContext.document.id ||
+      !target.sectionId ||
+      !req.readContext.document.sections.some(
+        (section) =>
+          section.id === target.sectionId &&
+          section.workbench?.runs.some(
+            (run) =>
+              run.id === req.followUp?.runId &&
+              JSON.stringify(run.target) === JSON.stringify(target),
+          ),
+      )
+    )
+      throw new Error(
+        "Follow-up must remain attached to the saved run's target",
+      );
+    if (
+      target.start > target.end ||
+      target.sectionSnapshot.slice(target.start, target.end) !== target.text ||
+      (target.scope === "section" &&
+        (target.start !== 0 || target.end !== target.sectionSnapshot.length))
+    )
+      throw new Error("Invalid saved target range");
+    if (
+      resolveHistoricalTarget(req.readContext.document, target).status !==
+      req.followUp.targetStatus
+    )
+      throw new Error("Saved target status changed; inspect this run again");
+    if (req.stage === "propose" && req.followUp.targetStatus !== "exact")
+      throw new Error(
+        "Select the current passage for a new run before proposing options",
+      );
+  } else validateTarget(req.readContext.document, req.editTarget);
   if (
     req.editTarget.scope === "document" &&
     !["critique", "break_template"].includes(req.action)

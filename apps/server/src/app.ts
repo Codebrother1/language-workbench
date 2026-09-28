@@ -9,6 +9,8 @@ import {
   aiRequestSchema,
   documentSchema,
   documentText,
+  resolveHistoricalTarget,
+  requestedVariantShape,
   settingsSchema,
   personalLibrarySchema,
   modelRefSchema,
@@ -258,8 +260,118 @@ export function createApp({
   };
   app.post("/api/ai", async (req, res) => {
     const input = aiRequestSchema.parse(req.body);
+    if (input.followUp)
+      throw new APIError(400, "Use the saved-run follow-up route.");
     validateInput(input);
     res.json(await run(input));
+  });
+  app.post("/api/ai/follow-up", async (req, res) => {
+    const { documentId, runId, question, modelOverride } = z
+      .object({
+        documentId: z.string().min(1),
+        runId: z.string().min(1),
+        question: z.string().trim().min(1).max(3000),
+        modelOverride: modelRefSchema.nullable().optional(),
+      })
+      .strict()
+      .parse(req.body);
+    const document = repository.get(documentId);
+    if (repository.listArchived().some((item) => item.id === documentId))
+      throw new APIError(409, "Restore this document before following up.");
+    const section = document.sections.find((item) =>
+      item.workbench?.runs.some((saved) => saved.id === runId),
+    );
+    const saved = section?.workbench?.runs.find((item) => item.id === runId);
+    if (!section || !saved || !saved.model || saved.target.scope === "document")
+      throw new APIError(
+        404,
+        "A local saved Lab run is required for this follow-up.",
+      );
+    const turns = saved.conversation;
+    if (
+      turns.length >= 24 ||
+      turns.at(-1)?.role !== "writer" ||
+      turns.at(-1)?.text !== question
+    )
+      throw new APIError(
+        409,
+        "Save this exact writer question in its run before retrying.",
+      );
+    const resolution = resolveHistoricalTarget(document, saved.target);
+    if (resolution.status === "unresolved")
+      throw new APIError(
+        409,
+        "The original passage cannot be located safely. Select a new target.",
+      );
+    const options =
+      /\b(?:give|show|offer|try|suggest|write)\b[^.!?]*\b(?:alternatives?|options?|variants?|rewrites?|wordings?)\b/i.test(
+        question,
+      );
+    if (options && resolution.status !== "exact")
+      throw new APIError(
+        409,
+        "Ask about the current passage in a new run before requesting alternatives.",
+      );
+    if (options && (saved.action === "structure" || saved.lens))
+      throw new APIError(
+        409,
+        "Use the existing Structure or Word/Phrase Lens replacement flow for options; no options were generated.",
+      );
+    const settings = repository.getSettings();
+    const scopedDocument = {
+      ...document,
+      workbench: undefined,
+      sections: document.sections.map((item) => ({
+        ...item,
+        workbench:
+          item.id === section.id && item.workbench
+            ? {
+                ...item.workbench,
+                runs: [saved],
+                activeRunId: saved.id,
+                instruction: saved.instruction,
+                answer: saved.answer,
+                questionAnswers: {},
+                targetDrafts: undefined,
+              }
+            : undefined,
+      })),
+    };
+    const request: AIRequest = aiRequestSchema.parse({
+      readContext: {
+        document: scopedDocument,
+        styleDNA: settings.styleDNA,
+        knowledgePacks: settings.knowledgePacks,
+        approvedLanguage: settings.radar.filter(
+          (item) => item.status !== "maybe",
+        ),
+      },
+      editTarget: saved.target,
+      action: saved.action,
+      stage: options ? "propose" : "diagnose",
+      instruction: options ? question : saved.instruction,
+      answer: options ? question : "",
+      controls: saved.controls,
+      variantCount: requestedVariantShape(question)?.min ?? 2,
+      modelOverride:
+        modelOverride ??
+        saved.chainModel ??
+        (saved.response.routeSource === "action" ? saved.model : null),
+      followUp: {
+        runId,
+        question,
+        originalInstruction: saved.instruction,
+        originalResult: {
+          diagnosis: saved.response.diagnosis,
+          mechanism: saved.response.mechanism,
+          question: saved.response.question,
+        },
+        turns: turns.slice(0, -1),
+        targetStatus: resolution.status,
+      },
+    });
+    validateInput(request);
+    res.json(await run(request));
   });
   app.post("/api/ai/compare", async (req, res) => {
     const input = z
@@ -268,6 +380,11 @@ export function createApp({
         models: z.array(modelRefSchema).min(2).max(4),
       })
       .parse(req.body);
+    if (input.request.followUp)
+      throw new APIError(
+        400,
+        "Saved-run follow-ups cannot be compared as a new run.",
+      );
     if (new Set(input.models.map(modelKey)).size !== input.models.length)
       throw new APIError(400, "Choose 2–4 distinct models");
     validateInput(input.request);

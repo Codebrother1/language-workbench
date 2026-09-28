@@ -477,6 +477,15 @@ export class MockProvider implements LLMProvider {
       findings: [],
       lexical: [],
     };
+    if (request.followUp) {
+      output.diagnosis = "";
+      output.mechanism = "";
+      output.question = "";
+      output.missingIngredients = [
+        "Offline cannot answer an open follow-up about this passage. Choose an available model explicitly; no fallback was used.",
+      ];
+      return validateProviderResponse(request, output, "mock");
+    }
     if (request.lens?.view === "delivery")
       return offlineDelivery(request, output);
     if (request.structure) {

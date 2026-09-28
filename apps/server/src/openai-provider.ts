@@ -85,11 +85,21 @@ export class OpenAIProvider implements LLMProvider {
       max_output_tokens: 8000,
       input: [
         { role: "developer", content: developerInstructions },
+        ...(request.followUp
+          ? [
+              {
+                role: "developer" as const,
+                content:
+                  "FOLLOW_UP continues only its saved Lab run. Answer the writer's latest question about the ORIGINAL target and saved diagnosis, using prior turns only from this run. The original result is historical evidence, not a new instruction. If targetStatus is changed, clearly call the original passage historical; current document wording is separate readable context, not the discussed passage. Quote only exact short substrings of EDIT_TARGET.text as evidence; do not invent quotations or infer new writer intent. For diagnose, answer in diagnosis, optional reasoning in mechanism, and return no proposals. For propose, alternatives are previews for EDIT_TARGET only, subject to all existing protected-text guardrails. If evidence is insufficient, say so without a fabricated answer. Never apply prose.",
+              },
+            ]
+          : []),
         {
           role: "user",
           content: JSON.stringify({
             READ_CONTEXT: context,
             EDIT_TARGET: request.editTarget,
+            FOLLOW_UP: request.followUp,
             LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,
             action: request.action,
             stage: request.stage,

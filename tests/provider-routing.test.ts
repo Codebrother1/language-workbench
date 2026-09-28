@@ -16,6 +16,7 @@ import {
   defaultSettings,
   documentTarget,
   newDocument,
+  paragraphs,
   targetFor,
   resolveModel,
   providerCatalogSchema,
@@ -163,6 +164,85 @@ afterEach(async () => {
 });
 
 describe("provider catalog, environment boundary and persistence", () => {
+  it("continues a saved run with its pinned model and scoped history, without paid fallback", async () => {
+    let doc = repository.create(
+      "Targeted run",
+      "They were larping as experts.",
+    );
+    const target = targetFor(doc, doc.sections[0].id, "selection", 10, 17);
+    const run = {
+      id: "run-1",
+      createdAt: doc.createdAt,
+      target,
+      stage: "diagnose" as const,
+      action: "coach",
+      instruction: "Why does it read flat?",
+      answer: "",
+      controls: {},
+      model: openai,
+      chainModel: openai,
+      response: {
+        ...output,
+        diagnosis: "Earlier result about larping.",
+        model: openai,
+        routeSource: "action",
+      },
+      conversation: [
+        {
+          id: "writer",
+          role: "writer" as const,
+          text: "What evidence?",
+          createdAt: doc.createdAt,
+        },
+      ],
+    };
+    doc.sections[0].workbench = {
+      ...emptyWorkbench(),
+      runs: [run, { ...run, id: "another-run", conversation: [] }],
+      activeRunId: run.id,
+    };
+    doc = repository.save(doc.id, doc);
+    const body = {
+      documentId: doc.id,
+      runId: run.id,
+      question: "What evidence?",
+    };
+    const result = await (await api("/api/ai/follow-up", "POST", body)).json();
+    expect(result.model).toEqual(openai);
+    expect(result.routeSource).toBe("action");
+    const requestBody = calls.find(
+      (call) => call.body?.model === openai.modelId,
+    )?.body;
+    expect(requestBody).toBeTruthy();
+    const submitted = JSON.parse(requestBody.input[2].content);
+    expect(submitted.FOLLOW_UP.runId).toBe(run.id);
+    expect(submitted.FOLLOW_UP.originalResult.diagnosis).toBe(
+      "Earlier result about larping.",
+    );
+    expect(
+      submitted.READ_CONTEXT.document.sections[0].workbench.runs.map(
+        (item: any) => item.id,
+      ),
+    ).toEqual([run.id]);
+    expect(
+      repository.get(doc.id).sections[0].workbench?.runs[0].conversation,
+    ).toHaveLength(1);
+    doc.sections[0].content = paragraphs("They were drifting as experts.");
+    doc = repository.save(doc.id, doc);
+    expect((await api("/api/ai/follow-up", "POST", body)).status).toBe(200);
+    const changedInput = JSON.parse(calls.at(-1)!.body.input[2].content);
+    expect(changedInput.FOLLOW_UP.targetStatus).toBe("changed");
+    expect(changedInput.EDIT_TARGET.text).toBe("larping");
+    expect(changedInput.READ_CONTEXT.document.sections[0].content).toEqual(
+      doc.sections[0].content,
+    );
+    registry.setEnabled("openai", false);
+    const earlierCalls = calls.length;
+    const unavailable = await api("/api/ai/follow-up", "POST", body);
+    expect(unavailable.status).toBe(400);
+    expect((await unavailable.json()).error).toMatch(/disabled/i);
+    expect(calls).toHaveLength(earlierCalls);
+  });
   it("publishes truthful descriptors, no raw keys and no background discovery", async () => {
     const result = await (await api("/api/providers")).json();
     expect(providerCatalogSchema.safeParse(result).success).toBe(true);

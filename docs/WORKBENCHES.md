@@ -11,7 +11,7 @@ Each section can save its own:
 - Instruction and human-answer drafts; selected action and controls.
 - Word/Phrase Lens mode, fidelity, shape, intent, persona/register/era and technical setting.
 - Section model override, next-operation model choice and comparison model list.
-- Diagnosis and proposal runs, captured targets, model identity, questions, lexical entries, findings and candidates.
+- Diagnosis and proposal runs, captured targets, model identity, questions, lexical entries, findings and candidates. Each saved local run can hold up to twelve writer/assistant follow-up exchanges, separate from other runs and from Piece Memory. A follow-up keeps the original target and run result as context; a changed target is clearly historical, an unresolved target blocks new requests, and asking about the current passage starts a new run. Offline reports when it cannot answer rather than inventing a conversation. Each successful assistant turn records the actual model; proposals remain previews for explicit Copy, Save or Use only; Structure and Word/Phrase Lens keep their own guarded proposal flows.
 - The currently inspected run and proposal outcomes; associated variants and document iteration records.
 
 These are optional fields in the document JSON and autosave to SQLite with the document. They are not transient chat state. Wait for **Saved** before reloading; there is no durable browser crash-recovery journal for unflushed edits. Earlier schema-version-1 documents without these fields still load. Whole-document critique/template analysis uses a **separate document workbench**, so it does not overwrite a section's drafts or propose whole-document replacement.
