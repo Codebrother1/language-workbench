@@ -108,11 +108,12 @@ export function ContextualWriting({
   w: Workspace;
   navigation: Wayfinding;
 }) {
-  const [hidden, setHidden] = useState<string[]>([]);
   const key = (item: (typeof w.contextualItems)[number]) =>
     `${item.source}:${item.itemId ?? item.key}`;
-  const items = w.contextualItems.filter((item) => !hidden.includes(key(item)));
-  if (!items.length && !w.selectedGuidance.length) return null;
+  const items = w.contextualVisibleItems;
+  const hidden = w.contextualHiddenItems;
+  if (!items.length && !hidden.length && !w.selectedGuidance.length)
+    return null;
   const sourceLabel = (item: (typeof items)[number]) =>
     ({
       style_dna: "STYLE DNA",
@@ -177,13 +178,38 @@ export function ContextualWriting({
             </Button>
             <Button
               className="text-button"
-              onClick={() => setHidden((old) => [...old, key(item)])}
+              onClick={() => w.dismissGuidance(item)}
             >
               Not relevant
             </Button>
           </div>
         </article>
       ))}
+      {!!hidden.length && (
+        <details className="hidden-guidance">
+          <summary>
+            Show hidden guidance · {hidden.length} hidden saved{" "}
+            {hidden.length === 1 ? "item" : "items"}
+          </summary>
+          {hidden.map((item) => (
+            <article
+              key={key(item)}
+              data-hidden-guidance-id={item.itemId ?? item.key}
+            >
+              <span className="eyebrow">{sourceLabel(item)}</span>
+              <b>{item.title}</b>
+              <p>
+                {item.text.length > 200
+                  ? item.text.slice(0, 200).trimEnd() + "…"
+                  : item.text}
+              </p>
+              <Button onClick={() => w.restoreGuidance(item)}>
+                Restore guidance
+              </Button>
+            </article>
+          ))}
+        </details>
+      )}
       {!!w.selectedGuidance.length && (
         <div className="run-guidance" data-testid="run-guidance">
           <b>
@@ -193,7 +219,11 @@ export function ContextualWriting({
           </b>
           {w.selectedGuidance.map((item) => (
             <div className="row wrap" key={key(item)}>
-              <span>{item.text}</span>
+              <span>
+                <small className="eyebrow">{sourceLabel(item)}</small>
+                <br />
+                {item.text}
+              </span>
               <Button
                 aria-label="Remove guidance"
                 onClick={() => w.removeGuidance(item)}

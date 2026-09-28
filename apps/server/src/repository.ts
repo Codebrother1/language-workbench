@@ -281,6 +281,10 @@ export class Repository {
       revision: 0,
       createdAt: now,
       updatedAt: now,
+      guidanceDismissals: doc.guidanceDismissals.flatMap((dismissal) => {
+        const sectionId = sectionIds.get(dismissal.sectionId);
+        return sectionId ? [{ ...dismissal, sectionId }] : [];
+      }),
       pieceMemory: {
         ...doc.pieceMemory,
         decisions: doc.pieceMemory.decisions.map((decision) => ({

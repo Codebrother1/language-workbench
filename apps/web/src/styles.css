@@ -2311,6 +2311,16 @@ summary {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
+.contextual-writing .hidden-guidance {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.contextual-writing .hidden-guidance > summary {
+  padding: 8px 0;
+  min-height: 40px;
+  color: var(--muted);
+  cursor: pointer;
+}
 .contextual-writing article b,
 .contextual-writing article p {
   display: block;

@@ -4,6 +4,9 @@ import {
   libraryDelta,
   makeHumanRun,
   contextualGuidance,
+  guidanceContext,
+  guidanceIdentity,
+  isGuidanceDismissed,
 } from "../apps/web/src/library-helpers";
 import {
   appendRun,
@@ -24,6 +27,97 @@ import {
 } from "../packages/domain/src";
 
 describe("contextual saved writing guidance", () => {
+  it("scopes dismissal to document, section and task while retaining source identity across edits", () => {
+    const doc = newDocument("A", "One opening.");
+    doc.sections[0].kind = "Hook";
+    doc.sections.push(newSection("Hook", "Another opening."));
+    const saved = {
+      ...createLibraryItem({ kind: "move", content: "Name the object." }),
+      sectionKinds: ["Hook"],
+    };
+    const first = targetFor(doc, doc.sections[0].id);
+    const second = targetFor(doc, doc.sections[1].id);
+    const guidance = contextualGuidance({
+      doc,
+      target: first,
+      action: "coach",
+      styleDNA: defaultSettings().styleDNA,
+      library: { ...emptyLibrary(), items: [saved] },
+    })[0];
+    doc.guidanceDismissals.push({
+      ...guidanceContext(doc, first, "coach")!,
+      identity: guidanceIdentity(guidance),
+    });
+    expect(isGuidanceDismissed(doc, guidance, first, "coach")).toBe(true);
+    expect(
+      isGuidanceDismissed(
+        doc,
+        {
+          ...guidance,
+          text: "Revised saved move.",
+          source: "section_style",
+          kind: "style_rule",
+        },
+        first,
+        "coach",
+      ),
+    ).toBe(true);
+    expect(isGuidanceDismissed(doc, guidance, second, "coach")).toBe(false);
+    expect(isGuidanceDismissed(doc, guidance, first, "humor")).toBe(false);
+    expect(
+      isGuidanceDismissed(
+        newDocument("B", "Separate."),
+        guidance,
+        first,
+        "coach",
+      ),
+    ).toBe(false);
+  });
+  it("does not surface a content-type-only item throughout an ordinary Freeform draft or fill a third slot", () => {
+    const doc = newDocument("Ordinary", "An ordinary paragraph.");
+    const broad = {
+      ...createLibraryItem({
+        kind: "pattern",
+        title: "Everywhere?",
+        content: "A broad construction.",
+      }),
+      contentTypes: ["freeform"],
+    };
+    const context = {
+      doc,
+      target: targetFor(doc, doc.sections[0].id),
+      action: "coach" as const,
+      styleDNA: defaultSettings().styleDNA,
+    };
+    expect(
+      contextualGuidance({
+        ...context,
+        library: { ...emptyLibrary(), items: [broad] },
+      }),
+    ).toEqual([]);
+    doc.sections[0].kind = "Closer";
+    const rule = {
+      ...createLibraryItem({
+        kind: "style_rule",
+        content: "End on the object.",
+      }),
+      sectionKinds: ["Closer"],
+    };
+    const move = {
+      ...createLibraryItem({
+        kind: "move",
+        content: "Let the object hold the ending.",
+      }),
+      sectionKinds: ["Closer"],
+    };
+    expect(
+      contextualGuidance({
+        ...context,
+        target: targetFor(doc, doc.sections[0].id),
+        library: { ...emptyLibrary(), items: [broad, rule, move] },
+      }).map((item) => item.itemId),
+    ).toEqual([rule.id, move.id]);
+  });
   it("surfaces scoped section rules, matching moves and customized Style DNA without unrelated items", () => {
     const style = {
       ...defaultSettings().styleDNA,
@@ -61,15 +155,15 @@ describe("contextual saved writing guidance", () => {
     });
     expect(items.map((item) => item.text)).toEqual([
       rule.content,
-      style.rhythm,
       move.content,
+      style.rhythm,
     ]);
     expect(items.map((item) => item.source)).toEqual([
       "section_style",
-      "style_dna",
       "library",
+      "style_dna",
     ]);
-    expect(items[2].kind).toBe("move");
+    expect(items[1].kind).toBe("move");
   });
   it("matches a saved ending rule by explicit rule key rather than inferred prose meaning", () => {
     const doc = newDocument("Draft", "Do not end with a summary.");

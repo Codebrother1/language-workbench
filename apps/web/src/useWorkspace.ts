@@ -103,6 +103,9 @@ import {
 import {
   createLibraryItem,
   contextualGuidance,
+  guidanceContext,
+  guidanceIdentity,
+  isGuidanceDismissed,
   libraryDelta,
   makeHumanRun,
   type SaveLibraryItemInput,
@@ -1037,10 +1040,13 @@ export function useWorkspace() {
       await flush();
       const next = duplicate
         ? await api<Document>("/import", "POST", {
-            document: forkDocument(
-              current.current,
-              current.current.title + " — copy",
-            ),
+            document: {
+              ...forkDocument(
+                current.current,
+                current.current.title + " — copy",
+              ),
+              guidanceDismissals: [],
+            },
           })
         : await api<Document>("/documents", "POST", {});
       await flush();
@@ -1928,6 +1934,46 @@ export function useWorkspace() {
     styleDNA: settings.styleDNA,
     library,
   });
+  const contextualVisibleItems = contextualItems.filter(
+    (item) => !isGuidanceDismissed(doc, item, target, action),
+  );
+  const contextualHiddenItems = contextualItems.filter((item) =>
+    isGuidanceDismissed(doc, item, target, action),
+  );
+  const dismissGuidance = (item: SavedGuidance) => {
+    if (!target) return;
+    update((currentDoc) => {
+      const context = guidanceContext(currentDoc, target, action);
+      if (!context || isGuidanceDismissed(currentDoc, item, target, action))
+        return currentDoc;
+      return {
+        ...currentDoc,
+        guidanceDismissals: [
+          ...currentDoc.guidanceDismissals,
+          { ...context, identity: guidanceIdentity(item) },
+        ],
+      };
+    });
+  };
+  const restoreGuidance = (item: SavedGuidance) => {
+    if (!target) return;
+    update((currentDoc) => {
+      const context = guidanceContext(currentDoc, target, action);
+      return context
+        ? {
+            ...currentDoc,
+            guidanceDismissals: currentDoc.guidanceDismissals.filter(
+              (dismissal) =>
+                !(
+                  dismissal.sectionId === context.sectionId &&
+                  dismissal.context === context.context &&
+                  dismissal.identity === guidanceIdentity(item)
+                ),
+            ),
+          }
+        : currentDoc;
+    });
+  };
   const selectedGuidance =
     target &&
     guidanceDraft?.documentId === doc.id &&
@@ -3150,6 +3196,10 @@ export function useWorkspace() {
     markLibraryUsed,
     relevantItems,
     contextualItems,
+    contextualVisibleItems,
+    contextualHiddenItems,
+    dismissGuidance,
+    restoreGuidance,
     selectedGuidance,
     attachGuidance,
     removeGuidance,

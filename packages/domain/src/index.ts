@@ -285,6 +285,12 @@ export const pieceMemorySchema = z.object({
   reviewedDraftRevision: z.number().int().min(0).default(0),
 });
 export type PieceMemory = z.infer<typeof pieceMemorySchema>;
+export const guidanceDismissalSchema = z.object({
+  identity: z.string().min(1),
+  sectionId: z.string().min(1),
+  context: z.string().min(1),
+});
+export type GuidanceDismissal = z.infer<typeof guidanceDismissalSchema>;
 export const documentSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -296,6 +302,7 @@ export const documentSchema = z
     brief: writingBriefSchema,
     draftRevision: z.number().int().min(0).default(0),
     pieceMemory: pieceMemorySchema.default({}),
+    guidanceDismissals: z.array(guidanceDismissalSchema).max(500).default([]),
     sections: z.array(writingSectionSchema).min(1),
     parkedGroups: z.array(parkedGroupSchema).default([]),
     sources: z.array(sourceMaterialSchema).default([]),
@@ -623,6 +630,7 @@ export function newDocument(title = "Untitled", text = ""): Document {
     draftRevision: 0,
     brief: writingBriefSchema.parse({}),
     pieceMemory: pieceMemorySchema.parse({}),
+    guidanceDismissals: [],
     sections: [newSection("Freeform", text)],
     parkedGroups: [],
     sources: [],

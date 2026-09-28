@@ -15,6 +15,47 @@ import {
 } from "./domain";
 import { makeRun } from "./workspace-helpers";
 
+export function guidanceIdentity(item: SavedGuidance): string {
+  return item.itemId
+    ? `library:${item.itemId}`
+    : `${item.source}:${item.key ?? ""}`;
+}
+export function guidanceContext(
+  doc: Document,
+  target: EditTarget | null,
+  action: WritingAction,
+) {
+  const section = doc.sections.find((item) => item.id === target?.sectionId);
+  return section && target
+    ? {
+        sectionId: section.id,
+        context: JSON.stringify([
+          section.kind,
+          target.scope,
+          action,
+          doc.brief.contentType,
+        ]),
+      }
+    : null;
+}
+export function isGuidanceDismissed(
+  doc: Document,
+  item: SavedGuidance,
+  target: EditTarget | null,
+  action: WritingAction,
+): boolean {
+  const scope = guidanceContext(doc, target, action);
+  return (
+    !!scope &&
+    doc.guidanceDismissals.some(
+      (dismissal) =>
+        dismissal.sectionId === scope.sectionId &&
+        dismissal.context === scope.context &&
+        dismissal.identity === guidanceIdentity(item),
+    )
+  );
+}
+
 export function contextualGuidance(input: {
   doc: Document;
   target: EditTarget | null;
@@ -73,16 +114,16 @@ export function contextualGuidance(input: {
     const transition = ["Segue", "Transition"].includes(section.kind);
     const connector = item.kind === "connector" && transition;
     if (item.kind === "connector" && !connector) continue;
-    if (!connector && !scoped && !tagged && !contentScoped) continue;
+    if (!connector && !scoped && !tagged) continue;
     const score =
       item.kind === "style_rule" && scoped
         ? 100
         : connector
           ? 90
-          : item.kind === "style_rule" && (tagged || contentScoped)
+          : scoped
             ? 85
-            : scoped
-              ? 65
+            : item.kind === "style_rule" && (tagged || contentScoped)
+              ? 70
               : tagged
                 ? 55
                 : 40;

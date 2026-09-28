@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   test,
   expect,
@@ -155,6 +156,7 @@ test("Your writing retrieves saved Hook guidance locally and attaches only an ex
   expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
   await item.getByRole("button", { name: "Use as guidance" }).click();
   await expect(page.getByTestId("run-guidance")).toContainText(rule.content);
+  await expect(page.getByTestId("run-guidance")).toContainText("SECTION STYLE");
   await page
     .getByTestId("run-guidance")
     .getByRole("button", { name: "Remove guidance" })
@@ -198,11 +200,19 @@ test("contextual guidance reflects source edits without rewriting an earlier Lab
   await contextual.locator("summary").click();
   await expect(contextual).toContainText(move.content);
   await contextual.getByRole("button", { name: "Not relevant" }).click();
-  await expect(contextual).toHaveCount(0);
+  await expect(contextual).toContainText("1 hidden saved item");
+  await expect(
+    contextual.getByRole("button", { name: "View source" }),
+  ).toHaveCount(0);
   await focus(page, "Segue");
   await focus(page, "Hook");
-  await expect(contextual).toContainText(move.content);
-  await contextual.locator("summary").click();
+  await expect(contextual).toContainText("1 hidden saved item");
+  await contextual.locator("summary").first().click();
+  await contextual.getByText("Show hidden guidance").click();
+  await contextual.getByRole("button", { name: "Restore guidance" }).click();
+  await expect(
+    contextual.getByRole("button", { name: "View source" }),
+  ).toBeVisible();
   await contextual.getByRole("button", { name: "View source" }).click();
   await expect(
     page.getByRole("dialog", { name: "Personal Writing Library" }),
@@ -227,7 +237,11 @@ test("contextual guidance reflects source edits without rewriting an earlier Lab
       ...newer,
       items: newer.items.map((item: any) =>
         item.id === move.id
-          ? { ...item, content: "Let the object carry the turn." }
+          ? {
+              ...item,
+              kind: "pattern",
+              content: "Let the object carry the turn.",
+            }
           : item,
       ),
     },
@@ -237,8 +251,14 @@ test("contextual guidance reflects source edits without rewriting an earlier Lab
   await expect(page.getByTestId("your-writing")).toContainText(
     "Let the object carry the turn.",
   );
+  await expect(page.getByTestId("your-writing")).toContainText(
+    "PERSONAL LIBRARY · PATTERN",
+  );
   await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
     move.content,
+  );
+  await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
+    "PERSONAL LIBRARY · MOVE",
   );
   const last = await library(request);
   await request.put("/api/library", {
@@ -253,6 +273,69 @@ test("contextual guidance reflects source edits without rewriting an earlier Lab
   await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
     move.content,
   );
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+});
+
+test("document-local hidden guidance survives archive and export but a UI duplicate starts fresh", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const initialLibrary = await library(request);
+  const item = {
+    ...createLibraryItem({
+      kind: "move",
+      title: "My Hook move",
+      content: "Stop at the precise object.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  await request.put("/api/library", {
+    data: { ...initialLibrary, items: [item] },
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  await focus(page, "Hook");
+  const contextual = page.getByTestId("your-writing");
+  await contextual.getByRole("button", { name: "Not relevant" }).click();
+  await expect(contextual).toContainText("1 hidden saved item");
+  await save(page);
+  const saved = await stored(request, doc.id);
+  expect(saved.guidanceDismissals).toHaveLength(1);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const exported = JSON.parse(
+    readFileSync((await (await download).path())!, "utf8"),
+  );
+  expect(exported.guidanceDismissals).toEqual(saved.guidanceDismissals);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  const switcher = page.getByLabel("Switch document");
+  await expect.poll(() => switcher.inputValue()).not.toBe(doc.id);
+  const copy = await stored(request, await switcher.inputValue());
+  expect(copy.guidanceDismissals).toEqual([]);
+  await focus(page, "Hook");
+  await expect(page.getByTestId("your-writing")).toContainText(item.content);
+  await switcher.selectOption(doc.id);
+  await focus(page, "Hook");
+  await expect(page.getByTestId("your-writing")).toContainText(
+    "1 hidden saved item",
+  );
+  await request.post("/api/documents/archive", { data: { ids: [doc.id] } });
+  const archived = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(archived.guidanceDismissals).toEqual(saved.guidanceDismissals);
+  await request.post("/api/documents/restore", { data: { ids: [doc.id] } });
+  await page.reload();
+  await focus(page, "Hook");
+  await expect(page.getByTestId("your-writing")).toContainText(
+    "1 hidden saved item",
+  );
+  const laterLibrary = await library(request);
+  await request.put("/api/library", { data: { ...laterLibrary, items: [] } });
+  await page.reload();
+  await focus(page, "Hook");
+  await expect(page.getByTestId("your-writing")).toHaveCount(0);
   expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
 });
 

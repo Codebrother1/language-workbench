@@ -502,11 +502,13 @@ describe("local API and SQLite persistence", () => {
     ).toBe("");
     delete second.pieceMemory;
     delete second.draftRevision;
+    delete second.guidanceDismissals;
     const legacy = await (
       await request("/api/import", "POST", { document: second })
     ).json();
     expect(legacy.pieceMemory).toEqual(first.pieceMemory);
     expect(legacy.draftRevision).toBe(0);
+    expect(legacy.guidanceDismissals).toEqual([]);
     const oldMemory = structuredClone(first);
     oldMemory.pieceMemory.nextMove = "An earlier note.";
     delete oldMemory.pieceMemory.reviewedDraftRevision;
@@ -522,6 +524,35 @@ describe("local API and SQLite persistence", () => {
       (await (await request(`/api/documents/${copied.id}`)).json()).pieceMemory
         .nextMove,
     ).toBe(memory.nextMove);
+  });
+  it("persists contextual dismissals with the document and remaps them on import", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Local context",
+        text: "Authored line.",
+      })
+    ).json();
+    doc.guidanceDismissals.push({
+      identity: "library:move-one",
+      sectionId: doc.sections[0].id,
+      context: JSON.stringify(["Freeform", "section", "coach", "freeform"]),
+    });
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    const prose = documentText(doc);
+    await request("/api/documents/archive", "POST", { ids: [doc.id] });
+    await stop();
+    await start();
+    const archived = await (await request(`/api/documents/${doc.id}`)).json();
+    expect(archived.guidanceDismissals).toEqual(doc.guidanceDismissals);
+    await request("/api/documents/restore", "POST", { ids: [doc.id] });
+    const imported = await (
+      await request("/api/import", "POST", { document: archived })
+    ).json();
+    expect(imported.guidanceDismissals).toEqual([
+      { ...doc.guidanceDismissals[0], sectionId: imported.sections[0].id },
+    ]);
+    expect(imported.sections[0].id).not.toBe(doc.sections[0].id);
+    expect(documentText(imported)).toBe(prose);
   });
   it("tracks authored draft revision independently of metadata and memory review", async () => {
     let doc = await (
