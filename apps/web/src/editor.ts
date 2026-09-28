@@ -199,7 +199,10 @@ export function fromEditor(
     };
   });
 }
-export function revealScrollContainer(pane: HTMLElement): void {
+export function revealScrollContainer(
+  pane: HTMLElement,
+  behavior: ScrollBehavior = "smooth",
+): void {
   const bounds = pane.getBoundingClientRect();
   const top = Math.min(window.innerHeight * 0.15, 120);
   if (
@@ -209,7 +212,7 @@ export function revealScrollContainer(pane: HTMLElement): void {
   )
     window.scrollTo({
       top: window.scrollY + bounds.top - top,
-      behavior: "smooth",
+      behavior,
     });
 }
 
@@ -217,6 +220,7 @@ export function scrollPreviewToSection(
   id: string,
   force = false,
   allowPageScroll = false,
+  behavior: ScrollBehavior = "smooth",
 ): boolean {
   const pane = document.querySelector<HTMLElement>(".dock-preview .writing");
   if (!pane || getComputedStyle(pane).display === "none") return false;
@@ -241,7 +245,7 @@ export function scrollPreviewToSection(
       target.bottom <= window.innerHeight * 0.75
     )
       return false;
-    node.scrollIntoView({ block: "center", behavior: "smooth" });
+    node.scrollIntoView({ block: "center", behavior });
     return true;
   }
   const bounds = pane.getBoundingClientRect();
@@ -251,7 +255,7 @@ export function scrollPreviewToSection(
     target.top >= bounds.top + Math.min(bounds.height * 0.22, 180) &&
     target.bottom <= bounds.top + bounds.height * 0.7
   ) {
-    if (allowPageScroll) revealScrollContainer(pane);
+    if (allowPageScroll) revealScrollContainer(pane, behavior);
     return false;
   }
   pane.scrollTo({
@@ -260,9 +264,9 @@ export function scrollPreviewToSection(
       target.top -
       bounds.top -
       Math.min(bounds.height * 0.3, 220),
-    behavior: "smooth",
+    behavior,
   });
-  if (allowPageScroll) revealScrollContainer(pane);
+  if (allowPageScroll) revealScrollContainer(pane, behavior);
   return true;
 }
 

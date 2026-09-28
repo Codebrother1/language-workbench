@@ -95,6 +95,7 @@ function scrollWorkbenchToSection(
   id: string,
   force = false,
   allowPageScroll = false,
+  behavior: ScrollBehavior = "smooth",
 ): boolean {
   const card = Array.from(
     document.querySelectorAll<HTMLElement>(".structure-item"),
@@ -139,12 +140,12 @@ function scrollWorkbenchToSection(
       (target.bottom < 60 ||
         (controls?.bottom ?? target.top) > window.innerHeight - 90)
     )
-      card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      card.scrollIntoView({ block: "nearest", behavior });
     return true;
   }
   if (delta && usableBottom > usableTop)
-    pane.scrollTo({ top: pane.scrollTop + delta, behavior: "smooth" });
-  if (allowPageScroll) revealScrollContainer(pane);
+    pane.scrollTo({ top: pane.scrollTop + delta, behavior });
+  if (allowPageScroll) revealScrollContainer(pane, behavior);
   return true;
 }
 
@@ -1536,6 +1537,24 @@ export default function App() {
     if (selected?.placement === "draft") lastDraftId.current = selected.id;
   }, [w.doc.sections, w.selectedSectionId]);
   const orientationToken = useRef(0);
+  const interactionGeneration = useRef(0);
+  const switchGeneration = useRef<number | null>(null);
+  const orientationStarted = useRef(false);
+  useLayoutEffect(() => {
+    const record = () => {
+      interactionGeneration.current++;
+    };
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
+      window.addEventListener(event, record, true);
+    return () => {
+      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
+        window.removeEventListener(event, record, true);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (w.documentSwitching && switchGeneration.current === null)
+      switchGeneration.current = interactionGeneration.current;
+  }, [w.documentSwitching]);
   const orientationInteracted = useRef(false);
   const orientedPanes = useRef({
     documentId: "",
@@ -1553,13 +1572,19 @@ export default function App() {
     if (!id || !w.doc.sections.some((section) => section.id === id)) return;
     const current = orientedPanes.current;
     if (current.documentId !== w.doc.id) {
+      const takenOver =
+        switchGeneration.current !== null
+          ? interactionGeneration.current > switchGeneration.current
+          : !orientationStarted.current && interactionGeneration.current > 0;
+      switchGeneration.current = null;
+      orientationStarted.current = true;
       orientedPanes.current = {
         documentId: w.doc.id,
         sectionId: id,
-        workbench: false,
-        preview: false,
+        workbench: takenOver,
+        preview: takenOver,
       };
-      orientationInteracted.current = false;
+      orientationInteracted.current = takenOver;
     } else if (current.sectionId !== id) {
       current.sectionId = id;
       if (
@@ -1596,13 +1621,13 @@ export default function App() {
       if (!stillCurrent()) return;
       const state = orientedPanes.current;
       if (workbenchShown && !state.workbench && workbench.clientHeight > 0)
-        state.workbench = scrollWorkbenchToSection(id, false, true);
+        state.workbench = scrollWorkbenchToSection(id, false, true, "instant");
       if (previewShown && !state.preview && preview.clientHeight > 0) {
         const passage = preview.querySelector<HTMLElement>(
           `[data-preview-section-id="${CSS.escape(id)}"], .writing-editor > section[id="${CSS.escape(id)}"]`,
         );
         if (passage) {
-          scrollPreviewToSection(id, false, window.innerWidth > 900);
+          scrollPreviewToSection(id, false, window.innerWidth > 900, "instant");
           state.preview = true;
         }
       }
@@ -2166,7 +2191,10 @@ export default function App() {
             <Select
               aria-label="Switch document"
               value={w.doc.id}
-              onChange={(e) => w.navigate(e.target.value)}
+              onChange={(e) => {
+                switchGeneration.current = interactionGeneration.current;
+                void w.navigate(e.target.value);
+              }}
               disabled={!w.ready || w.documentSwitching}
             >
               {w.documents.length ? (

@@ -267,6 +267,30 @@ for (const width of [1440, 1024])
           page.getByRole("button", { name: "Open Piece memory" }),
         ).toHaveCount(0);
       await expect(card).toHaveClass(/active/);
+      if (width === 1024 && withMemory) {
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              ),
+            ),
+        );
+        expect(
+          await card.evaluate((node) => {
+            const a = node.getBoundingClientRect(),
+              b = node.closest(".structure")!.getBoundingClientRect();
+            return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+          }),
+        ).toBe(true);
+        expect(
+          await passage.evaluate((node) => {
+            const a = node.getBoundingClientRect(),
+              b = node.closest(".writing")!.getBoundingClientRect();
+            return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+          }),
+        ).toBe(true);
+      }
       await expect
         .poll(() =>
           card.evaluate((node, selector) => {
@@ -426,6 +450,59 @@ for (const width of [1440, 1024])
       await expect(fresh.getByTestId("writing-editor")).not.toBeFocused();
       await fresh.close();
     });
+
+for (const input of ["wheel", "touchstart", "pointerdown", "keydown"] as const)
+  test(`${input} input while a document switch is pending prevents late automatic reorientation`, async ({
+    page,
+    request,
+  }) => {
+    const first = await seed(request);
+    const source = {
+      ...first,
+      title: "Next document",
+      selectedSectionId: first.sections[8].id,
+    };
+    const second = await (
+      await request.post("/api/import", { data: { document: source } })
+    ).json();
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto("/");
+    const picker = page.getByLabel("Switch document");
+    await picker.selectOption(first.id);
+    await page
+      .locator(`[data-section-id="${first.sections[8].id}"] .section-focus`)
+      .click();
+    await save(page);
+    const pane = page.locator(".dock-workbench .structure");
+    await expect
+      .poll(() => pane.evaluate((node) => node.scrollTop))
+      .toBeGreaterThan(0);
+    await page.route("**/api/settings", async (route) => {
+      if (route.request().method() === "PUT")
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      await route.continue();
+    });
+    await picker.selectOption(second.id);
+    await pane.hover();
+    if (input === "wheel") await page.mouse.wheel(0, -4000);
+    else {
+      if (input === "keydown") await page.keyboard.press("ArrowUp");
+      else await pane.dispatchEvent(input, { bubbles: true });
+      await pane.evaluate((node) =>
+        node.scrollTo({ top: 0, behavior: "instant" }),
+      );
+    }
+    await expect
+      .poll(() => pane.evaluate((node) => node.scrollTop))
+      .toBeLessThan(6);
+    await expect(
+      page.locator(`[data-section-id="${second.sections[8].id}"]`),
+    ).toHaveClass(/active/);
+    await expect
+      .poll(() => pane.evaluate((node) => node.scrollTop))
+      .toBeLessThan(6);
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  });
 
 test("a new Preview section and manual scroll supersede a pending 1024px orientation", async ({
   page,
