@@ -1044,6 +1044,190 @@ test("Piece memory keeps writer-authored intention, decisions and unresolved not
   expect(documentText(saved)).toBe(documentText(doc));
 });
 
+test("blank Piece Memory does not warn after prose changes", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Leave a quieter ending.");
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  const memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toHaveCount(0);
+  await expect(page.getByRole("note")).toHaveCount(0);
+});
+
+test("Piece Memory freshness follows draft changes, review and intentional edits without rewriting prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  const aiRequests: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) aiRequests.push(event.url());
+  });
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  let memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toHaveCount(0);
+  await memory
+    .getByLabel("Purpose")
+    .fill("Let the ending land without a summary.");
+  await memory.getByLabel("Next move").fill("Reread the closer.");
+  await memory
+    .getByLabel("Decision to remember")
+    .fill("Keep the ending quiet.");
+  await memory.getByRole("button", { name: "Add decision" }).click();
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByText("Next move: Reread the closer.")).toBeVisible();
+  await save(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Leave this ending open.");
+  await expect(
+    page.getByText("Earlier next move: Reread the closer."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Draft changed since this was saved."),
+  ).toBeVisible();
+  await save(page);
+  await page.reload();
+  await expect(
+    page.getByText("Earlier next move: Reread the closer."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Review Piece memory" }).click();
+  memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toBeVisible();
+  await expect(
+    memory.getByRole("textbox", { name: "Decision 1", exact: true }),
+  ).toHaveValue("Keep the ending quiet.");
+  const prose = documentText(
+    await (await request.get(`/api/documents/${doc.id}`)).json(),
+  );
+  await memory.getByRole("button", { name: "Mark reviewed" }).click();
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toHaveCount(0);
+  await expect(memory.getByLabel("Purpose")).toHaveValue(
+    "Let the ending land without a summary.",
+  );
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByText("Next move: Reread the closer.")).toBeVisible();
+  await save(page);
+  expect(
+    documentText(await (await request.get(`/api/documents/${doc.id}`)).json()),
+  ).toBe(prose);
+  await select(page, "Leave this ending open.");
+  await page.keyboard.insertText("Leave this ending unresolved.");
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toBeVisible();
+  await memory
+    .getByLabel("Last session note")
+    .fill("Do not touch the opening.");
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toHaveCount(0);
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  expect(aiRequests).toHaveLength(0);
+  expect(
+    (await (await request.get(`/api/documents/${doc.id}`)).json()).pieceMemory
+      .reviewedDraftRevision,
+  ).toBe(2);
+});
+
+test("activating a different saved take changes the draft without judging a memory decision", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.nextMove = "Compare the closer takes.";
+  doc.pieceMemory.decisions.push({
+    id: "decision",
+    text: "Keep the quiet ending.",
+    createdAt: doc.createdAt,
+  });
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await page.getByRole("button", { name: "Save take", exact: true }).click();
+  await page.getByLabel("Take name (optional)").fill("Quiet");
+  await page.getByLabel("Take name (optional)").press("Enter");
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Leave this ending louder!");
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  const memory = page.getByRole("dialog", { name: "Piece memory" });
+  await memory.getByRole("button", { name: "Mark reviewed" }).click();
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await expect(
+    page.getByText("Next move: Compare the closer takes."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "1 take" }).click();
+  await page
+    .locator(".variants .variant")
+    .getByRole("button", { name: "Activate" })
+    .click();
+  await expect(
+    page.getByText("Earlier next move: Compare the closer takes."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Review Piece memory" }).click();
+  await expect(
+    memory.getByRole("textbox", { name: "Decision 1", exact: true }),
+  ).toHaveValue("Keep the quiet ending.");
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toBeVisible();
+});
+
+test("metadata and Lab work do not stale memory, while blank Next move keeps freshness inside the panel", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.purpose = "Leave the reader with the quiet line.";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  await expect(page.getByRole("note")).toHaveCount(0);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  await diagnose(page, "shorten");
+  await save(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  let memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toHaveCount(0);
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByRole("note")).toHaveCount(0);
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("The ending now asks more.");
+  await expect(page.getByRole("note")).toHaveCount(0);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toBeVisible();
+  await expect(memory.getByLabel("Purpose")).toHaveValue(
+    "Leave the reader with the quiet line.",
+  );
+});
+
 test("session question suggestion stays tentative and unsaved until individually accepted", async ({
   page,
   request,
@@ -1098,6 +1282,9 @@ test("session question suggestion stays tentative and unsaved until individually
   await expect(
     memory.getByLabel("Current question", { exact: true }),
   ).toHaveValue("");
+  await expect(
+    memory.getByText("Draft changed since this memory was last updated."),
+  ).toHaveCount(0);
   await memory
     .getByRole("button", { name: "Suggest where I left off" })
     .click();
@@ -1115,6 +1302,7 @@ test("session question suggestion stays tentative and unsaved until individually
   expect(stored.pieceMemory.currentQuestion).toBe(
     "Does the new opening arrive too early?",
   );
+  expect(stored.pieceMemory.reviewedDraftRevision).toBe(stored.draftRevision);
   expect(documentText(stored)).toBe(
     prose.replace(
       "First sentence stays. I really utilize tools in order to help. Last sentence stays.",
@@ -1147,10 +1335,11 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   await page.getByRole("button", { name: "Document actions" }).click();
   const singleDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export JSON" }).click();
-  expect(
-    JSON.parse(readFileSync((await (await singleDownload).path())!, "utf8"))
-      .pieceMemory.nextMove,
-  ).toBe("Reread the bridge.");
+  const single = JSON.parse(
+    readFileSync((await (await singleDownload).path())!, "utf8"),
+  );
+  expect(single.pieceMemory.nextMove).toBe("Reread the bridge.");
+  expect(single.pieceMemory.reviewedDraftRevision).toBe(single.draftRevision);
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("button", { name: "Manage documents" }).click();
   let manage = page.getByRole("dialog", { name: "Manage documents" });
@@ -1165,6 +1354,9 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   expect(selected.documents.map((item: any) => item.id)).toEqual([first.id]);
   expect(selected.documents[0].pieceMemory.decisions[0].text).toBe(
     "Keep the closer.",
+  );
+  expect(selected.documents[0].pieceMemory.reviewedDraftRevision).toBe(
+    selected.documents[0].draftRevision,
   );
   const allDownload = page.waitForEvent("download");
   await manage.getByRole("button", { name: "Export all" }).click();
@@ -1188,6 +1380,9 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
     await request.get(`/api/documents/${duplicateId}`)
   ).json();
   expect(duplicate.pieceMemory.nextMove).toBe("Reread the bridge.");
+  expect(duplicate.pieceMemory.reviewedDraftRevision).toBe(
+    duplicate.draftRevision,
+  );
   expect(duplicate.pieceMemory.decisions[0].id).not.toBe("choice");
   await switcher.selectOption(second.id);
   await expect(page.getByText("Next move: Reread the bridge.")).toHaveCount(0);

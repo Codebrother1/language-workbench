@@ -159,8 +159,20 @@ function PieceMemory({ w }: { w: Workspace }) {
       pieceMemory: {
         ...apply(doc.pieceMemory),
         updatedAt: new Date().toISOString(),
+        reviewedDraftRevision: w.draftRevision,
       },
     }));
+  const hasMemory = Boolean(
+    memory.purpose.trim() ||
+    memory.reader.trim() ||
+    memory.currentQuestion.trim() ||
+    memory.nextMove.trim() ||
+    memory.lastSessionNote.trim() ||
+    memory.unresolved.some((item) => item.trim()) ||
+    memory.decisions.some((item) => item.text.trim()),
+  );
+  const draftChanged =
+    hasMemory && memory.reviewedDraftRevision !== w.draftRevision;
   const fields = [
     ["Next move", memory.nextMove],
     ["Purpose", memory.purpose],
@@ -197,6 +209,14 @@ function PieceMemory({ w }: { w: Workspace }) {
         Writing Brief, Lab history and your draft. Nothing here edits your
         prose.
       </p>
+      {draftChanged && (
+        <div className="piece-memory-freshness" role="status">
+          <span>Draft changed since this memory was last updated.</span>
+          <Button onClick={() => change((old) => ({ ...old }))}>
+            Mark reviewed
+          </Button>
+        </div>
+      )}
       <section
         className="piece-memory-summary"
         aria-label="Where I left off"
@@ -329,6 +349,11 @@ function PieceMemory({ w }: { w: Workspace }) {
         </Button>
       </div>
       <h3>Decisions made</h3>
+      {draftChanged && decisionCount > 0 && (
+        <small className="muted">
+          Review decisions against the current draft.
+        </small>
+      )}
       {memory.decisions.map((decision, index) => (
         <div className="row wrap" key={decision.id}>
           <input

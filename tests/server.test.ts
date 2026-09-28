@@ -152,6 +152,7 @@ describe("local API and SQLite persistence", () => {
       decisions: [],
       nextMove: "",
       lastSessionNote: "",
+      reviewedDraftRevision: 0,
     });
     const memory = {
       ...first.pieceMemory,
@@ -195,15 +196,137 @@ describe("local API and SQLite persistence", () => {
         .nextMove,
     ).toBe("");
     delete second.pieceMemory;
+    delete second.draftRevision;
     const legacy = await (
       await request("/api/import", "POST", { document: second })
     ).json();
     expect(legacy.pieceMemory).toEqual(first.pieceMemory);
+    expect(legacy.draftRevision).toBe(0);
+    const oldMemory = structuredClone(first);
+    oldMemory.pieceMemory.nextMove = "An earlier note.";
+    delete oldMemory.pieceMemory.reviewedDraftRevision;
+    delete oldMemory.draftRevision;
+    const importedMemory = await (
+      await request("/api/import", "POST", { document: oldMemory })
+    ).json();
+    expect(importedMemory.pieceMemory.reviewedDraftRevision).toBe(
+      importedMemory.draftRevision,
+    );
     await request(`/api/documents/${first.id}`, "DELETE");
     expect(
       (await (await request(`/api/documents/${copied.id}`)).json()).pieceMemory
         .nextMove,
     ).toBe(memory.nextMove);
+  });
+  it("tracks authored draft revision independently of metadata and memory review", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Memory freshness",
+        text: "Original prose.",
+      })
+    ).json();
+    expect(doc.draftRevision).toBe(0);
+    expect(doc.pieceMemory.reviewedDraftRevision).toBe(0);
+    const save = async (change: (body: any) => void) => {
+      const body = structuredClone(doc);
+      change(body);
+      doc = await (
+        await request(`/api/documents/${body.id}`, "PUT", body)
+      ).json();
+      return doc;
+    };
+    await save((body) => {
+      body.pieceMemory.nextMove = "Check the ending.";
+      body.pieceMemory.reviewedDraftRevision = 0;
+    });
+    expect(doc.draftRevision).toBe(0);
+    await save((body) => {
+      body.sections[0].workbench = emptyWorkbench();
+      body.sections[0].workbench.instruction = "What happens next?";
+    });
+    expect(doc.draftRevision).toBe(0);
+    await save((body) => {
+      body.selectedSectionId = body.sections[0].id;
+      body.defaultModel = { providerId: "mock", modelId: "conservative" };
+      body.sections[0].modelOverride = { providerId: "mock", modelId: "plain" };
+      body.sections[0].variants.push({
+        id: "saved-take",
+        label: "Earlier",
+        text: "Original prose.",
+        target: targetFor(body, body.sections[0].id),
+        createdAt: body.createdAt,
+        origin: "human",
+      });
+    });
+    expect(doc.draftRevision).toBe(0);
+    await save((body) => {
+      body.draftRevision = 99;
+    });
+    expect(doc.draftRevision).toBe(0);
+    await save((body) => {
+      body.sections[0].content = paragraphs("Revised prose.");
+    });
+    expect(doc.draftRevision).toBe(1);
+    expect(doc.pieceMemory.reviewedDraftRevision).toBe(0);
+    await save((body) => {
+      body.pieceMemory.reviewedDraftRevision = 1;
+    });
+    expect(doc.draftRevision).toBe(1);
+    await save((body) => {
+      body.sections.push(newSection("Point", "Another section."));
+    });
+    expect(doc.draftRevision).toBe(2);
+    await save((body) => {
+      body.sections.reverse();
+    });
+    expect(doc.draftRevision).toBe(3);
+    await save((body) => {
+      body.sections[0].placement = "parked";
+    });
+    expect(doc.draftRevision).toBe(4);
+    await save((body) => {
+      body.sections[0].placement = "draft";
+    });
+    expect(doc.draftRevision).toBe(5);
+    await save((body) => {
+      body.sections.pop();
+    });
+    expect(doc.draftRevision).toBe(6);
+    await save((body) => {
+      body.title = "A new title";
+      body.brief.audience = "One reader";
+    });
+    expect(doc.draftRevision).toBe(6);
+    await stop();
+    await start();
+    expect(
+      (await (await request(`/api/documents/${doc.id}`)).json()).draftRevision,
+    ).toBe(6);
+    const staleCopy = await (
+      await request("/api/import", "POST", { document: doc })
+    ).json();
+    expect(staleCopy.draftRevision).toBe(6);
+    expect(staleCopy.pieceMemory.reviewedDraftRevision).toBe(1);
+    await save((body) => {
+      body.pieceMemory.reviewedDraftRevision = 6;
+    });
+    const currentCopy = await (
+      await request("/api/import", "POST", { document: doc })
+    ).json();
+    expect(currentCopy.draftRevision).toBe(6);
+    expect(currentCopy.pieceMemory.reviewedDraftRevision).toBe(6);
+    await request("/api/documents/archive", "POST", { ids: [staleCopy.id] });
+    await stop();
+    await start();
+    expect(
+      (await (await request(`/api/documents/${staleCopy.id}`)).json())
+        .pieceMemory.reviewedDraftRevision,
+    ).toBe(1);
+    await request("/api/documents/restore", "POST", { ids: [staleCopy.id] });
+    expect(
+      (await (await request(`/api/documents/${staleCopy.id}`)).json())
+        .draftRevision,
+    ).toBe(6);
   });
   it("archives and restores full documents by ID across a server restart", async () => {
     const first = await (

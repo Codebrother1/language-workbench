@@ -1499,6 +1499,8 @@ export default function App() {
   const wordCount = draft.flatMap((section) =>
     sectionText(section).trim().split(/\s+/).filter(Boolean),
   ).length;
+  const memoryDraftChanged =
+    w.doc.pieceMemory.reviewedDraftRevision !== w.draftRevision;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
   const widths = dragWidths ?? w.layout.paneWidths;
@@ -2600,10 +2602,14 @@ export default function App() {
       {!hideNextMove && w.doc.pieceMemory.nextMove.trim() && (
         <div className="piece-next-move" role="note">
           <span>
-            <b>Next move:</b> {w.doc.pieceMemory.nextMove.trim()}
+            <b>{memoryDraftChanged ? "Earlier next move:" : "Next move:"}</b>{" "}
+            {w.doc.pieceMemory.nextMove.trim()}
+            {memoryDraftChanged && (
+              <small>Draft changed since this was saved.</small>
+            )}
           </span>
           <Button onClick={() => w.setPanel("memory")}>
-            Open Piece memory
+            {memoryDraftChanged ? "Review Piece memory" : "Open Piece memory"}
           </Button>
           <Button
             aria-label="Dismiss next move"

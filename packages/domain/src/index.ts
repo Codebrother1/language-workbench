@@ -259,6 +259,7 @@ export const pieceMemorySchema = z.object({
   nextMove: z.string().max(1200).default(""),
   lastSessionNote: z.string().max(3000).default(""),
   updatedAt: z.string().optional(),
+  reviewedDraftRevision: z.number().int().min(0).default(0),
 });
 export type PieceMemory = z.infer<typeof pieceMemorySchema>;
 export const documentSchema = z
@@ -270,6 +271,7 @@ export const documentSchema = z
     updatedAt: z.string(),
     revision: z.number().int().min(0),
     brief: writingBriefSchema,
+    draftRevision: z.number().int().min(0).default(0),
     pieceMemory: pieceMemorySchema.default({}),
     sections: z.array(writingSectionSchema).min(1),
     parkedGroups: z.array(parkedGroupSchema).default([]),
@@ -298,6 +300,23 @@ export const documentSchema = z
     { message: "Section and parked-group references must be valid." },
   );
 export type Document = z.infer<typeof documentSchema>;
+export function authoredDraftState(doc: Document): string {
+  return JSON.stringify(
+    doc.sections.map((section) => ({
+      id: section.id,
+      kind: section.kind,
+      label: section.label,
+      placement: section.placement,
+      content: section.content,
+    })),
+  );
+}
+export function hasAuthoredDraftChange(
+  before: Document,
+  after: Document,
+): boolean {
+  return authoredDraftState(before) !== authoredDraftState(after);
+}
 export const styleDNASchema = z.object({
   sentenceLengths: z
     .string()
@@ -563,6 +582,7 @@ export function newDocument(title = "Untitled", text = ""): Document {
     createdAt: now,
     updatedAt: now,
     revision: 0,
+    draftRevision: 0,
     brief: writingBriefSchema.parse({}),
     pieceMemory: pieceMemorySchema.parse({}),
     sections: [newSection("Freeform", text)],

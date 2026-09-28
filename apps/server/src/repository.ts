@@ -7,6 +7,7 @@ import {
   personalLibrarySchema,
   type PersonalLibrary,
   documentSchema,
+  hasAuthoredDraftChange,
   newDocument,
   settingsSchema,
   uid,
@@ -92,6 +93,8 @@ export class Repository {
       createdAt: old.createdAt,
       updatedAt: new Date().toISOString(),
       revision: old.revision + 1,
+      draftRevision:
+        old.draftRevision + Number(hasAuthoredDraftChange(old, doc)),
     };
     const result = this.db
       .prepare(

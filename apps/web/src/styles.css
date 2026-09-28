@@ -455,6 +455,25 @@ hr {
 .piece-next-move span {
   flex: 1 1 240px;
 }
+.piece-next-move span small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+}
+.piece-memory-freshness {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+  font-size: 12px;
+}
+.piece-memory-freshness .button {
+  min-height: 28px;
+  padding: 3px 8px;
+}
 .piece-next-move .button {
   min-height: 28px;
   padding: 3px 8px;

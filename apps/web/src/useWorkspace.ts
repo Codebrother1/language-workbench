@@ -41,6 +41,7 @@ import {
   validateTarget,
   paragraphs,
   documentSchema,
+  hasAuthoredDraftChange,
   type SectionWorkbench,
   type ModelRef,
   type ProviderCatalog,
@@ -409,6 +410,7 @@ export function useWorkspace() {
                   null,
               ),
               revision: result.revision,
+              draftRevision: result.draftRevision,
               updatedAt: result.updatedAt,
               revisionTrail: current.current.revisionTrail.map(
                 (entry) =>
@@ -2662,6 +2664,12 @@ export function useWorkspace() {
     }
   };
   return {
+    draftRevision:
+      doc.draftRevision +
+      Number(
+        persisted.current.id === doc.id &&
+          hasAuthoredDraftChange(persisted.current, doc),
+      ),
     layout,
     setPrimaryView,
     setDensity,
