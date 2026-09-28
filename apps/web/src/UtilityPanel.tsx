@@ -28,6 +28,7 @@ import {
   sectionMentions,
   documentBackup,
   duplicateDocumentCue,
+  hasPieceMemoryContent,
 } from "./workspace-helpers";
 const words = (value: string) =>
   value
@@ -162,17 +163,9 @@ function PieceMemory({ w }: { w: Workspace }) {
         reviewedDraftRevision: w.draftRevision,
       },
     }));
-  const hasMemory = Boolean(
-    memory.purpose.trim() ||
-    memory.reader.trim() ||
-    memory.currentQuestion.trim() ||
-    memory.nextMove.trim() ||
-    memory.lastSessionNote.trim() ||
-    memory.unresolved.some((item) => item.trim()) ||
-    memory.decisions.some((item) => item.text.trim()),
-  );
   const draftChanged =
-    hasMemory && memory.reviewedDraftRevision !== w.draftRevision;
+    hasPieceMemoryContent(memory) &&
+    memory.reviewedDraftRevision !== w.draftRevision;
   const fields = [
     ["Next move", memory.nextMove],
     ["Purpose", memory.purpose],

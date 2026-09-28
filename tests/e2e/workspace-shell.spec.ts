@@ -241,6 +241,7 @@ for (const width of [1440, 1024])
       if (withMemory && width === 1440) {
         await page.getByRole("button", { name: "Document actions" }).click();
         await page
+          .getByRole("group", { name: "Document commands" })
           .getByRole("button", { name: "Piece memory", exact: true })
           .click();
         await expect(

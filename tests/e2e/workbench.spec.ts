@@ -953,6 +953,133 @@ test("last selected document survives A to B to A, reload and a fresh app view",
   await expect(picker).toHaveValue(fallback);
 });
 
+for (const width of [1440, 1024, 700])
+  test(`Piece memory has a quiet document control at ${width}px for blank and changed memory`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    await page.setViewportSize({ width, height: width === 1024 ? 768 : 900 });
+    await open(page);
+    const aiRequests: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) aiRequests.push(event.url());
+    });
+    const control = page.getByTestId("piece-memory-entry");
+    await expect(control).toBeVisible();
+    await expect(control).toHaveAccessibleName("Piece memory");
+    await expect(control).not.toContainText("Draft changed");
+    await page.getByRole("button", { name: /^03 Closer$/ }).click();
+    await select(page, "Leave this ending alone.");
+    await page.keyboard.insertText("Leave it quiet.");
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    await expect(control).toHaveAccessibleName("Piece memory");
+    const prose = documentText(
+      await (await request.get(`/api/documents/${doc.id}`)).json(),
+    );
+    const originalRevision = (
+      await (await request.get(`/api/documents/${doc.id}`)).json()
+    ).revision;
+    await control.focus();
+    await control.press("Enter");
+    const memory = page.getByRole("dialog", { name: "Piece memory" });
+    await expect(memory).toBeVisible();
+    await expect(
+      page.locator(`[data-section-id="${doc.sections[2].id}"]`),
+    ).toHaveClass(/active/);
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+    await memory.getByRole("button", { name: "Close dialog" }).click();
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get(`/api/documents/${doc.id}`)).json())
+            .revision,
+      )
+      .toBe(originalRevision);
+    expect(
+      documentText(
+        await (await request.get(`/api/documents/${doc.id}`)).json(),
+      ),
+    ).toBe(prose);
+    await page.getByTestId("piece-memory-entry").click();
+    await memory
+      .getByLabel("Purpose")
+      .fill("Leave the narrator room to notice.");
+    await memory.getByRole("button", { name: "Close dialog" }).click();
+    await expect(control).toHaveAccessibleName("Piece memory");
+    await expect(page.getByRole("note")).toHaveCount(0);
+    await page.getByRole("button", { name: /^03 Closer$/ }).click();
+    await select(page, "Leave it quiet.");
+    await page.keyboard.insertText("Leave it unresolved.");
+    await expect(control).toHaveAccessibleName("Piece memory, draft changed");
+    await expect(control).toContainText("Draft changed");
+    await expect(page.getByRole("note")).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    await control.click();
+    await expect(
+      memory.getByText("Draft changed since this memory was last updated."),
+    ).toBeVisible();
+    await memory.getByRole("button", { name: "Mark reviewed" }).click();
+    await expect(control).toHaveAccessibleName("Piece memory");
+    await memory.getByRole("button", { name: "Close dialog" }).click();
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    await page.reload();
+    await expect(control).toHaveAccessibleName("Piece memory");
+    expect(aiRequests).toHaveLength(0);
+  });
+
+test("Piece memory entry follows per-document freshness through switch, duplicate and archive restore", async ({
+  page,
+  request,
+}) => {
+  const first = await seed(request);
+  first.pieceMemory.purpose = "Preserve the precise ending.";
+  await request.put(`/api/documents/${first.id}`, { data: first });
+  const saved = await (await request.get(`/api/documents/${first.id}`)).json();
+  saved.sections[2].content = paragraphs("A changed ending.");
+  await request.put(`/api/documents/${first.id}`, { data: saved });
+  const other = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Other draft", "Unrelated prose.") },
+    })
+  ).json();
+  await open(page);
+  const entry = page.getByTestId("piece-memory-entry"),
+    picker = page.getByLabel("Switch document");
+  await picker.selectOption(first.id);
+  await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
+  await picker.selectOption(other.id);
+  await expect(entry).toHaveAccessibleName("Piece memory");
+  await picker.selectOption(first.id);
+  await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
+  await page.reload();
+  await expect(picker).toHaveValue(first.id);
+  await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  await expect.poll(() => picker.inputValue()).not.toBe(first.id);
+  await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
+  await picker.selectOption(first.id);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  await page
+    .getByRole("dialog", { name: /Archive/ })
+    .getByRole("button", { name: "Archive document" })
+    .click();
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  const manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage
+    .locator(`[data-managed-id="${first.id}"]`)
+    .getByRole("button", { name: /Restore/ })
+    .click();
+  await manage.getByRole("button", { name: "Close dialog" }).click();
+  await picker.selectOption(first.id);
+  await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
+});
+
 test("Piece memory keeps writer-authored intention, decisions and unresolved notes outside canonical prose", async ({
   page,
   request,
@@ -960,7 +1087,10 @@ test("Piece memory keeps writer-authored intention, decisions and unresolved not
   const doc = await seed(request);
   await open(page);
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory" }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   const memory = page.getByRole("dialog", { name: "Piece memory" });
   await expect(
     memory.getByRole("heading", { name: "Where I left off" }),
@@ -1054,7 +1184,10 @@ test("blank Piece Memory does not warn after prose changes", async ({
   await select(page, "Leave this ending alone.");
   await page.keyboard.insertText("Leave a quieter ending.");
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   const memory = page.getByRole("dialog", { name: "Piece memory" });
   await expect(
     memory.getByText("Draft changed since this memory was last updated."),
@@ -1073,7 +1206,10 @@ test("Piece Memory freshness follows draft changes, review and intentional edits
     if (event.url().endsWith("/api/ai")) aiRequests.push(event.url());
   });
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   let memory = page.getByRole("dialog", { name: "Piece memory" });
   await expect(
     memory.getByText("Draft changed since this memory was last updated."),
@@ -1130,7 +1266,10 @@ test("Piece Memory freshness follows draft changes, review and intentional edits
   await select(page, "Leave this ending open.");
   await page.keyboard.insertText("Leave this ending unresolved.");
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   memory = page.getByRole("dialog", { name: "Piece memory" });
   await expect(
     memory.getByText("Draft changed since this memory was last updated."),
@@ -1170,7 +1309,10 @@ test("activating a different saved take changes the draft without judging a memo
   await select(page, "Leave this ending alone.");
   await page.keyboard.insertText("Leave this ending louder!");
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   const memory = page.getByRole("dialog", { name: "Piece memory" });
   await memory.getByRole("button", { name: "Mark reviewed" }).click();
   await memory.getByRole("button", { name: "Close dialog" }).click();
@@ -1207,7 +1349,10 @@ test("metadata and Lab work do not stale memory, while blank Next move keeps fre
   await diagnose(page, "shorten");
   await save(page);
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   let memory = page.getByRole("dialog", { name: "Piece memory" });
   await expect(
     memory.getByText("Draft changed since this memory was last updated."),
@@ -1218,7 +1363,10 @@ test("metadata and Lab work do not stale memory, while blank Next move keeps fre
   await page.keyboard.insertText("The ending now asks more.");
   await expect(page.getByRole("note")).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   memory = page.getByRole("dialog", { name: "Piece memory" });
   await expect(
     memory.getByText("Draft changed since this memory was last updated."),
@@ -1264,7 +1412,10 @@ test("session question suggestion stays tentative and unsaved until individually
     if (event.url().endsWith("/api/ai")) aiRequests.push(event.url());
   });
   await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("button", { name: "Piece memory" }).click();
+  await page
+    .getByRole("group", { name: "Document commands" })
+    .getByRole("button", { name: "Piece memory", exact: true })
+    .click();
   const memory = page.getByRole("dialog", { name: "Piece memory" });
   await memory
     .getByRole("button", { name: "Suggest where I left off" })

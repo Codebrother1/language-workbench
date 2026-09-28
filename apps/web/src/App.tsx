@@ -79,6 +79,7 @@ import {
   sectionReference,
   sectionMentions,
   duplicateDocumentCue,
+  hasPieceMemoryContent,
 } from "./workspace-helpers";
 
 function draftPositionLabel(section: WritingSection, index: number): string {
@@ -1500,6 +1501,7 @@ export default function App() {
     sectionText(section).trim().split(/\s+/).filter(Boolean),
   ).length;
   const memoryDraftChanged =
+    hasPieceMemoryContent(w.doc.pieceMemory) &&
     w.doc.pieceMemory.reviewedDraftRevision !== w.draftRevision;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
@@ -2264,6 +2266,32 @@ export default function App() {
             onClick={() => w.setPanel("sources")}
           >
             Sources · {w.doc.sources.length}
+          </Button>
+          <Button
+            className="piece-memory-entry"
+            data-testid="piece-memory-entry"
+            aria-label={
+              memoryDraftChanged
+                ? "Piece memory, draft changed"
+                : "Piece memory"
+            }
+            aria-expanded={w.panel === "memory"}
+            title={
+              memoryDraftChanged
+                ? "Piece memory · Draft changed"
+                : "Piece memory"
+            }
+            disabled={!w.ready}
+            onClick={() => w.setPanel("memory")}
+          >
+            <FileText size={14} aria-hidden="true" />
+            <span className="memory-entry-label">Piece memory</span>
+            {memoryDraftChanged && (
+              <>
+                <span className="memory-entry-separator">·</span>
+                <span>Draft changed</span>
+              </>
+            )}
           </Button>
           <Button
             className="top-action command-trigger"

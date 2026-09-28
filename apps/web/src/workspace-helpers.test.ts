@@ -24,6 +24,7 @@ import {
   currentTakeIds,
   chooseActiveDocument,
   documentBackup,
+  hasPieceMemoryContent,
   duplicateDocumentCue,
   textDifference,
   alignedTextDifference,
@@ -70,6 +71,23 @@ describe("document title disambiguation", () => {
     expect(duplicateDocumentCue(other, [a, b, other])).toBe("");
     b.sections[0].content = a.sections[0].content;
     expect(duplicateDocumentCue(a, [a, b])).toContain(a.id.slice(-6));
+  });
+});
+
+describe("Piece memory presence", () => {
+  it("does not mistake an empty memory's revision for authored intention", () => {
+    const memory = newDocument().pieceMemory;
+    memory.reviewedDraftRevision = 0;
+    expect(hasPieceMemoryContent(memory)).toBe(false);
+    memory.purpose = "A specific purpose.";
+    expect(hasPieceMemoryContent(memory)).toBe(true);
+    memory.purpose = "";
+    memory.decisions.push({
+      id: "choice",
+      text: "Keep the ending.",
+      createdAt: "2026-01-01",
+    });
+    expect(hasPieceMemoryContent(memory)).toBe(true);
   });
 });
 

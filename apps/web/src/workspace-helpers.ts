@@ -5,6 +5,7 @@ import {
   structuralMechanisms,
   uid,
   type Document,
+  type PieceMemory,
   type WritingSection,
   type EditTarget,
   type SectionWorkbench,
@@ -65,6 +66,18 @@ export function duplicateDocumentCue(
   )
     ? `modified ${edited}`
     : `modified ${edited} · ${doc.id.slice(-6)}`;
+}
+
+export function hasPieceMemoryContent(memory: PieceMemory): boolean {
+  return Boolean(
+    memory.purpose.trim() ||
+    memory.reader.trim() ||
+    memory.currentQuestion.trim() ||
+    memory.nextMove.trim() ||
+    memory.lastSessionNote.trim() ||
+    memory.unresolved.some((item) => item.trim()) ||
+    memory.decisions.some((item) => item.text.trim()),
+  );
 }
 
 export function documentBackup(

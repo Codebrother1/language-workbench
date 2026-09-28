@@ -255,6 +255,27 @@ hr {
   border-color: transparent;
   font-size: 12px;
 }
+.button.piece-memory-entry {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 7px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.button.piece-memory-entry:hover,
+.button.piece-memory-entry[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--accent-light);
+}
+.memory-entry-separator {
+  color: var(--muted);
+}
 .button.full {
   width: 100%;
   justify-content: space-between;
@@ -1750,6 +1771,10 @@ hr {
   }
   .topbar-actions {
     gap: 2px;
+  }
+  .piece-memory-entry .memory-entry-label,
+  .piece-memory-entry .memory-entry-separator {
+    display: none;
   }
   .topbar-actions > .icon {
     display: none;
