@@ -131,6 +131,80 @@ describe("local API and SQLite persistence", () => {
     );
     expect((await request(`/api/documents/${first.id}`)).status).toBe(404);
   });
+  it("stores optional document-local Piece Memory across restart, archive and identity-remapped import", async () => {
+    const first = await (
+      await request("/api/documents", "POST", {
+        title: "First piece",
+        text: "Authored prose.",
+      })
+    ).json();
+    const second = await (
+      await request("/api/documents", "POST", {
+        title: "Other piece",
+        text: "Independent prose.",
+      })
+    ).json();
+    expect(first.pieceMemory).toEqual({
+      purpose: "",
+      reader: "",
+      currentQuestion: "",
+      unresolved: [],
+      decisions: [],
+      nextMove: "",
+      lastSessionNote: "",
+    });
+    const memory = {
+      ...first.pieceMemory,
+      purpose: "Let the reader see the turn.",
+      unresolved: ["Is the transition earned?"],
+      decisions: [
+        {
+          id: "decision-1",
+          text: "Keep the repeated ending.",
+          createdAt: first.createdAt,
+        },
+      ],
+      nextMove: "Rewrite the middle.",
+      lastSessionNote: "Opening is settled.",
+    };
+    const saved = await (
+      await request(`/api/documents/${first.id}`, "PUT", {
+        ...first,
+        pieceMemory: memory,
+      })
+    ).json();
+    expect(saved.pieceMemory).toMatchObject(memory);
+    await request("/api/documents/archive", "POST", { ids: [first.id] });
+    await stop();
+    await start();
+    expect(
+      (await (await request(`/api/documents/${first.id}`)).json()).pieceMemory,
+    ).toMatchObject(memory);
+    await request("/api/documents/restore", "POST", { ids: [first.id] });
+    const copied = await (
+      await request("/api/import", "POST", { document: saved })
+    ).json();
+    expect(copied.pieceMemory).toMatchObject({
+      purpose: memory.purpose,
+      nextMove: memory.nextMove,
+      decisions: [{ text: memory.decisions[0].text }],
+    });
+    expect(copied.pieceMemory.decisions[0].id).not.toBe(memory.decisions[0].id);
+    expect(
+      (await (await request(`/api/documents/${second.id}`)).json()).pieceMemory
+        .nextMove,
+    ).toBe("");
+    delete second.pieceMemory;
+    const legacy = await (
+      await request("/api/import", "POST", { document: second })
+    ).json();
+    expect(legacy.pieceMemory).toEqual(first.pieceMemory);
+    await request(`/api/documents/${first.id}`, "DELETE");
+    expect(
+      (await (await request(`/api/documents/${copied.id}`)).json()).pieceMemory
+        .nextMove,
+    ).toBe(memory.nextMove);
+  });
   it("archives and restores full documents by ID across a server restart", async () => {
     const first = await (
       await request("/api/documents", "POST", {

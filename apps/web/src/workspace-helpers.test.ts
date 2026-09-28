@@ -77,6 +77,12 @@ describe("document backup", () => {
   it("exports selected document-local data without application credentials or global settings", () => {
     const a = newDocument("A", "Human text.");
     const b = newDocument("B", "Different draft.");
+    a.pieceMemory.nextMove = "Revise the last line.";
+    a.pieceMemory.decisions.push({
+      id: "decision",
+      text: "Keep the pause.",
+      createdAt: a.createdAt,
+    });
     a.sources.push({
       id: "source",
       title: "Reference",
@@ -97,6 +103,13 @@ describe("document backup", () => {
       documents: [a],
     });
     expect(backup.documents).not.toContain(b);
+    expect(backup.documents[0].pieceMemory.nextMove).toBe(
+      "Revise the last line.",
+    );
+    a.pieceMemory.nextMove = "A later edit.";
+    expect(backup.documents[0].pieceMemory.nextMove).toBe(
+      "Revise the last line.",
+    );
     expect(JSON.stringify(backup)).not.toMatch(
       /OPENAI_API_KEY|apiKey|credentialSuffix|styleDNA|personalLibrary/,
     );

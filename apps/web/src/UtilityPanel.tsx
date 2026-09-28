@@ -11,6 +11,7 @@ import {
   type Document,
   type Settings,
   type WritingBrief,
+  type PieceMemory as PieceMemoryData,
   type SourceMaterial,
 } from "./domain";
 import { api, type Workspace } from "./useWorkspace";
@@ -136,6 +137,323 @@ function Brief({ w }: { w: Workspace }) {
         />
       </Field>
     </>
+  );
+}
+function PieceMemory({ w }: { w: Workspace }) {
+  const memory = w.doc.pieceMemory;
+  const [unresolvedDraft, setUnresolvedDraft] = useState("");
+  const [decisionDraft, setDecisionDraft] = useState("");
+  const [suggestedQuestion, setSuggestedQuestion] = useState<string | null>(
+    null,
+  );
+  const [suggestionNotice, setSuggestionNotice] = useState("");
+  useEffect(() => {
+    setSuggestedQuestion(null);
+    setSuggestionNotice("");
+    setUnresolvedDraft("");
+    setDecisionDraft("");
+  }, [w.doc.id]);
+  const change = (apply: (memory: PieceMemoryData) => PieceMemoryData) =>
+    w.update((doc) => ({
+      ...doc,
+      pieceMemory: {
+        ...apply(doc.pieceMemory),
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+  const fields = [
+    ["Next move", memory.nextMove],
+    ["Purpose", memory.purpose],
+    ["Reader", memory.reader],
+    ["Current question", memory.currentQuestion],
+    ["Last session note", memory.lastSessionNote],
+  ].filter(([, value]) => value.trim());
+  const unresolvedCount = memory.unresolved.filter((item) =>
+    item.trim(),
+  ).length;
+  const decisionCount = memory.decisions.filter((item) =>
+    item.text.trim(),
+  ).length;
+  const suggest = () => {
+    const runs = [
+      ...(w.doc.workbench?.runs ?? []),
+      ...w.doc.sections.flatMap((section) => section.workbench?.runs ?? []),
+    ];
+    const question = runs
+      .filter((run) => run.instruction.trim().includes("?"))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .find((run) => run.instruction.trim() !== memory.currentQuestion.trim());
+    setSuggestedQuestion(question?.instruction.trim() ?? null);
+    setSuggestionNotice(
+      question
+        ? "Earlier writer-authored Lab question · check if it still applies. No memory was saved."
+        : "No explicit writer question in saved Lab runs. Nothing was saved.",
+    );
+  };
+  return (
+    <div className="piece-memory" data-testid="piece-memory">
+      <p className="panel-intro">
+        Optional notes about where you are in this piece. Separate from the
+        Writing Brief, Lab history and your draft. Nothing here edits your
+        prose.
+      </p>
+      <section
+        className="piece-memory-summary"
+        aria-label="Where I left off"
+        hidden={
+          fields.length === 0 && unresolvedCount === 0 && decisionCount === 0
+        }
+      >
+        {(fields.length > 0 || unresolvedCount > 0 || decisionCount > 0) && (
+          <h3>Where I left off</h3>
+        )}
+        {fields.map(([label, value]) => (
+          <p key={label}>
+            <b>{label}</b>
+            <span>{value}</span>
+          </p>
+        ))}
+        {(unresolvedCount > 0 || decisionCount > 0) && (
+          <small>
+            {[
+              unresolvedCount > 0 ? `${unresolvedCount} unresolved` : "",
+              decisionCount > 0
+                ? `${decisionCount} ${decisionCount === 1 ? "decision" : "decisions"}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </small>
+        )}
+      </section>
+      <div className="piece-memory-next">
+        <Field label="Next move">
+          <textarea
+            rows={2}
+            maxLength={1200}
+            value={memory.nextMove}
+            onChange={(event) =>
+              change((old) => ({ ...old, nextMove: event.target.value }))
+            }
+            placeholder="What were you about to do?"
+          />
+        </Field>
+      </div>
+      <Field label="Purpose">
+        <textarea
+          rows={2}
+          maxLength={3000}
+          value={memory.purpose}
+          onChange={(event) =>
+            change((old) => ({ ...old, purpose: event.target.value }))
+          }
+          placeholder="What is this piece trying to do?"
+        />
+      </Field>
+      <Field label="Reader">
+        <input
+          maxLength={1200}
+          value={memory.reader}
+          onChange={(event) =>
+            change((old) => ({ ...old, reader: event.target.value }))
+          }
+          placeholder="Who is this for?"
+        />
+      </Field>
+      <Field label="Current question">
+        <textarea
+          rows={2}
+          maxLength={1800}
+          value={memory.currentQuestion}
+          onChange={(event) =>
+            change((old) => ({ ...old, currentQuestion: event.target.value }))
+          }
+          placeholder="What are you still deciding?"
+        />
+      </Field>
+      <h3>Unresolved</h3>
+      {memory.unresolved.map((item, index) => (
+        <div className="row wrap" key={index}>
+          <input
+            aria-label={`Unresolved item ${index + 1}`}
+            maxLength={1200}
+            value={item}
+            onChange={(event) =>
+              change((old) => ({
+                ...old,
+                unresolved: old.unresolved.map((value, at) =>
+                  at === index ? event.target.value : value,
+                ),
+              }))
+            }
+            onBlur={() => {
+              if (!item.trim())
+                change((old) => ({
+                  ...old,
+                  unresolved: old.unresolved.filter((_, at) => at !== index),
+                }));
+            }}
+          />
+          <Button
+            aria-label={`Resolve unresolved item ${index + 1}`}
+            onClick={() =>
+              change((old) => ({
+                ...old,
+                unresolved: old.unresolved.filter((_, at) => at !== index),
+              }))
+            }
+          >
+            Resolve
+          </Button>
+        </div>
+      ))}
+      <div className="row wrap">
+        <input
+          aria-label="Unresolved note"
+          maxLength={1200}
+          value={unresolvedDraft}
+          onChange={(event) => setUnresolvedDraft(event.target.value)}
+          placeholder="Something to revisit"
+        />
+        <Button
+          disabled={!unresolvedDraft.trim()}
+          onClick={() => {
+            change((old) => ({
+              ...old,
+              unresolved: [...old.unresolved, unresolvedDraft.trim()],
+            }));
+            setUnresolvedDraft("");
+          }}
+        >
+          Add unresolved
+        </Button>
+      </div>
+      <h3>Decisions made</h3>
+      {memory.decisions.map((decision, index) => (
+        <div className="row wrap" key={decision.id}>
+          <input
+            aria-label={`Decision ${index + 1}`}
+            maxLength={1200}
+            value={decision.text}
+            onChange={(event) =>
+              change((old) => ({
+                ...old,
+                decisions: old.decisions.map((item) =>
+                  item.id === decision.id
+                    ? { ...item, text: event.target.value }
+                    : item,
+                ),
+              }))
+            }
+            onBlur={() => {
+              if (!decision.text.trim())
+                change((old) => ({
+                  ...old,
+                  decisions: old.decisions.filter(
+                    (item) => item.id !== decision.id,
+                  ),
+                }));
+            }}
+          />
+          <Button
+            aria-label={`Remove decision ${index + 1}`}
+            onClick={() =>
+              change((old) => ({
+                ...old,
+                decisions: old.decisions.filter(
+                  (item) => item.id !== decision.id,
+                ),
+              }))
+            }
+          >
+            Remove
+          </Button>
+        </div>
+      ))}
+      <div className="row wrap">
+        <input
+          aria-label="Decision to remember"
+          maxLength={1200}
+          value={decisionDraft}
+          onChange={(event) => setDecisionDraft(event.target.value)}
+          placeholder="A choice you want to remember"
+        />
+        <Button
+          disabled={!decisionDraft.trim()}
+          onClick={() => {
+            change((old) => ({
+              ...old,
+              decisions: [
+                ...old.decisions,
+                {
+                  id: uid(),
+                  text: decisionDraft.trim(),
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            }));
+            setDecisionDraft("");
+          }}
+        >
+          Add decision
+        </Button>
+      </div>
+      <Field label="Last session note">
+        <textarea
+          rows={3}
+          maxLength={3000}
+          value={memory.lastSessionNote}
+          onChange={(event) =>
+            change((old) => ({ ...old, lastSessionNote: event.target.value }))
+          }
+          placeholder="What should you remember next time?"
+        />
+      </Field>
+      <div className="piece-memory-suggest">
+        <Button onClick={suggest}>Suggest where I left off</Button>
+        <small>
+          Only copies an explicit writer question from saved Lab runs. No model
+          request or paid provider; review before keeping it.
+        </small>
+        {suggestionNotice && <p role="status">{suggestionNotice}</p>}
+        {suggestedQuestion !== null && (
+          <div className="piece-memory-proposal">
+            <Field label="Suggested current question">
+              <textarea
+                rows={2}
+                value={suggestedQuestion}
+                onChange={(event) => setSuggestedQuestion(event.target.value)}
+              />
+            </Field>
+            <div className="row wrap">
+              <Button
+                disabled={!suggestedQuestion.trim()}
+                onClick={() => {
+                  change((old) => ({
+                    ...old,
+                    currentQuestion: suggestedQuestion.trim(),
+                  }));
+                  setSuggestedQuestion(null);
+                  setSuggestionNotice(
+                    "Saved your reviewed question to Piece Memory.",
+                  );
+                }}
+              >
+                Keep this question
+              </Button>
+              <Button
+                onClick={() => {
+                  setSuggestedQuestion(null);
+                  setSuggestionNotice("Ignored. Nothing was saved.");
+                }}
+              >
+                Ignore suggestion
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 function Sources({ w }: { w: Workspace }) {
@@ -1041,6 +1359,7 @@ export function UtilityPanel({
   if (!w.panel) return null;
   const title = {
     brief: "Writing brief",
+    memory: "Piece memory",
     sources: "Source material",
     style: "Style DNA & knowledge",
     radar: "Language radar",
@@ -1072,6 +1391,8 @@ export function UtilityPanel({
         <ManageDocuments w={w} />
       ) : w.panel === "brief" ? (
         <Brief w={w} />
+      ) : w.panel === "memory" ? (
+        <PieceMemory w={w} />
       ) : w.panel === "sources" ? (
         <Sources w={w} />
       ) : w.panel === "style" ? (

@@ -442,6 +442,71 @@ hr {
 .delete-confirm p {
   margin: 0 0 10px;
 }
+.piece-next-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 7px 20px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.piece-next-move span {
+  flex: 1 1 240px;
+}
+.piece-next-move .button {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.piece-memory {
+  display: grid;
+  gap: 12px;
+}
+.piece-memory-summary {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.piece-memory-summary[hidden] {
+  display: none;
+}
+.piece-memory-summary h3 {
+  margin-top: 0;
+}
+.piece-memory-summary p {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.piece-memory-summary small {
+  color: var(--muted);
+}
+.piece-memory-next {
+  padding: 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-light);
+}
+.piece-memory .row input {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.piece-memory-suggest {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.piece-memory-suggest > .button {
+  justify-self: start;
+}
+.piece-memory-suggest small {
+  color: var(--muted);
+}
 .save-take-form {
   display: grid;
   gap: 8px;

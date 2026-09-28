@@ -1430,6 +1430,8 @@ export default function App() {
   const layoutMenu = useRef<HTMLDetailsElement>(null);
   const [dragWidths, setDragWidths] = useState<PaneWidths | null>(null);
   const [previewFocused, setPreviewFocused] = useState(false);
+  const [hideNextMove, setHideNextMove] = useState(false);
+  useEffect(() => setHideNextMove(false), [w.doc.id]);
   const [readingMode, setReadingMode] = useState(false);
   const [parkedFocusId, setParkedFocusId] = useState<string | null>(null);
   const lastDraftId = useRef<string | null>(null);
@@ -2348,6 +2350,15 @@ export default function App() {
                 >
                   Manage documents
                 </Button>
+                <Button
+                  disabled={!w.ready}
+                  onClick={() => {
+                    w.setPanel("memory");
+                    setMenu(false);
+                  }}
+                >
+                  Piece memory
+                </Button>
                 <hr />
                 <Button
                   onClick={() => {
@@ -2536,6 +2547,23 @@ export default function App() {
           )}
         </div>
       </div>
+      {!hideNextMove && w.doc.pieceMemory.nextMove.trim() && (
+        <div className="piece-next-move" role="note">
+          <span>
+            <b>Next move:</b> {w.doc.pieceMemory.nextMove.trim()}
+          </span>
+          <Button onClick={() => w.setPanel("memory")}>
+            Open Piece memory
+          </Button>
+          <Button
+            aria-label="Dismiss next move"
+            title="Dismiss next move for now"
+            onClick={() => setHideNextMove(true)}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
       <div
         className={
           "workspace dock-workspace " + (paneCount === 3 ? "dock-three" : "")

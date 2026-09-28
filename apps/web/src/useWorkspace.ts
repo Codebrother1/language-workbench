@@ -139,6 +139,7 @@ export async function api<T>(
 }
 export type Panel =
   | "brief"
+  | "memory"
   | "sources"
   | "style"
   | "radar"

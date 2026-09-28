@@ -293,10 +293,27 @@ export const commands: CommandDefinition[] = [
     group: "Find your tools",
   },
   {
+    id: "memory",
+    label: "Piece memory · Unresolved questions",
+    description:
+      "Remember this piece's purpose, decisions, open questions and next move without changing draft prose.",
+    keywords: [
+      "piece memory",
+      "where I left off",
+      "next move",
+      "unresolved",
+      "decisions",
+      "session note",
+      "remember this",
+      "what was I doing",
+    ],
+    group: "Document",
+  },
+  {
     id: "history",
     label: "Writing history",
     description: "Open the existing record of proposals and your choices.",
-    keywords: ["history", "iterations", "decisions"],
+    keywords: ["history", "iterations", "proposal history"],
     group: "Find your tools",
   },
   {

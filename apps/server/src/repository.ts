@@ -270,6 +270,13 @@ export class Repository {
       revision: 0,
       createdAt: now,
       updatedAt: now,
+      pieceMemory: {
+        ...doc.pieceMemory,
+        decisions: doc.pieceMemory.decisions.map((decision) => ({
+          ...decision,
+          id: uid(),
+        })),
+      },
       sources: doc.sources.map((s) => ({ ...s, id: uid() })),
       sections: doc.sections.map((s) => ({
         ...s,

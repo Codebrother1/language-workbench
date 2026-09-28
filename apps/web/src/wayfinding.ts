@@ -206,6 +206,9 @@ export function useWayfinding(w: Workspace) {
       case "brief":
         w.setPanel("brief");
         return;
+      case "memory":
+        w.setPanel("memory");
+        return;
       case "sources":
         w.setPanel("sources");
         return;

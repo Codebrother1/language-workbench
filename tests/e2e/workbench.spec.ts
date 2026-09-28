@@ -11,6 +11,7 @@ import {
   defaultSettings,
   documentText,
   targetFor,
+  emptyWorkbench,
   paragraphs,
 } from "../../packages/domain/src/index";
 async function seed(
@@ -950,6 +951,265 @@ test("last selected document survives A to B to A, reload and a fresh app view",
   expect([a.id, b.id]).toContain(fallback);
   await page.reload();
   await expect(picker).toHaveValue(fallback);
+});
+
+test("Piece memory keeps writer-authored intention, decisions and unresolved notes outside canonical prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory" }).click();
+  const memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(
+    memory.getByRole("heading", { name: "Where I left off" }),
+  ).toHaveCount(0);
+  await memory
+    .getByRole("button", { name: "Suggest where I left off" })
+    .click();
+  await expect(
+    memory.getByText("No explicit writer question in saved Lab runs."),
+  ).toBeVisible();
+  await expect(memory.getByLabel("Suggested current question")).toHaveCount(0);
+  await memory
+    .getByLabel("Purpose")
+    .fill("Let the ending turn without explaining it.");
+  await memory.getByLabel("Current question").fill("Is the middle too early?");
+  await memory.getByLabel("Next move").fill("Rewrite the last beat.");
+  await memory
+    .getByLabel("Last session note")
+    .fill("Keep the opening as it is.");
+  await memory.getByLabel("Unresolved note").fill("Check the callback.");
+  await memory.getByRole("button", { name: "Add unresolved" }).click();
+  await memory
+    .getByLabel("Decision to remember")
+    .fill("Keep the triple repetition.");
+  await memory.getByRole("button", { name: "Add decision" }).click();
+  await expect(
+    memory.getByRole("heading", { name: "Where I left off" }),
+  ).toBeVisible();
+  await expect(
+    memory
+      .getByRole("region", { name: "Where I left off" })
+      .getByText("Rewrite the last beat."),
+  ).toBeVisible();
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await expect(
+    page.getByText("Next move: Rewrite the last beat."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Dismiss next move" }).click();
+  await expect(page.getByText("Next move: Rewrite the last beat.")).toHaveCount(
+    0,
+  );
+  await save(page);
+  await page.reload();
+  await expect(
+    page.getByText("Next move: Rewrite the last beat."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open Piece memory" }).click();
+  const restored = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(restored.getByLabel("Purpose")).toHaveValue(
+    "Let the ending turn without explaining it.",
+  );
+  await expect(restored.getByLabel("Last session note")).toHaveValue(
+    "Keep the opening as it is.",
+  );
+  await expect(
+    restored.getByRole("textbox", { name: "Unresolved item 1", exact: true }),
+  ).toHaveValue("Check the callback.");
+  await expect(
+    restored.getByRole("textbox", { name: "Decision 1", exact: true }),
+  ).toHaveValue("Keep the triple repetition.");
+  await restored
+    .getByRole("textbox", { name: "Unresolved item 1", exact: true })
+    .fill("Check the callback twice.");
+  await restored
+    .getByRole("textbox", { name: "Decision 1", exact: true })
+    .fill("Keep the final repetition.");
+  await restored
+    .getByRole("button", { name: "Resolve unresolved item 1" })
+    .click();
+  await restored.getByRole("button", { name: "Remove decision 1" }).click();
+  await expect(restored.getByText("1 unresolved")).toHaveCount(0);
+  await restored.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.pieceMemory).toMatchObject({
+    purpose: "Let the ending turn without explaining it.",
+    unresolved: [],
+    decisions: [],
+    nextMove: "Rewrite the last beat.",
+  });
+  expect(documentText(saved)).toBe(documentText(doc));
+});
+
+test("session question suggestion stays tentative and unsaved until individually accepted", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const prose = documentText(doc);
+  const target = targetFor(doc, doc.sections[0].id);
+  doc.sections[0].workbench = emptyWorkbench();
+  doc.sections[0].workbench.runs.push({
+    id: "old-question",
+    createdAt: doc.createdAt,
+    target,
+    action: "coach",
+    instruction: "Does this opening arrive too early?",
+    answer: "",
+    controls: {},
+    model: null,
+    response: {
+      provider: "mock",
+      diagnosis: "Earlier analysis.",
+      mechanism: "",
+      question: "A model-generated question must not become memory.",
+      missingIngredients: [],
+      findings: [],
+      proposals: [],
+      lexical: [],
+    },
+  });
+  doc.sections[0].content = paragraphs("The opening has since changed.");
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  const aiRequests: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) aiRequests.push(event.url());
+  });
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Piece memory" }).click();
+  const memory = page.getByRole("dialog", { name: "Piece memory" });
+  await memory
+    .getByRole("button", { name: "Suggest where I left off" })
+    .click();
+  await expect(
+    memory.getByText("Earlier writer-authored Lab question"),
+  ).toBeVisible();
+  await expect(memory.getByLabel("Suggested current question")).toHaveValue(
+    "Does this opening arrive too early?",
+  );
+  await expect(
+    memory.getByLabel("Current question", { exact: true }),
+  ).toHaveValue("");
+  await memory.getByRole("button", { name: "Ignore suggestion" }).click();
+  await expect(
+    memory.getByLabel("Current question", { exact: true }),
+  ).toHaveValue("");
+  await memory
+    .getByRole("button", { name: "Suggest where I left off" })
+    .click();
+  await memory
+    .getByLabel("Suggested current question")
+    .fill("Does the new opening arrive too early?");
+  await memory.getByRole("button", { name: "Keep this question" }).click();
+  await expect(
+    memory.getByLabel("Current question", { exact: true }),
+  ).toHaveValue("Does the new opening arrive too early?");
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  expect(aiRequests).toHaveLength(0);
+  const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(stored.pieceMemory.currentQuestion).toBe(
+    "Does the new opening arrive too early?",
+  );
+  expect(documentText(stored)).toBe(
+    prose.replace(
+      "First sentence stays. I really utilize tools in order to help. Last sentence stays.",
+      "The opening has since changed.",
+    ),
+  );
+});
+
+test("Piece memory stays document-local and survives single/bulk export, duplicate and archive restore", async ({
+  page,
+  request,
+}) => {
+  const first = await seed(request);
+  first.pieceMemory.nextMove = "Reread the bridge.";
+  first.pieceMemory.decisions.push({
+    id: "choice",
+    text: "Keep the closer.",
+    createdAt: first.createdAt,
+  });
+  await request.put(`/api/documents/${first.id}`, { data: first });
+  const second = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Other draft", "Unrelated prose.") },
+    })
+  ).json();
+  await open(page);
+  const switcher = page.getByLabel("Switch document");
+  await switcher.selectOption(first.id);
+  await expect(page.getByText("Next move: Reread the bridge.")).toBeVisible();
+  await page.getByRole("button", { name: "Document actions" }).click();
+  const singleDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  expect(
+    JSON.parse(readFileSync((await (await singleDownload).path())!, "utf8"))
+      .pieceMemory.nextMove,
+  ).toBe("Reread the bridge.");
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  let manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage
+    .locator(`[data-managed-id="${first.id}"] input[type="checkbox"]`)
+    .check();
+  const selectedDownload = page.waitForEvent("download");
+  await manage.getByRole("button", { name: "Export selected" }).click();
+  const selected = JSON.parse(
+    readFileSync((await (await selectedDownload).path())!, "utf8"),
+  );
+  expect(selected.documents.map((item: any) => item.id)).toEqual([first.id]);
+  expect(selected.documents[0].pieceMemory.decisions[0].text).toBe(
+    "Keep the closer.",
+  );
+  const allDownload = page.waitForEvent("download");
+  await manage.getByRole("button", { name: "Export all" }).click();
+  const all = JSON.parse(
+    readFileSync((await (await allDownload).path())!, "utf8"),
+  );
+  expect(
+    all.documents.find((item: any) => item.id === first.id).pieceMemory
+      .nextMove,
+  ).toBe("Reread the bridge.");
+  expect(
+    all.documents.find((item: any) => item.id === second.id).pieceMemory
+      .nextMove,
+  ).toBe("");
+  await manage.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  await expect.poll(() => switcher.inputValue()).not.toBe(first.id);
+  const duplicateId = await switcher.inputValue();
+  const duplicate = await (
+    await request.get(`/api/documents/${duplicateId}`)
+  ).json();
+  expect(duplicate.pieceMemory.nextMove).toBe("Reread the bridge.");
+  expect(duplicate.pieceMemory.decisions[0].id).not.toBe("choice");
+  await switcher.selectOption(second.id);
+  await expect(page.getByText("Next move: Reread the bridge.")).toHaveCount(0);
+  await switcher.selectOption(first.id);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  await page
+    .getByRole("dialog", { name: /Archive/ })
+    .getByRole("button", { name: "Archive document" })
+    .click();
+  await page.reload();
+  await expect(switcher).not.toHaveValue(first.id);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Manage documents" }).click();
+  manage = page.getByRole("dialog", { name: "Manage documents" });
+  await manage
+    .locator(`[data-managed-id="${first.id}"]`)
+    .getByRole("button", { name: /Restore/ })
+    .click();
+  await manage.getByRole("button", { name: "Close dialog" }).click();
+  await switcher.selectOption(first.id);
+  await expect(page.getByText("Next move: Reread the bridge.")).toBeVisible();
 });
 
 test("archiving an active document preserves its work and restores it without changing the current draft", async ({

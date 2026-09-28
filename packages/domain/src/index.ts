@@ -244,6 +244,23 @@ export const sourceMaterialSchema = z.object({
   url: z.string().default(""),
 });
 export type SourceMaterial = z.infer<typeof sourceMaterialSchema>;
+export const memoryDecisionSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().max(1200),
+  createdAt: z.string().min(1),
+});
+export type MemoryDecision = z.infer<typeof memoryDecisionSchema>;
+export const pieceMemorySchema = z.object({
+  purpose: z.string().max(3000).default(""),
+  reader: z.string().max(1200).default(""),
+  currentQuestion: z.string().max(1800).default(""),
+  unresolved: z.array(z.string().max(1200)).max(200).default([]),
+  decisions: z.array(memoryDecisionSchema).max(200).default([]),
+  nextMove: z.string().max(1200).default(""),
+  lastSessionNote: z.string().max(3000).default(""),
+  updatedAt: z.string().optional(),
+});
+export type PieceMemory = z.infer<typeof pieceMemorySchema>;
 export const documentSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -253,6 +270,7 @@ export const documentSchema = z
     updatedAt: z.string(),
     revision: z.number().int().min(0),
     brief: writingBriefSchema,
+    pieceMemory: pieceMemorySchema.default({}),
     sections: z.array(writingSectionSchema).min(1),
     parkedGroups: z.array(parkedGroupSchema).default([]),
     sources: z.array(sourceMaterialSchema).default([]),
@@ -269,6 +287,8 @@ export const documentSchema = z
       new Set(doc.sections.map((s) => s.id)).size === doc.sections.length &&
       new Set(doc.parkedGroups.map((g) => g.id)).size ===
         doc.parkedGroups.length &&
+      new Set(doc.pieceMemory.decisions.map((decision) => decision.id)).size ===
+        doc.pieceMemory.decisions.length &&
       doc.sections.every(
         (s) =>
           s.placement !== "parked" ||
@@ -544,6 +564,7 @@ export function newDocument(title = "Untitled", text = ""): Document {
     updatedAt: now,
     revision: 0,
     brief: writingBriefSchema.parse({}),
+    pieceMemory: pieceMemorySchema.parse({}),
     sections: [newSection("Freeform", text)],
     parkedGroups: [],
     sources: [],
