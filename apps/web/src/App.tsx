@@ -1581,10 +1581,13 @@ export default function App() {
     );
     if (!workspace || !workbench || !preview) return;
     let frame = 0,
+      focusFrame = 0,
+      focusPending = false,
       geometry = "",
       cancelled = false;
     const stillCurrent = () =>
       !cancelled &&
+      !focusPending &&
       token === orientationToken.current &&
       orientedPanes.current.documentId === w.doc.id &&
       orientedPanes.current.sectionId === id &&
@@ -1653,16 +1656,8 @@ export default function App() {
     };
     workbench.addEventListener("scrollend", onScrollEnd);
     preview.addEventListener("scrollend", onScrollEnd);
-    const cancel = (event: Event) => {
-      if (
-        cancelled ||
-        (event.type === "focusin" &&
-          !(
-            event.target instanceof Element &&
-            event.target.closest(".writing-editor")
-          ))
-      )
-        return;
+    const cancelNow = () => {
+      if (cancelled) return;
       for (const pane of [workbench, preview])
         pane.scrollTo({ top: pane.scrollTop, behavior: "instant" });
       window.scrollTo({ top: window.scrollY, behavior: "instant" });
@@ -1672,6 +1667,32 @@ export default function App() {
       cancelled = true;
       observer.disconnect();
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(focusFrame);
+    };
+    const cancel = (event: Event) => {
+      if (cancelled) return;
+      if (event.type === "focusin") {
+        const owner = event.target;
+        if (
+          !(owner instanceof HTMLElement) ||
+          !owner.closest(".writing-editor")
+        )
+          return;
+        focusPending = true;
+        cancelAnimationFrame(focusFrame);
+        focusFrame = requestAnimationFrame(() => {
+          focusPending = false;
+          if (!stillCurrent()) return;
+          if (
+            owner === document.activeElement ||
+            owner.contains(document.activeElement)
+          )
+            cancelNow();
+          else schedule();
+        });
+        return;
+      }
+      cancelNow();
     };
     for (const event of [
       "wheel",
@@ -1688,6 +1709,7 @@ export default function App() {
       ++orientationToken.current;
       observer.disconnect();
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(focusFrame);
       workbench.removeEventListener("scrollend", onScrollEnd);
       preview.removeEventListener("scrollend", onScrollEnd);
       for (const event of [
