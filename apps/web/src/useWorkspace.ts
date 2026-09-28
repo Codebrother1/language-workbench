@@ -190,10 +190,30 @@ function sameSavedContentExceptFocus(a: Document, b: Document): boolean {
   return withoutFocus(a) === withoutFocus(b);
 }
 
+function modelForFollowUp(
+  wb: SectionWorkbench,
+  run: WorkbenchRun,
+): ModelRef | null {
+  return (
+    wb.oneOffModel ??
+    (wb.runChain && sameFocusTarget(wb.runChain.target, run.target)
+      ? wb.runChain.model
+      : null) ??
+    run.chainModel ??
+    run.model
+  );
+}
+
 export function useWorkspace() {
   const initial = useRef(newDocument());
   const [doc, setDoc] = useState(initial.current);
+  const [stagedPassage, setStagedPassage] = useState<{
+    documentId: string;
+    sourceRunId: string;
+    target: EditTarget;
+  } | null>(null);
   const current = useRef(doc);
+  useEffect(() => setStagedPassage(null), [doc.id]);
   const persisted = useRef(doc);
   // Preserve section metadata when rich-editor undo resurrects a removed/reordered node.
   const sectionMetadata = useRef(new Map(doc.sections.map((s) => [s.id, s])));
@@ -1506,6 +1526,34 @@ export function useWorkspace() {
   const localHistory = currentWorkbench.runs;
   const activeRun =
     localHistory.find((run) => run.id === currentWorkbench.activeRunId) ?? null;
+  const followUpModel = activeRun
+    ? modelForFollowUp(currentWorkbench, activeRun)
+    : null;
+  const followUpProvider = catalog?.providers.find(
+    (provider) => provider.id === followUpModel?.providerId,
+  );
+  const followUpDescriptor = followUpProvider?.models.find(
+    (model) => model.id === followUpModel?.modelId,
+  );
+  const followUpAvailability = !catalog
+    ? "unknown"
+    : !followUpModel ||
+        !followUpProvider?.configured ||
+        !followUpProvider.enabled ||
+        !followUpProvider.implemented ||
+        !followUpDescriptor ||
+        followUpDescriptor.capabilities.structuredOutput === false
+      ? "unavailable"
+      : followUpModel.providerId === "mock"
+        ? "offline"
+        : "live";
+  const stagedCurrentPassage =
+    stagedPassage?.documentId === doc.id &&
+    !activeRun &&
+    target &&
+    sameFocusTarget(stagedPassage.target, target)
+      ? stagedPassage
+      : null;
   const response = activeRun?.response ?? null;
   const responseTarget = activeRun?.target ?? null;
   const activeResolution =
@@ -2236,25 +2284,38 @@ export function useWorkspace() {
     }
     return operate(stage, override);
   };
-  const askCurrentPassage = (runId: string): Promise<void> => {
+  const stageCurrentPassage = (runId: string): void => {
     const run = current.current.sections
       .flatMap((section) => section.workbench?.runs ?? [])
       .find((item) => item.id === runId);
     const resolution =
       run && resolveHistoricalTarget(current.current, run.target);
-    if (!run || !resolution || resolution.status !== "changed")
-      return Promise.resolve();
+    if (!run || !resolution || resolution.status !== "changed") return;
     const currentTarget = resolution.current;
     selectExactTarget(currentTarget);
     changeInspection(null);
     update((doc) =>
-      updateWorkbench(doc, currentTarget.sectionId, (local) =>
-        patchTargetDraft(local, currentTarget, {
-          instruction: run.instruction,
+      updateWorkbench(doc, currentTarget.sectionId, (local) => ({
+        ...patchTargetDraft(local, currentTarget, {
+          instruction: "",
+          answer: "",
         }),
-      ),
+        activeRunId: null,
+        oneOffModel: null,
+        runChain: null,
+        clearedChainRunId: run.id,
+      })),
     );
-    return operate("diagnose", undefined, undefined, false, currentTarget);
+    setStagedPassage({
+      documentId: current.current.id,
+      sourceRunId: run.id,
+      target: currentTarget,
+    });
+  };
+  const cancelStagedPassage = () => {
+    const sourceRunId = stagedCurrentPassage?.sourceRunId;
+    setStagedPassage(null);
+    if (sourceRunId) selectRun(sourceRunId);
   };
   const askFollowUp = async (
     runId: string,
@@ -2296,13 +2357,7 @@ export function useWorkspace() {
       return false;
     }
     const wb = getWorkbench(current.current, owner.id);
-    const chosen =
-      wb.oneOffModel ??
-      (wb.runChain && sameFocusTarget(wb.runChain.target, run.target)
-        ? wb.runChain.model
-        : null) ??
-      run.chainModel ??
-      run.model;
+    const chosen = modelForFollowUp(wb, run)!;
     requestBusy.current = true;
     setBusy(true);
     setRunning({ label: "Following up…", models: [chosen] });
@@ -3043,6 +3098,8 @@ export function useWorkspace() {
     currentWorkbench,
     localHistory,
     activeRun,
+    followUpModel,
+    followUpAvailability,
     inspectedTarget: inspectedRunTarget,
     useCurrentPassage,
     returnToCurrentPassage,
@@ -3109,7 +3166,9 @@ export function useWorkspace() {
     mergeSection,
     ask,
     askFollowUp,
-    askCurrentPassage,
+    stagedCurrentPassage,
+    stageCurrentPassage,
+    cancelStagedPassage,
     saveFollowUpOption,
     useFollowUpOption,
     proposalText,

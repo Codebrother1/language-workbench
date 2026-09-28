@@ -2,10 +2,12 @@ import { useEffect, useRef } from "react";
 import type { Workspace } from "./useWorkspace";
 import { Button } from "./ui";
 import { modelLabel } from "./ModelControls";
+import { resolveHistoricalTarget } from "./target-drafts";
 import {
   sectionMentions,
   runDraftState,
   humanTargetLabel,
+  resultOutcome,
 } from "./workspace-helpers";
 export function WorkbenchHistory({
   w,
@@ -32,37 +34,67 @@ export function WorkbenchHistory({
         Local to this writing object. Canonical text stays unchanged while you
         explore.
       </p>
-      {recent.map((run) => (
-        <article
-          className={
-            "run-entry " + (w.activeRun?.id === run.id ? "active" : "")
-          }
-          key={run.id}
-        >
-          <div className="row between">
-            <b>{run.action.replaceAll("_", " ")}</b>
-            <time>
-              {new Date(run.createdAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </time>
-          </div>
-          <p className="small">{modelLabel(w.catalog, run.model)}</p>
-          <span className="draft-state">{runDraftState(w.doc, run)}</span>
-          <p>
-            {run.instruction ||
-              display(run.response.question || run.response.diagnosis)}
-          </p>
-          <span className="small muted">
-            {run.response.proposals.length} candidates ·{" "}
-            {humanTargetLabel(run.target)}
-          </span>
-          <Button className="full" onClick={() => w.selectRun(run.id)}>
-            Inspect this run
-          </Button>
-        </article>
-      ))}
+      {recent.map((run, index) => {
+        const ordinal = recent.length - index;
+        const question =
+          run.instruction.trim() ||
+          (run.target.text.trim()
+            ? `No writer question · “${run.target.text.trim()}”`
+            : `No writer question · ${run.action.replaceAll("_", " ")}`);
+        const status =
+          run.target.scope === "document"
+            ? runDraftState(w.doc, run)
+            : {
+                exact: "Current",
+                changed: "Target changed",
+                unresolved: "Target unresolved",
+              }[resolveHistoricalTarget(w.doc, run.target).status];
+        const unavailable =
+          resultOutcome(run)?.title ??
+          (!run.response.diagnosis.trim() && !run.response.proposals.length
+            ? run.response.missingIngredients.some((reason) =>
+                /unavailable|cannot|offline/i.test(reason),
+              )
+              ? "Unavailable"
+              : "No result"
+            : "");
+        return (
+          <article
+            className={
+              "run-entry " + (w.activeRun?.id === run.id ? "active" : "")
+            }
+            key={run.id}
+          >
+            <div className="row between">
+              <b>{run.action.replaceAll("_", " ")}</b>
+              <time>
+                {new Date(run.createdAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
+            </div>
+            <p className="run-question" title={question}>
+              {question}
+            </p>
+            <span className="small muted">
+              Run {ordinal} · {humanTargetLabel(run.target)} · {status}
+              {unavailable ? ` · ${unavailable}` : ""}
+            </span>
+            <p className="small muted">
+              {modelLabel(w.catalog, run.model)} ·{" "}
+              {run.response.proposals.length} candidates
+            </p>
+            <Button
+              className="full"
+              title={`Inspect Run ${ordinal}: ${question}`}
+              onClick={() => w.selectRun(run.id)}
+            >
+              Inspect this run
+            </Button>
+          </article>
+        );
+      })}
       {recent.filter((r) => r.response.proposals.length).length > 1 && (
         <details>
           <summary>Compare recent outputs</summary>

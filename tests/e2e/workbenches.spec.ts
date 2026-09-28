@@ -810,6 +810,10 @@ test("changed and unresolved targets preserve historical conversation without si
 }) => {
   const doc = await seed(request);
   const calls: string[] = [];
+  let analysisCalls = 0;
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) analysisCalls++;
+  });
   await page.route("**/api/ai/follow-up", (route) => {
     calls.push(route.request().postDataJSON().question);
     return route.fulfill({
@@ -847,13 +851,39 @@ test("changed and unresolved targets preserve historical conversation without si
     .fill("What was the earlier turn doing?");
   await thread.getByRole("button", { name: "Send follow-up" }).click();
   await expect(thread.getByTestId("follow-up-assistant")).toHaveCount(2);
+  const beforeHandoff = analysisCalls;
   await thread
-    .getByRole("button", { name: "Ask about current passage in a new run" })
+    .getByRole("button", { name: "Ask about current passage" })
     .click();
+  await expect(page.getByTestId("current-passage-stage")).toContainText(
+    "His ass is wandering.",
+  );
+  await expect(page.getByTestId("current-passage-stage")).toContainText(
+    "Next run with: Offline conservative",
+  );
+  await expect(page.locator(".local-history .run-entry")).toHaveCount(1);
+  await expect(page.getByLabel("Question for current passage")).toHaveValue("");
+  expect(analysisCalls).toBe(beforeHandoff);
+  await page.getByRole("button", { name: "Return to saved run" }).click();
+  await expect(thread.getByTestId("follow-up-writer")).toHaveCount(2);
+  expect(analysisCalls).toBe(beforeHandoff);
+  await thread
+    .getByRole("button", { name: "Ask about current passage" })
+    .click();
+  await page
+    .getByLabel("Question for current passage")
+    .fill("Does the revised turn still flatten?");
+  await expect(page.getByTestId("run-model")).toHaveCount(0);
+  expect(analysisCalls).toBe(beforeHandoff);
+  await page.getByRole("button", { name: "Run question" }).click();
+  await expect.poll(() => analysisCalls).toBe(beforeHandoff + 1);
   await expect(thread.getByTestId("follow-up-writer")).toHaveCount(0);
   await save(page);
   const saved = await stored(request, doc.id);
   expect(saved.sections[0].workbench.runs[0].conversation.length).toBe(4);
+  expect(saved.sections[0].workbench.runs[1].target.text).toBe(
+    "His ass is wandering.",
+  );
   expect(calls).toEqual([
     "What is the original doing?",
     "What was the earlier turn doing?",
@@ -869,6 +899,9 @@ test("changed and unresolved targets preserve historical conversation without si
   await expect(page.getByTestId("lab-follow-up")).toContainText(
     "cannot be located safely",
   );
+  await expect(
+    page.getByRole("button", { name: "Ask about current passage" }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Send follow-up" }),
   ).toBeDisabled();
@@ -1056,6 +1089,178 @@ test("Offline follow-up keeps the writer question for retry without fabricating 
   await page.getByRole("button", { name: "Retry saved follow-up" }).click();
   await expect(page.getByTestId("follow-up-writer")).toHaveCount(1);
   await expect(page.getByTestId("follow-up-assistant")).toHaveCount(1);
+});
+
+for (const width of [1440, 700])
+  test(`history distinguishes the same long question on original and current passages at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const question =
+      "Does this repetition flatten the turn before the contrast has time to arrive, especially when the next sentence is kept in place?";
+    const aiCalls: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) aiCalls.push(event.url());
+    });
+    await select(page, "His ass is larping.");
+    await page.getByLabel("Your direction").fill(question);
+    await page.getByRole("button", { name: /Diagnose this/ }).click();
+    await expect(page.getByTestId("lab-follow-up")).toBeVisible();
+    await select(page, "His ass is larping.");
+    await page.keyboard.insertText("His ass is wandering.");
+    await page
+      .getByTestId("lab-follow-up")
+      .getByRole("button", { name: "Ask about current passage" })
+      .click();
+    await page.getByLabel("Question for current passage").fill(question);
+    await page.getByRole("button", { name: "Run question" }).click();
+    await page.locator(".local-history > summary").click();
+    const rows = page.locator(".local-history .run-entry");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0).locator(".run-question")).toHaveAttribute(
+      "title",
+      question,
+    );
+    await expect(rows.nth(1).locator(".run-question")).toHaveAttribute(
+      "title",
+      question,
+    );
+    await expect(rows.nth(0)).toContainText("Run 2");
+    await expect(rows.nth(0)).toContainText("Current");
+    await expect(rows.nth(1)).toContainText("Run 1");
+    await expect(rows.nth(1)).toContainText("Target changed");
+    const count = aiCalls.length;
+    await rows.nth(1).getByRole("button", { name: "Inspect this run" }).click();
+    await expect(page.getByTestId("lab-follow-up")).toContainText(
+      "His ass is larping.",
+    );
+    expect(aiCalls).toHaveLength(count);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    expect(documentText(await stored(request, doc.id))).toContain(
+      "His ass is wandering.",
+    );
+  });
+
+test("staging current wording clears the historical one-off model until the writer chooses a new run model", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  await open(page);
+  await select(page, "His ass is larping.");
+  await models(page);
+  const picker = page.getByLabel("Run with", { exact: true });
+  await picker.selectOption(modelKey(plain));
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-model")).toContainText("Offline plain");
+  await select(page, "His ass is larping.");
+  await page.keyboard.insertText("His ass is wandering.");
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await page
+    .getByTestId("lab-follow-up")
+    .getByRole("button", { name: "Ask about current passage" })
+    .click();
+  await expect(page.getByTestId("current-passage-stage")).toContainText(
+    "Next run with: Offline conservative",
+  );
+  await expect(picker).toHaveValue("");
+  expect(calls).toHaveLength(0);
+  await picker.selectOption(modelKey(plain));
+  await expect(page.getByTestId("current-passage-stage")).toContainText(
+    "Next run with: Offline plain",
+  );
+  await page
+    .getByLabel("Question for current passage")
+    .fill("What does the new passage do?");
+  await page.getByRole("button", { name: "Run question" }).click();
+  await expect.poll(() => calls.length).toBe(1);
+  expect(calls[0].modelOverride).toEqual(plain);
+});
+
+test("follow-up helper reflects the current model without rewriting prior turn identity", async ({
+  page,
+  request,
+}) => {
+  await seed(request);
+  let liveAvailable = true;
+  await page.route("**/api/providers", async (route) => {
+    const response = await route.fetch();
+    const catalog = await response.json();
+    const direct = catalog.providers.find(
+      (provider: any) => provider.id === "openai",
+    );
+    direct.configured = liveAvailable;
+    direct.enabled = true;
+    direct.implemented = true;
+    direct.models = [
+      {
+        id: "gpt-6-luna",
+        providerId: "openai",
+        displayName: "gpt-6-luna",
+        capabilities: { text: true, structuredOutput: true },
+      },
+    ];
+    await route.fulfill({ response, json: catalog });
+  });
+  await page.route("**/api/ai/follow-up", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "mock",
+        model: conservative,
+        diagnosis: "Earlier answer for this original run.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        findings: [],
+        lexical: [],
+        proposals: [],
+      }),
+    }),
+  );
+  await open(page);
+  await section(page, "Hook");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  const thread = page.getByTestId("lab-follow-up");
+  await expect(thread).toContainText("Offline cannot answer open follow-ups");
+  await thread
+    .getByLabel("Ask a follow-up about this passage")
+    .fill("What in the original matters?");
+  await thread.getByRole("button", { name: "Send follow-up" }).click();
+  await expect(thread.getByTestId("follow-up-assistant")).toContainText(
+    "Earlier answer for this original run.",
+  );
+  const model = page.getByLabel("Run with", { exact: true });
+  await models(page);
+  const live = { providerId: "openai", modelId: "gpt-6-luna" };
+  await model.selectOption(modelKey(live));
+  await expect(thread).not.toContainText(
+    "Offline cannot answer open follow-ups",
+  );
+  await expect(thread).toContainText("gpt-6-luna");
+  await expect(thread.getByTestId("follow-up-assistant")).toContainText(
+    "Offline conservative",
+  );
+  await model.selectOption(modelKey(conservative));
+  await expect(thread).toContainText("Offline cannot answer open follow-ups");
+  await model.selectOption(modelKey(live));
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  liveAvailable = false;
+  await page.reload();
+  await expect(page.getByTestId("lab-follow-up")).toContainText("unavailable");
+  await expect(page.getByTestId("run-model")).toContainText("Offline");
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
 });
 
 test("common Lab approaches name the action without changing the selected prose", async ({

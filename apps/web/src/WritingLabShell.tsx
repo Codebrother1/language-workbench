@@ -171,8 +171,8 @@ function FollowUpThread({ w, run }: { w: Workspace; run: WorkbenchRun }) {
             Follow-ups here discuss the original passage, not the current
             wording.
           </small>
-          <Button onClick={() => w.askCurrentPassage(run.id)}>
-            Ask about current passage in a new run
+          <Button onClick={() => w.stageCurrentPassage(run.id)}>
+            Ask about current passage
           </Button>
         </div>
       )}
@@ -275,11 +275,26 @@ function FollowUpThread({ w, run }: { w: Workspace; run: WorkbenchRun }) {
               placeholder="Ask about the original passage…"
             />
           </Field>
-          {(w.oneOffModel ?? w.chainModel ?? run.model)?.providerId ===
-            "mock" && (
+          {w.followUpModel && (
+            <small className="muted">
+              Next follow-up with: {modelLabel(w.catalog, w.followUpModel)}
+            </small>
+          )}
+          {w.followUpAvailability === "offline" && (
             <small className="muted">
               Offline cannot answer open follow-ups. Choose a configured model
               with Run with if you need an answer; no paid fallback is used.
+            </small>
+          )}
+          {w.followUpAvailability === "unavailable" && (
+            <small className="muted">
+              The selected follow-up model is unavailable. Choose a configured
+              model with Run with; no fallback is used.
+            </small>
+          )}
+          {w.followUpAvailability === "unknown" && (
+            <small className="muted">
+              Provider status unavailable. Reconnect before sending a follow-up.
             </small>
           )}
           <Button
@@ -908,7 +923,44 @@ export function WritingLabShell({
               </Button>
             </div>
           )}
-          {deliveryActive || w.isLensTarget ? (
+          {w.stagedCurrentPassage ? (
+            <section
+              className="staged-current-passage"
+              data-testid="current-passage-stage"
+              aria-label="Current passage staged"
+            >
+              <b>Current passage staged</b>
+              <p>{target.text}</p>
+              <small>
+                No question was sent. Review your question and model before
+                running.
+              </small>
+              <Field label="Question for current passage">
+                <textarea
+                  rows={3}
+                  value={w.instruction}
+                  onChange={(event) => w.setInstruction(event.target.value)}
+                  placeholder="What should the Lab look at in this wording?"
+                />
+              </Field>
+              <small>
+                Next run with: {modelLabel(w.catalog, w.effectiveModel.model)} ·{" "}
+                {w.effectiveModel.source.replace("_", " ")}
+              </small>
+              <div className="row wrap">
+                <Button
+                  className="primary"
+                  disabled={!w.instruction.trim() || w.busy || !w.ready}
+                  onClick={() => void w.ask("diagnose")}
+                >
+                  Run question
+                </Button>
+                <Button onClick={w.cancelStagedPassage}>
+                  Return to saved run
+                </Button>
+              </div>
+            </section>
+          ) : deliveryActive || w.isLensTarget ? (
             <WordLensControls w={w} />
           ) : (
             <>
