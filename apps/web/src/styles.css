@@ -2707,6 +2707,12 @@ summary {
   font-size: 13px;
   border-bottom: 1px solid var(--line);
 }
+.reading-preview-heading {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--paper);
+}
 .preview-reading-state {
   display: flex;
   flex-basis: 100%;

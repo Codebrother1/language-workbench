@@ -76,6 +76,7 @@ import { UtilityPanel } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
 import {
   customSectionLabel,
+  sectionReference,
   sectionMentions,
   duplicateDocumentCue,
 } from "./workspace-helpers";
@@ -102,19 +103,47 @@ function scrollWorkbenchToSection(
   if (!card || !pane || getComputedStyle(card).display === "none") return false;
   const bounds = pane.getBoundingClientRect(),
     target = card.getBoundingClientRect();
+  const header = pane
+    .querySelector<HTMLElement>(".area-jump")
+    ?.getBoundingClientRect();
+  const lab = document
+    .querySelector<HTMLElement>(".dock-inspector:not(.pane-hidden)")
+    ?.getBoundingClientRect();
+  const labOverlaps =
+    lab &&
+    lab.left < bounds.right &&
+    lab.right > bounds.left &&
+    lab.top < bounds.bottom &&
+    lab.bottom > bounds.top;
+  const usableTop = Math.max(bounds.top + 12, header?.bottom ?? bounds.top) + 8;
+  const usableBottom =
+    Math.min(
+      bounds.bottom,
+      window.innerHeight,
+      labOverlaps ? lab.top : bounds.bottom,
+    ) - 12;
+  const controls = card
+    .querySelector<HTMLElement>(".card-essential")
+    ?.getBoundingClientRect();
+  const delta =
+    controls && controls.bottom > usableBottom
+      ? controls.bottom - usableBottom
+      : target.top < usableTop
+        ? target.top - usableTop
+        : target.top > usableBottom - 60 || force
+          ? target.top - usableTop
+          : 0;
   if (!["auto", "scroll"].includes(getComputedStyle(pane).overflowY)) {
     if (
       allowPageScroll &&
-      (target.bottom < 60 || target.top > window.innerHeight - 90)
+      (target.bottom < 60 ||
+        (controls?.bottom ?? target.top) > window.innerHeight - 90)
     )
-      card.scrollIntoView({ block: "center", behavior: "smooth" });
+      card.scrollIntoView({ block: "nearest", behavior: "smooth" });
     return true;
   }
-  if (force || target.top < bounds.top + 60 || target.top > bounds.bottom - 90)
-    pane.scrollTo({
-      top: pane.scrollTop + target.top - bounds.top - 75,
-      behavior: "smooth",
-    });
+  if (delta && usableBottom > usableTop)
+    pane.scrollTo({ top: pane.scrollTop + delta, behavior: "smooth" });
   if (allowPageScroll) revealScrollContainer(pane);
   return true;
 }
@@ -1505,59 +1534,156 @@ export default function App() {
     if (selected?.placement === "draft") lastDraftId.current = selected.id;
   }, [w.doc.sections, w.selectedSectionId]);
   const orientationToken = useRef(0);
+  const orientationInteracted = useRef(false);
   const orientedPanes = useRef({
     documentId: "",
+    sectionId: "",
     workbench: false,
     preview: false,
   });
   useLayoutEffect(() => {
     if (!w.ready) return;
-    if (orientedPanes.current.documentId !== w.doc.id)
-      orientedPanes.current = {
-        documentId: w.doc.id,
-        workbench: false,
-        preview: false,
-      };
     const id =
       w.selectedSectionId &&
       w.doc.sections.some((section) => section.id === w.selectedSectionId)
         ? w.selectedSectionId
         : w.doc.selectedSectionId;
     if (!id || !w.doc.sections.some((section) => section.id === id)) return;
-    if (
-      (!workbenchShown || orientedPanes.current.workbench) &&
-      (!previewShown || orientedPanes.current.preview)
-    )
-      return;
+    const current = orientedPanes.current;
+    if (current.documentId !== w.doc.id) {
+      orientedPanes.current = {
+        documentId: w.doc.id,
+        sectionId: id,
+        workbench: false,
+        preview: false,
+      };
+      orientationInteracted.current = false;
+    } else if (current.sectionId !== id) {
+      current.sectionId = id;
+      if (
+        orientationInteracted.current ||
+        (current.workbench && current.preview)
+      )
+        return;
+      current.workbench = false;
+      current.preview = false;
+    }
+    if (orientationInteracted.current) return;
     const token = ++orientationToken.current;
+    const workspace = document.querySelector<HTMLElement>(".dock-workspace");
+    const workbench = document.querySelector<HTMLElement>(
+      ".dock-workbench .structure",
+    );
+    const preview = document.querySelector<HTMLElement>(
+      ".dock-preview .writing",
+    );
+    if (!workspace || !workbench || !preview) return;
     let frame = 0,
-      tries = 0;
+      geometry = "",
+      cancelled = false;
+    const stillCurrent = () =>
+      !cancelled &&
+      token === orientationToken.current &&
+      orientedPanes.current.documentId === w.doc.id &&
+      orientedPanes.current.sectionId === id &&
+      !orientationInteracted.current;
     const orient = () => {
-      if (token !== orientationToken.current) return;
-      const current = orientedPanes.current;
-      if (current.documentId !== w.doc.id) return;
-      if (workbenchShown && !current.workbench)
-        current.workbench = scrollWorkbenchToSection(id, false, true);
-      if (previewShown && !current.preview) {
-        const visible = document.querySelector<HTMLElement>(
-          `.dock-preview [data-preview-section-id="${CSS.escape(id)}"], .dock-preview .writing-editor > section[id="${CSS.escape(id)}"]`,
+      if (!stillCurrent()) return;
+      const state = orientedPanes.current;
+      if (workbenchShown && !state.workbench && workbench.clientHeight > 0)
+        state.workbench = scrollWorkbenchToSection(id, false, true);
+      if (previewShown && !state.preview && preview.clientHeight > 0) {
+        const passage = preview.querySelector<HTMLElement>(
+          `[data-preview-section-id="${CSS.escape(id)}"], .writing-editor > section[id="${CSS.escape(id)}"]`,
         );
-        if (visible) {
+        if (passage) {
           scrollPreviewToSection(id, false, window.innerWidth > 900);
-          current.preview = true;
+          state.preview = true;
         }
       }
-      if (
-        ((workbenchShown && !current.workbench) ||
-          (previewShown && !current.preview)) &&
-        tries++ < 6
-      )
-        frame = requestAnimationFrame(orient);
     };
-    frame = requestAnimationFrame(orient);
-    return () => {
-      ++orientationToken.current;
+    const schedule = () => {
+      if (!stillCurrent()) return;
       cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(orient);
+    };
+    const observer = new ResizeObserver(() => {
+      if (!stillCurrent()) return;
+      const next = [workspace, workbench, preview]
+        .map((pane) => `${pane.clientWidth}x${pane.clientHeight}`)
+        .join("|");
+      if (next !== geometry) {
+        geometry = next;
+        orientedPanes.current.workbench = false;
+        orientedPanes.current.preview = false;
+        schedule();
+      }
+    });
+    for (const pane of [workspace, workbench, preview]) observer.observe(pane);
+    const onScrollEnd = () => {
+      if (!stillCurrent()) return;
+      const state = orientedPanes.current;
+      const card = workbench.querySelector<HTMLElement>(
+        `.structure-item[data-section-id="${CSS.escape(id)}"]`,
+      );
+      const passage = preview.querySelector<HTMLElement>(
+        `[data-preview-section-id="${CSS.escape(id)}"], .writing-editor > section[id="${CSS.escape(id)}"]`,
+      );
+      if (
+        workbenchShown &&
+        card &&
+        (card.getBoundingClientRect().bottom <
+          workbench.getBoundingClientRect().top + 60 ||
+          card.getBoundingClientRect().top >
+            workbench.getBoundingClientRect().bottom - 90)
+      )
+        state.workbench = false;
+      if (
+        previewShown &&
+        passage &&
+        (passage.getBoundingClientRect().bottom <
+          preview.getBoundingClientRect().top + 30 ||
+          passage.getBoundingClientRect().top >
+            preview.getBoundingClientRect().bottom - 90)
+      )
+        state.preview = false;
+      if (!state.workbench || !state.preview) schedule();
+    };
+    workbench.addEventListener("scrollend", onScrollEnd);
+    preview.addEventListener("scrollend", onScrollEnd);
+    const cancel = () => {
+      orientationInteracted.current = true;
+      orientedPanes.current.workbench = true;
+      orientedPanes.current.preview = true;
+      cancelled = true;
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+    for (const event of [
+      "wheel",
+      "pointerdown",
+      "keydown",
+      "touchstart",
+      "focusin",
+    ])
+      window.addEventListener(event, cancel, true);
+    schedule();
+    void document.fonts.ready.then(schedule);
+    return () => {
+      cancelled = true;
+      ++orientationToken.current;
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      workbench.removeEventListener("scrollend", onScrollEnd);
+      preview.removeEventListener("scrollend", onScrollEnd);
+      for (const event of [
+        "wheel",
+        "pointerdown",
+        "keydown",
+        "touchstart",
+        "focusin",
+      ])
+        window.removeEventListener(event, cancel, true);
     };
   }, [
     w.ready,
@@ -1843,6 +1969,17 @@ export default function App() {
   const previewCard = w.doc.sections.find(
     (section) => section.id === activeEditorCard,
   );
+  const previewCardName =
+    previewCard && sectionReference(w.doc, previewCard.id);
+  const previewCardIdentity =
+    previewCard &&
+    customSectionLabel(previewCard) &&
+    w.doc.sections.filter(
+      (section) =>
+        customSectionLabel(section) === customSectionLabel(previewCard),
+    ).length > 1
+      ? `${previewCardName} · Section ${w.doc.sections.indexOf(previewCard) + 1}`
+      : previewCardName;
   useLayoutEffect(() => {
     const dom = w.editor?.view.dom as HTMLElement | undefined;
     if (!dom) return;
@@ -2482,7 +2619,14 @@ export default function App() {
             }}
           >
             <Toolbar w={w} />
-            <div className="selected-preview-heading">
+            <div
+              className={
+                "selected-preview-heading" +
+                (activeEditorCard && !previewFocused
+                  ? " reading-preview-heading"
+                  : "")
+              }
+            >
               <span className="eyebrow">
                 {parkedFocusId
                   ? "PARKED THOUGHT · outside the reader draft"
@@ -2504,11 +2648,11 @@ export default function App() {
                   role="status"
                 >
                   <span>
-                    Reading preview · editing{" "}
+                    Reading preview · Editing “{previewCardIdentity}” in
+                    Workbench
                     {previewCard?.placement === "parked"
-                      ? "a parked thought"
-                      : "this section"}{" "}
-                    in Workbench.
+                      ? " (parked thought)."
+                      : "."}
                   </span>
                   {previewCard?.placement === "parked" && !draft.length ? (
                     <span>
