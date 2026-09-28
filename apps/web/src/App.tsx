@@ -1651,7 +1651,19 @@ export default function App() {
     };
     workbench.addEventListener("scrollend", onScrollEnd);
     preview.addEventListener("scrollend", onScrollEnd);
-    const cancel = () => {
+    const cancel = (event: Event) => {
+      if (
+        cancelled ||
+        (event.type === "focusin" &&
+          !(
+            event.target instanceof Element &&
+            event.target.closest(".writing-editor")
+          ))
+      )
+        return;
+      for (const pane of [workbench, preview])
+        pane.scrollTo({ top: pane.scrollTop, behavior: "instant" });
+      window.scrollTo({ top: window.scrollY, behavior: "instant" });
       orientationInteracted.current = true;
       orientedPanes.current.workbench = true;
       orientedPanes.current.preview = true;

@@ -170,6 +170,26 @@ for (const width of [1440, 1024])
     await preview.evaluate((pane) => {
       pane.scrollTop = 0;
     });
+    if (width === 1024)
+      await page.addInitScript(() => {
+        const observer = new MutationObserver(() => {
+          if (
+            document
+              .querySelector('[data-testid="save-state"]')
+              ?.textContent?.includes("Saved")
+          ) {
+            observer.disconnect();
+            document
+              .querySelector<HTMLInputElement>('[aria-label="Document title"]')
+              ?.focus();
+          }
+        });
+        observer.observe(document, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      });
     if (width !== 1024)
       await page.route("**/api/documents", async (route) => {
         if (route.request().method() === "GET")
@@ -331,6 +351,94 @@ for (const width of [1440, 1024])
     await expect(fresh.getByTestId("writing-editor")).not.toBeFocused();
     await fresh.close();
   });
+
+test("a new Preview section and manual scroll supersede a pending 1024px orientation", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const previous = doc.sections[8].id,
+    next = doc.sections[5].id;
+  const other = await (
+    await request.post("/api/import", {
+      data: { document: newDocument("Another place", "Other prose.") },
+    })
+  ).json();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/");
+  await page.getByLabel("Switch document").selectOption(doc.id);
+  await page.locator(`[data-section-id="${previous}"] .section-focus`).click();
+  await save(page);
+  await page.reload();
+  await expect(page.locator(`[data-section-id="${previous}"]`)).toHaveClass(
+    /active/,
+  );
+  await page.setViewportSize({ width: 1040, height: 810 });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const passage = page.locator(
+    `.dock-preview .writing-editor > section[id="${next}"]`,
+  );
+  await passage.click();
+  await expect(page.locator(`[data-section-id="${next}"]`)).toHaveClass(
+    /active/,
+  );
+  const preview = page.locator(".dock-preview .writing");
+  await preview.hover();
+  await page.mouse.wheel(0, 160);
+  await expect(passage).toBeInViewport();
+  await expect(page.getByTestId("writing-editor")).toBeFocused();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await expect(passage).toBeInViewport();
+  await expect(
+    page.locator(`[data-section-id="${next}"] .card-essential`),
+  ).toBeVisible();
+  await page.getByLabel("Switch document").selectOption(other.id);
+  await expect(page.locator(`[data-section-id="${previous}"]`)).toHaveCount(0);
+  await expect(
+    page.locator(`[data-section-id="${other.sections[0].id}"]`),
+  ).toBeInViewport();
+});
+
+test("direct prose focus cancels stale reload orientation before responsive resize", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const id = doc.sections[8].id;
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/");
+  await page.locator(`[data-section-id="${id}"] .section-focus`).click();
+  await save(page);
+  await page.reload();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+  await page.setViewportSize({ width: 1040, height: 810 });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByTestId("writing-editor").focus();
+  await expect(page.getByTestId("writing-editor")).toBeFocused();
+  const workbench = page.locator(".dock-workbench .structure"),
+    preview = page.locator(".dock-preview .writing");
+  await workbench.evaluate((pane) =>
+    pane.scrollTo({ top: 0, behavior: "instant" }),
+  );
+  await preview.evaluate((pane) =>
+    pane.scrollTo({ top: 0, behavior: "instant" }),
+  );
+  await page.setViewportSize({ width: 1040, height: 810 });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  expect(await workbench.evaluate((pane) => pane.scrollTop)).toBeLessThan(6);
+  expect(await preview.evaluate((pane) => pane.scrollTop)).toBeLessThan(6);
+});
 
 test("700px reload restores section identity without locking stacked pane scroll", async ({
   page,
@@ -746,6 +854,13 @@ for (const width of [1440, 1024])
     request,
   }) => {
     const doc = await seed(request);
+    if (width === 1024) {
+      doc.sections[8].content = newSection(
+        "Point",
+        "The ending carries a longer thought through this section. ".repeat(12),
+      ).content;
+      await request.put(`/api/documents/${doc.id}`, { data: doc });
+    }
     await page.setViewportSize({ width, height: 768 });
     await page.goto("/");
     const pane = page.locator(".dock-workbench .structure");
