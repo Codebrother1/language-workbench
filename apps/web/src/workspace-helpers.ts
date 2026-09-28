@@ -367,6 +367,7 @@ export type RunCapture = {
   controls: SectionWorkbench["controls"];
   model: ModelRef | null;
   chainModel?: ModelRef;
+  guidance?: WorkbenchRun["guidance"];
   question: string;
 };
 export function writerResultReason(reason: string): string {
@@ -415,6 +416,7 @@ export function makeRun(
     instruction: capture.instruction,
     answer: capture.answer,
     conversation: [],
+    guidance: capture.guidance ?? [],
     controls: { ...capture.controls },
     model: response.model ?? capture.model,
     ...(capture.chainModel ? { chainModel: capture.chainModel } : {}),

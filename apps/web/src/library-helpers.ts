@@ -1,6 +1,12 @@
 import {
   libraryItemSchema,
+  matchesLibraryScope,
+  defaultSettings,
   uid,
+  type Document,
+  type SavedGuidance,
+  type StyleDNA,
+  type WritingAction,
   type LibraryItem,
   type PersonalLibrary,
   type EditTarget,
@@ -8,6 +14,127 @@ import {
   type StructureRequest,
 } from "./domain";
 import { makeRun } from "./workspace-helpers";
+
+export function contextualGuidance(input: {
+  doc: Document;
+  target: EditTarget | null;
+  action: WritingAction;
+  styleDNA: StyleDNA;
+  library: PersonalLibrary;
+}): SavedGuidance[] {
+  const section = input.doc.sections.find(
+    (item) => item.id === input.target?.sectionId,
+  );
+  if (!section || !input.target) return [];
+  const context = {
+    sectionKind: section.kind,
+    contentType: input.doc.brief.contentType,
+    audience: input.doc.brief.audience,
+    register: input.styleDNA.register,
+  };
+  const task = input.action.toLowerCase();
+  const categories = [
+    ...((["rhythm", "coach"].includes(task) &&
+      ["selection", "word"].includes(input.target.scope)) ||
+    section.kind === "Hook"
+      ? ["rhythm", "sentenceLengths"]
+      : []),
+    ...(task === "humor" || section.kind === "Punchline"
+      ? ["humor", "explanationDepth"]
+      : []),
+    ...(["Closer", "Conclusion"].includes(section.kind)
+      ? ["endingStyles", "callbackUsage"]
+      : []),
+    ...(["Segue", "Transition"].includes(section.kind) ? ["transitions"] : []),
+    ...(input.target.scope === "word" || task === "words"
+      ? ["profanity", "register"]
+      : []),
+    ...(task === "technical" ? ["technicality"] : []),
+  ] as (keyof StyleDNA)[];
+  const metadataMatches = (item: LibraryItem) =>
+    [...item.tags, ...item.effects, item.ruleKey].some((value) =>
+      [
+        task,
+        section.kind.toLowerCase(),
+        ...categories.map((key) => key.toLowerCase()),
+      ].includes(value.toLowerCase()),
+    );
+  const candidates: { item: SavedGuidance; score: number }[] = [];
+  for (const item of input.library.items) {
+    if (
+      !item.content.trim() ||
+      item.content.length > 3000 ||
+      !matchesLibraryScope(item, context)
+    )
+      continue;
+    const scoped = item.sectionKinds.length > 0;
+    const tagged = metadataMatches(item);
+    const contentScoped = item.contentTypes.length > 0;
+    const transition = ["Segue", "Transition"].includes(section.kind);
+    const connector = item.kind === "connector" && transition;
+    if (item.kind === "connector" && !connector) continue;
+    if (!connector && !scoped && !tagged && !contentScoped) continue;
+    const score =
+      item.kind === "style_rule" && scoped
+        ? 100
+        : connector
+          ? 90
+          : item.kind === "style_rule" && (tagged || contentScoped)
+            ? 85
+            : scoped
+              ? 65
+              : tagged
+                ? 55
+                : 40;
+    candidates.push({
+      score,
+      item: {
+        source: connector
+          ? "connector"
+          : item.kind === "style_rule" && scoped
+            ? "section_style"
+            : "library",
+        itemId: item.id,
+        kind: item.kind,
+        preference: item.preference,
+        title: item.title,
+        text: item.content,
+      },
+    });
+  }
+  const defaults = defaultSettings().styleDNA;
+  for (const key of new Set(categories)) {
+    const value = input.styleDNA[key];
+    if (typeof value !== "string" || !value.trim() || value === defaults[key])
+      continue;
+    candidates.push({
+      score: 80,
+      item: {
+        source: "style_dna",
+        key,
+        title: key
+          .replace(/([A-Z])/g, " $1")
+          .replace(/^./, (letter) => letter.toUpperCase()),
+        text: value,
+      },
+    });
+  }
+  const seen = new Set<string>();
+  return candidates
+    .sort(
+      (a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title),
+    )
+    .map(({ item }) => item)
+    .filter((item) => {
+      const normalized = item.text
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, "");
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    })
+    .slice(0, 3);
+}
 
 export type SaveLibraryItemInput = Pick<LibraryItem, "kind" | "content"> &
   Partial<

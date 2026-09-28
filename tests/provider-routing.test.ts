@@ -21,6 +21,8 @@ import {
   resolveModel,
   providerCatalogSchema,
   emptyWorkbench,
+  emptyLibrary,
+  libraryItemSchema,
   type ModelRef,
   type AIResponse,
 } from "../packages/domain/src/index";
@@ -181,6 +183,14 @@ describe("provider catalog, environment boundary and persistence", () => {
       controls: {},
       model: openai,
       chainModel: openai,
+      guidance: [
+        {
+          source: "section_style" as const,
+          itemId: "saved-guide",
+          title: "Hook restraint",
+          text: "Keep the reveal unannounced.",
+        },
+      ],
       response: {
         ...output,
         diagnosis: "Earlier result about larping.",
@@ -196,6 +206,16 @@ describe("provider catalog, environment boundary and persistence", () => {
         },
       ],
     };
+    const guide = libraryItemSchema.parse({
+      id: "saved-guide",
+      kind: "style_rule",
+      title: "Hook restraint",
+      content: run.guidance[0].text,
+      sectionKinds: ["Freeform"],
+      createdAt: doc.createdAt,
+      updatedAt: doc.createdAt,
+    });
+    repository.saveLibrary({ ...emptyLibrary(), items: [guide] });
     doc.sections[0].workbench = {
       ...emptyWorkbench(),
       runs: [run, { ...run, id: "another-run", conversation: [] }],
@@ -214,8 +234,11 @@ describe("provider catalog, environment boundary and persistence", () => {
       (call) => call.body?.model === openai.modelId,
     )?.body;
     expect(requestBody).toBeTruthy();
-    const submitted = JSON.parse(requestBody.input[2].content);
+    const submitted = JSON.parse(
+      requestBody.input.find((entry: any) => entry.role === "user").content,
+    );
     expect(submitted.FOLLOW_UP.runId).toBe(run.id);
+    expect(submitted.WRITER_SELECTED_GUIDANCE).toMatchObject(run.guidance);
     expect(submitted.FOLLOW_UP.originalResult.diagnosis).toBe(
       "Earlier result about larping.",
     );
@@ -227,11 +250,24 @@ describe("provider catalog, environment boundary and persistence", () => {
     expect(
       repository.get(doc.id).sections[0].workbench?.runs[0].conversation,
     ).toHaveLength(1);
+    repository.saveLibrary({
+      ...repository.getLibrary(),
+      items: [{ ...guide, content: "A newer, different rule." }],
+    });
     doc.sections[0].content = paragraphs("They were drifting as experts.");
     doc = repository.save(doc.id, doc);
     expect((await api("/api/ai/follow-up", "POST", body)).status).toBe(200);
-    const changedInput = JSON.parse(calls.at(-1)!.body.input[2].content);
+    const changedInput = JSON.parse(
+      calls.at(-1)!.body.input.find((entry: any) => entry.role === "user")
+        .content,
+    );
     expect(changedInput.FOLLOW_UP.targetStatus).toBe("changed");
+    expect(changedInput.WRITER_SELECTED_GUIDANCE[0].text).toBe(
+      "Keep the reveal unannounced.",
+    );
+    expect(changedInput.READ_CONTEXT.personalLibrary.items[0].content).toBe(
+      "A newer, different rule.",
+    );
     expect(changedInput.EDIT_TARGET.text).toBe("larping");
     expect(changedInput.READ_CONTEXT.document.sections[0].content).toEqual(
       doc.sections[0].content,

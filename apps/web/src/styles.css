@@ -1085,6 +1085,16 @@ hr {
   margin: 0 0 9px;
   font-size: 13px;
 }
+.follow-up-guidance {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  font-size: 12px;
+}
+.follow-up-guidance p {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
 .lab-follow-up .follow-up-turn {
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
@@ -2284,6 +2294,43 @@ summary {
 }
 .quick-save-options .button {
   justify-content: flex-start;
+}
+.contextual-writing {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin: 12px 0;
+  font-size: 12px;
+}
+.contextual-writing > summary {
+  padding: 8px 0;
+  min-height: 40px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.contextual-writing article {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.contextual-writing article b,
+.contextual-writing article p {
+  display: block;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.contextual-writing .run-guidance {
+  padding: 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-light);
+}
+.contextual-writing .run-guidance .row span {
+  flex: 1 1 150px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.contextual-writing .button {
+  font-size: 11px;
+  min-height: 28px;
+  padding: 4px 7px;
 }
 .context-library article,
 .thought-unit,

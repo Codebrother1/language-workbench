@@ -4,6 +4,7 @@ import {
   type Page,
   type APIRequestContext,
 } from "@playwright/test";
+import { createLibraryItem } from "../../apps/web/src/library-helpers";
 import {
   newDocument,
   newSection,
@@ -89,6 +90,221 @@ async function fillThoughts(page: Page) {
     .getByLabel("Thought B · second thought")
     .fill("it was too expensive");
 }
+
+test("Your writing retrieves saved Hook guidance locally and attaches only an explicit run snapshot", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const libraryBefore = await library(request);
+  const rule = {
+    ...createLibraryItem({
+      kind: "style_rule",
+      title: "Opening restraint",
+      content: "Keep the reveal unannounced.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  const move = {
+    ...createLibraryItem({
+      kind: "move",
+      title: "Object first",
+      content: "Name the object, then stop.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  const other = {
+    ...createLibraryItem({
+      kind: "move",
+      title: "Ending",
+      content: "Finish the scene.",
+    }),
+    sectionKinds: ["Closer"],
+  };
+  await request.put("/api/library", {
+    data: { ...libraryBefore, items: [other, move, rule] },
+  });
+  const settings = await (await request.get("/api/settings")).json();
+  await request.put("/api/settings", {
+    data: {
+      ...settings,
+      styleDNA: { ...settings.styleDNA, rhythm: "Keep the abrupt turn." },
+    },
+  });
+  const requests: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) requests.push(event.postDataJSON());
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  await focus(page, "Hook");
+  const contextual = page.getByTestId("your-writing");
+  await expect(contextual).toContainText("Keep the reveal unannounced.");
+  await expect(contextual).toContainText("Keep the abrupt turn.");
+  await expect(contextual).toContainText("Name the object, then stop.");
+  await expect(contextual).not.toContainText("Finish the scene.");
+  await expect(contextual).toContainText("SECTION STYLE");
+  await expect(contextual).toContainText("STYLE DNA");
+  await expect(contextual).toContainText("PERSONAL LIBRARY");
+  expect(requests).toHaveLength(0);
+  const item = contextual
+    .locator("[data-guidance-id]")
+    .filter({ hasText: rule.content });
+  await item.getByRole("button", { name: "Copy", exact: true }).focus();
+  await item.getByRole("button", { name: "Copy", exact: true }).press("Enter");
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+  await item.getByRole("button", { name: "Use as guidance" }).click();
+  await expect(page.getByTestId("run-guidance")).toContainText(rule.content);
+  await page
+    .getByTestId("run-guidance")
+    .getByRole("button", { name: "Remove guidance" })
+    .click();
+  await expect(page.getByTestId("run-guidance")).toHaveCount(0);
+  await item.getByRole("button", { name: "Use as guidance" }).click();
+  expect(requests).toHaveLength(0);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("lab-follow-up")).toContainText(rule.content);
+  expect(requests[0].explicitGuidance).toMatchObject([
+    { itemId: rule.id, text: rule.content },
+  ]);
+  await save(page);
+  const saved = await stored(request, doc.id);
+  expect(saved.sections[0].workbench.runs[0].guidance).toMatchObject([
+    { source: "section_style", itemId: rule.id, text: rule.content },
+  ]);
+  expect(documentText(saved)).toBe(documentText(doc));
+});
+
+test("contextual guidance reflects source edits without rewriting an earlier Lab snapshot", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const current = await library(request);
+  const move = {
+    ...createLibraryItem({
+      kind: "move",
+      title: "Opening move",
+      content: "Lead with the cost.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  await request.put("/api/library", { data: { ...current, items: [move] } });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page);
+  await focus(page, "Hook");
+  const contextual = page.getByTestId("your-writing");
+  await expect(contextual).toBeVisible();
+  await contextual.locator("summary").click();
+  await expect(contextual).toContainText(move.content);
+  await contextual.getByRole("button", { name: "Not relevant" }).click();
+  await expect(contextual).toHaveCount(0);
+  await focus(page, "Segue");
+  await focus(page, "Hook");
+  await expect(contextual).toContainText(move.content);
+  await contextual.locator("summary").click();
+  await contextual.getByRole("button", { name: "View source" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Personal Writing Library" }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog", { name: "Personal Writing Library" })
+    .getByRole("button", { name: "Close dialog" })
+    .click();
+  await contextual.getByRole("button", { name: "Use as guidance" }).click();
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
+    move.content,
+  );
+  await save(page);
+  const saved = await stored(request, doc.id);
+  expect(saved.sections[0].workbench.runs[0].guidance[0].text).toBe(
+    move.content,
+  );
+  const newer = await library(request);
+  await request.put("/api/library", {
+    data: {
+      ...newer,
+      items: newer.items.map((item: any) =>
+        item.id === move.id
+          ? { ...item, content: "Let the object carry the turn." }
+          : item,
+      ),
+    },
+  });
+  await page.reload();
+  await focus(page, "Hook");
+  await expect(page.getByTestId("your-writing")).toContainText(
+    "Let the object carry the turn.",
+  );
+  await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
+    move.content,
+  );
+  const last = await library(request);
+  await request.put("/api/library", {
+    data: {
+      ...last,
+      items: last.items.filter((item: any) => item.id !== move.id),
+    },
+  });
+  await page.reload();
+  await focus(page, "Hook");
+  await expect(page.getByTestId("your-writing")).toHaveCount(0);
+  await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
+    move.content,
+  );
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+});
+
+test("stacked Segue shows only saved connector guidance without mixing Sources or Piece Memory", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.nextMove = "Rewrite the ending later.";
+  doc.sources.push({
+    id: "source-quote",
+    title: "Evidence quote",
+    kind: "quote",
+    text: "An unrelated source quotation.",
+    url: "",
+  });
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const lib = await library(request);
+  const connector = createLibraryItem({
+    kind: "connector",
+    title: "My segue",
+    content: "Prefer 'but' over formal transitions.",
+  });
+  const avoid = createLibraryItem({
+    kind: "connector",
+    title: "Formal connector",
+    content: "however",
+    preference: "avoid",
+  });
+  await request.put("/api/library", {
+    data: { ...lib, items: [connector, avoid] },
+  });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await page.setViewportSize({ width: 700, height: 900 });
+  await open(page);
+  await focus(page, "Segue");
+  const contextual = page.getByTestId("your-writing");
+  await expect(contextual).toBeVisible();
+  await contextual.locator("summary").click();
+  await expect(contextual).toContainText("CONNECTOR PREFERENCE");
+  await expect(contextual).toContainText(connector.content);
+  await expect(contextual).toContainText("CONNECTOR PREFERENCE · AVOID");
+  await expect(contextual).not.toContainText(doc.pieceMemory.nextMove);
+  await expect(contextual).not.toContainText("An unrelated source quotation.");
+  expect(calls).toHaveLength(0);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(701);
+});
 
 test("selected snippet quick-save, contextual surfacing, tags and metadata persist without insertion", async ({
   page,

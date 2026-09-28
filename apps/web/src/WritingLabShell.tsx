@@ -1,6 +1,11 @@
 import { NextSteps, ContextHelp, EmptyInspectorIntro } from "./FirstMove";
 import type { Wayfinding } from "./wayfinding";
-import { QuickSave, ContextLibrary, StyleContext } from "./LibraryTools";
+import {
+  QuickSave,
+  ContextLibrary,
+  StyleContext,
+  ContextualWriting,
+} from "./LibraryTools";
 import { StructureTool } from "./StructureTool";
 import { ModelControls, modelLabel } from "./ModelControls";
 import { WordLensControls, CandidatePreview } from "./WordLens";
@@ -161,6 +166,22 @@ function FollowUpThread({ w, run }: { w: Workspace; run: WorkbenchRun }) {
         <p className="small">
           <b>Original question:</b> {run.instruction}
         </p>
+      )}
+      {!!run.guidance.length && (
+        <div className="follow-up-guidance" data-testid="run-guidance-snapshot">
+          <b>Guidance used for this run</b>
+          {run.guidance.map((item, index) => (
+            <p key={index}>
+              <small>
+                {item.source === "library"
+                  ? `PERSONAL LIBRARY · ${item.kind?.replaceAll("_", " ").toUpperCase() ?? "ITEM"}`
+                  : item.source.replaceAll("_", " ").toUpperCase()}
+                {item.preference === "avoid" ? " · AVOID" : ""}
+              </small>{" "}
+              · {item.text}
+            </p>
+          ))}
+        </div>
       )}
       {resolution.status === "changed" && (
         <div className="follow-up-age" role="status">
@@ -894,6 +915,11 @@ export function WritingLabShell({
               )}
             </div>
           </div>
+          <ContextualWriting
+            key={`${w.doc.id}:${target.sectionId}:${target.scope}:${target.start}:${target.end}:${target.sectionSnapshot}`}
+            w={w}
+            navigation={navigation}
+          />
           {w.isDeliveryTarget && (
             <div
               className="segmented lens-view"

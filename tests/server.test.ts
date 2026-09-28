@@ -128,6 +128,14 @@ describe("saved Lab follow-up thread", () => {
       answer: "",
       controls: {},
       model: { providerId: "mock", modelId: "plain" },
+      guidance: [
+        {
+          source: "section_style",
+          itemId: "guide-one",
+          title: "Original Hook rule",
+          text: "Keep my exact first line.",
+        },
+      ],
       response: {
         provider: "mock",
         diagnosis: "An older note.",
@@ -179,6 +187,12 @@ describe("saved Lab follow-up thread", () => {
         (turn: any) => turn.text,
       ),
     ).toEqual(run.conversation.map((turn) => turn.text));
+    expect(duplicate.sections[0].workbench.runs[0].guidance).toMatchObject(
+      run.guidance,
+    );
+    expect(archived.sections[0].workbench.runs[0].guidance).toMatchObject(
+      run.guidance,
+    );
     expect(duplicate.sections[0].workbench.runs[0].id).not.toBe(run.id);
     expect(duplicate.sections[0].workbench.runs[0].conversation[0].id).not.toBe(
       "turn-w",
@@ -335,6 +349,7 @@ describe("saved Lab follow-up thread", () => {
     doc.sections[0].workbench = { ...emptyWorkbench(), runs: [run] };
     const older = documentSchema.parse(doc);
     expect(older.sections[0].workbench?.runs[0].conversation).toEqual([]);
+    expect(older.sections[0].workbench?.runs[0].guidance).toEqual([]);
     const turns = [
       {
         id: "w",

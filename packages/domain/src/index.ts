@@ -1,4 +1,5 @@
 import {
+  libraryKinds,
   personalLibrarySchema,
   resolvedWritingStyleSchema,
 } from "./personal-library";
@@ -118,6 +119,16 @@ export const editTargetSchema = z.object({
 });
 export type EditTarget = z.infer<typeof editTargetSchema>;
 export type SelectionTarget = EditTarget;
+export const savedGuidanceSchema = z.object({
+  source: z.enum(["style_dna", "section_style", "library", "connector"]),
+  itemId: z.string().optional(),
+  kind: z.enum(libraryKinds).optional(),
+  preference: z.enum(["like", "avoid", "reference"]).optional(),
+  key: z.string().optional(),
+  title: z.string().max(240),
+  text: z.string().trim().min(1).max(3000),
+});
+export type SavedGuidance = z.infer<typeof savedGuidanceSchema>;
 export const labConversationTurnSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["writer", "assistant"]),
@@ -142,6 +153,7 @@ export const workbenchRunSchema = z.object({
   model: modelRefSchema.nullable(),
   chainModel: modelRefSchema.optional(),
   conversation: z.array(labConversationTurnSchema).max(24).default([]),
+  guidance: z.array(savedGuidanceSchema).max(3).default([]),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -490,6 +502,7 @@ export const aiRequestSchema = z.object({
   variantCount: z.number().int().min(1).max(5).default(2),
   modelOverride: modelRefSchema.nullable().optional(),
   lens: lensOptionsSchema.optional(),
+  explicitGuidance: z.array(savedGuidanceSchema).max(3).optional(),
   followUp: z
     .object({
       runId: z.string().min(1),

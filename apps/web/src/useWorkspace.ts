@@ -27,6 +27,7 @@ import {
   type Settings,
   type EditTarget,
   type WorkbenchRun,
+  type SavedGuidance,
   type AIResponse,
   type WritingAction,
   type Variant,
@@ -101,6 +102,7 @@ import {
 } from "./workspace-helpers";
 import {
   createLibraryItem,
+  contextualGuidance,
   libraryDelta,
   makeHumanRun,
   type SaveLibraryItemInput,
@@ -108,6 +110,7 @@ import {
 } from "./library-helpers";
 import {
   getTargetDraft,
+  targetDraftKey,
   patchTargetDraft,
   restoreFocusTarget,
   resolveHistoricalTarget,
@@ -204,6 +207,15 @@ function modelForFollowUp(
   );
 }
 
+function guidanceKey(target: EditTarget): string {
+  return JSON.stringify([
+    target.documentId,
+    target.sectionId,
+    targetDraftKey(target),
+    target.sectionSnapshot,
+  ]);
+}
+
 export function useWorkspace() {
   const initial = useRef(newDocument());
   const [doc, setDoc] = useState(initial.current);
@@ -212,8 +224,16 @@ export function useWorkspace() {
     sourceRunId: string;
     target: EditTarget;
   } | null>(null);
+  const [guidanceDraft, setGuidanceDraft] = useState<{
+    documentId: string;
+    key: string;
+    items: SavedGuidance[];
+  } | null>(null);
   const current = useRef(doc);
-  useEffect(() => setStagedPassage(null), [doc.id]);
+  useEffect(() => {
+    setStagedPassage(null);
+    setGuidanceDraft(null);
+  }, [doc.id]);
   const persisted = useRef(doc);
   // Preserve section metadata when rich-editor undo resurrects a removed/reordered node.
   const sectionMetadata = useRef(new Map(doc.sections.map((s) => [s.id, s])));
@@ -1901,6 +1921,56 @@ export function useWorkspace() {
     register: settings.styleDNA.register,
   };
   const relevantItems = relevantLibraryItems(library.items, libraryContext);
+  const contextualItems = contextualGuidance({
+    doc,
+    target,
+    action,
+    styleDNA: settings.styleDNA,
+    library,
+  });
+  const selectedGuidance =
+    target &&
+    guidanceDraft?.documentId === doc.id &&
+    guidanceDraft.key === guidanceKey(target)
+      ? guidanceDraft.items
+      : [];
+  const attachGuidance = (item: SavedGuidance) => {
+    if (!target) return;
+    const key = guidanceKey(target);
+    setGuidanceDraft((previous) => {
+      const currentItems =
+        previous?.documentId === doc.id && previous.key === key
+          ? previous.items
+          : [];
+      if (
+        currentItems.some(
+          (entry) =>
+            entry.source === item.source &&
+            entry.itemId === item.itemId &&
+            entry.key === item.key,
+        ) ||
+        currentItems.length >= 3
+      )
+        return previous;
+      return { documentId: doc.id, key, items: [...currentItems, item] };
+    });
+  };
+  const removeGuidance = (item: SavedGuidance) =>
+    setGuidanceDraft((previous) =>
+      previous
+        ? {
+            ...previous,
+            items: previous.items.filter(
+              (entry) =>
+                !(
+                  entry.source === item.source &&
+                  entry.itemId === item.itemId &&
+                  entry.key === item.key
+                ),
+            ),
+          }
+        : null,
+    );
   const resolvedStyle = resolveWritingStyle({
     global: settings.styleDNA,
     library,
@@ -2089,8 +2159,11 @@ export function useWorkspace() {
         ? (wb.questionAnswers[activeRun.id] ??
           (activeRun.stage ? "" : draft.answer))
         : draft.answer;
+    const guidanceForRequest =
+      target && guidanceKey(target) === guidanceKey(t) ? selectedGuidance : [];
     const capture: RunCapture = {
       stage,
+      guidance: guidanceForRequest,
       ...(chosen === "words"
         ? {
             lens: {
@@ -2162,6 +2235,9 @@ export function useWorkspace() {
         },
         ...(structureInput ? { structure: structureInput } : {}),
         editTarget: t,
+        ...(capture.guidance?.length
+          ? { explicitGuidance: capture.guidance }
+          : {}),
         action: chosen,
         stage,
         instruction: capture.instruction,
@@ -2241,6 +2317,7 @@ export function useWorkspace() {
           ),
         );
       }
+      if (guidanceForRequest.length) setGuidanceDraft(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -3072,6 +3149,10 @@ export function useWorkspace() {
     importLibrary,
     markLibraryUsed,
     relevantItems,
+    contextualItems,
+    selectedGuidance,
+    attachGuidance,
+    removeGuidance,
     resolvedStyle,
     previewLibraryItem,
     structure,

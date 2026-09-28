@@ -347,6 +347,7 @@ export function createApp({
         ),
       },
       editTarget: saved.target,
+      ...(saved.guidance.length ? { explicitGuidance: saved.guidance } : {}),
       action: saved.action,
       stage: options ? "propose" : "diagnose",
       instruction: options ? question : saved.instruction,

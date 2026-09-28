@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Workspace } from "./useWorkspace";
+import type { Wayfinding } from "./wayfinding";
 import type { LibraryItem } from "./domain";
 import { Button, Field } from "./ui";
 export function QuickSave({
@@ -100,6 +101,113 @@ export function QuickSave({
     </details>
   );
 }
+export function ContextualWriting({
+  w,
+  navigation,
+}: {
+  w: Workspace;
+  navigation: Wayfinding;
+}) {
+  const [hidden, setHidden] = useState<string[]>([]);
+  const key = (item: (typeof w.contextualItems)[number]) =>
+    `${item.source}:${item.itemId ?? item.key}`;
+  const items = w.contextualItems.filter((item) => !hidden.includes(key(item)));
+  if (!items.length && !w.selectedGuidance.length) return null;
+  const sourceLabel = (item: (typeof items)[number]) =>
+    ({
+      style_dna: "STYLE DNA",
+      section_style: "SECTION STYLE",
+      library: `PERSONAL LIBRARY · ${item.kind?.replaceAll("_", " ").toUpperCase() ?? "ITEM"}`,
+      connector: `CONNECTOR PREFERENCE${item.preference === "avoid" ? " · AVOID" : ""}`,
+    })[item.source] +
+    (item.source === "library" && item.preference === "avoid"
+      ? " · AVOID"
+      : "");
+  return (
+    <details
+      className="contextual-writing"
+      data-testid="your-writing"
+      open={window.innerWidth > 1180}
+    >
+      <summary>
+        Your writing · {items.length} relevant saved{" "}
+        {items.length === 1 ? "item" : "items"}
+      </summary>
+      <p className="small muted">
+        Saved material that may apply here. Use as guidance captures your choice
+        for the next run; nothing inserts prose.
+      </p>
+      {items.map((item) => (
+        <article key={key(item)} data-guidance-id={item.itemId ?? item.key}>
+          <span className="eyebrow">{sourceLabel(item)}</span>
+          <b>{item.title}</b>
+          <p>
+            {item.text.length > 200
+              ? item.text.slice(0, 200).trimEnd() + "…"
+              : item.text}
+          </p>
+          <div className="row wrap">
+            <Button
+              onClick={() =>
+                item.source === "style_dna"
+                  ? w.setPanel("style")
+                  : item.source === "section_style"
+                    ? w.setPanel("guides")
+                    : navigation.findLibrary(
+                        item.title,
+                        w.library.items.find(
+                          (source) => source.id === item.itemId,
+                        )?.kind ?? "all",
+                      )
+              }
+            >
+              View source
+            </Button>
+            <Button onClick={() => void w.copy(item.text)}>Copy</Button>
+            <Button
+              disabled={
+                w.selectedGuidance.length >= 3 ||
+                w.selectedGuidance.some(
+                  (selected) => key(selected) === key(item),
+                )
+              }
+              onClick={() => w.attachGuidance(item)}
+            >
+              {w.activeRun ? "Use for next run" : "Use as guidance"}
+            </Button>
+            <Button
+              className="text-button"
+              onClick={() => setHidden((old) => [...old, key(item)])}
+            >
+              Not relevant
+            </Button>
+          </div>
+        </article>
+      ))}
+      {!!w.selectedGuidance.length && (
+        <div className="run-guidance" data-testid="run-guidance">
+          <b>
+            {w.activeRun
+              ? "Guidance for next new run · not this saved conversation"
+              : "Guidance for this run"}
+          </b>
+          {w.selectedGuidance.map((item) => (
+            <div className="row wrap" key={key(item)}>
+              <span>{item.text}</span>
+              <Button
+                aria-label="Remove guidance"
+                onClick={() => w.removeGuidance(item)}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
 export function ContextLibrary({ w }: { w: Workspace }) {
   const section = w.doc.sections.find((s) => s.id === w.target?.sectionId);
   return (

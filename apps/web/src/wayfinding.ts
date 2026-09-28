@@ -394,6 +394,7 @@ export function useWayfinding(w: Workspace) {
     openCommands,
     closeCommands: () => setPaletteOpen(false),
     runCommand,
+    findLibrary,
     toolNavigation,
     libraryNavigation,
   };

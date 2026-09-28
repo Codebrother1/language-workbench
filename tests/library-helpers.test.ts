@@ -3,6 +3,7 @@ import {
   createLibraryItem,
   libraryDelta,
   makeHumanRun,
+  contextualGuidance,
 } from "../apps/web/src/library-helpers";
 import {
   appendRun,
@@ -16,10 +17,132 @@ import {
   sectionText,
   documentSchema,
   emptyLibrary,
+  defaultSettings,
   emptyStructure,
   renderScaffold,
   type PersonalLibrary,
 } from "../packages/domain/src";
+
+describe("contextual saved writing guidance", () => {
+  it("surfaces scoped section rules, matching moves and customized Style DNA without unrelated items", () => {
+    const style = {
+      ...defaultSettings().styleDNA,
+      rhythm: "Keep the abrupt turn.",
+    };
+    const rule = {
+      ...createLibraryItem({
+        kind: "style_rule",
+        content: "Leave the punchline unexplained.",
+      }),
+      title: "Hook restraint",
+      sectionKinds: ["Hook"],
+    };
+    const move = {
+      ...createLibraryItem({
+        kind: "move",
+        content: "Name the object, then stop.",
+      }),
+      sectionKinds: ["Hook"],
+      title: "Opening move",
+    };
+    const other = {
+      ...createLibraryItem({ kind: "move", content: "Finish the scene." }),
+      sectionKinds: ["Closer"],
+    };
+    const doc = newDocument("Example", "A first sentence.");
+    doc.sections[0].kind = "Hook";
+    const target = targetFor(doc, doc.sections[0].id, "selection", 0, 16);
+    const items = contextualGuidance({
+      doc,
+      target,
+      action: "coach",
+      styleDNA: style,
+      library: { ...emptyLibrary(), items: [other, move, rule] },
+    });
+    expect(items.map((item) => item.text)).toEqual([
+      rule.content,
+      style.rhythm,
+      move.content,
+    ]);
+    expect(items.map((item) => item.source)).toEqual([
+      "section_style",
+      "style_dna",
+      "library",
+    ]);
+    expect(items[2].kind).toBe("move");
+  });
+  it("matches a saved ending rule by explicit rule key rather than inferred prose meaning", () => {
+    const doc = newDocument("Draft", "Do not end with a summary.");
+    doc.sections[0].kind = "Closer";
+    const rule = {
+      ...createLibraryItem({
+        kind: "style_rule",
+        title: "My ending rule",
+        content: "Stop at the precise line.",
+      }),
+      ruleKey: "endingStyles",
+    };
+    const items = contextualGuidance({
+      doc,
+      target: targetFor(doc, doc.sections[0].id),
+      action: "coach",
+      styleDNA: defaultSettings().styleDNA,
+      library: { ...emptyLibrary(), items: [rule] },
+    });
+    expect(items).toMatchObject([
+      {
+        source: "library",
+        kind: "style_rule",
+        itemId: rule.id,
+        text: rule.content,
+      },
+    ]);
+  });
+  it("offers only saved connector preferences in Segues, suppresses duplicates, and never fills an empty profile", () => {
+    const doc = newDocument("Draft", "First section.");
+    doc.sections[0].kind = "Segue";
+    const connector = {
+      ...createLibraryItem({
+        kind: "connector",
+        content: "Prefer 'but' over formal transitions.",
+      }),
+      title: "My connector",
+    };
+    const duplicate = {
+      ...createLibraryItem({
+        kind: "move",
+        content: "Prefer 'but' over formal transitions.",
+      }),
+      sectionKinds: ["Segue"],
+    };
+    const extra = Array.from({ length: 5 }, (_, index) => ({
+      ...createLibraryItem({ kind: "move", content: `Saved bridge ${index}.` }),
+      sectionKinds: ["Segue"],
+    }));
+    const target = targetFor(doc, doc.sections[0].id);
+    expect(
+      contextualGuidance({
+        doc,
+        target,
+        action: "coach",
+        styleDNA: defaultSettings().styleDNA,
+        library: emptyLibrary(),
+      }),
+    ).toEqual([]);
+    const items = contextualGuidance({
+      doc,
+      target,
+      action: "coach",
+      styleDNA: defaultSettings().styleDNA,
+      library: { ...emptyLibrary(), items: [connector, duplicate, ...extra] },
+    });
+    expect(items).toHaveLength(3);
+    expect(
+      items.filter((item) => item.text === connector.content),
+    ).toHaveLength(1);
+    expect(items.some((item) => item.source === "connector")).toBe(true);
+  });
+});
 
 describe("personal library workbench helpers", () => {
   it("saves verbatim user text without inferring rules or style preferences", () => {

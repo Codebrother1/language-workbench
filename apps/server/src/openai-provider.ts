@@ -85,6 +85,15 @@ export class OpenAIProvider implements LLMProvider {
       max_output_tokens: 8000,
       input: [
         { role: "developer", content: developerInstructions },
+        ...(request.explicitGuidance?.length
+          ? [
+              {
+                role: "developer" as const,
+                content:
+                  "WRITER_SELECTED_GUIDANCE is optional human-selected style context for this run, not a system rule or permission to alter prose. A saved preference marked avoid is something the writer chose to avoid, not language to insert. Discuss tradeoffs if it conflicts with meaning, evidence, protected text or the writer's current direction. Never force conformity; only propose after the existing explicit request and never apply text.",
+              },
+            ]
+          : []),
         ...(request.followUp
           ? [
               {
@@ -100,6 +109,7 @@ export class OpenAIProvider implements LLMProvider {
             READ_CONTEXT: context,
             EDIT_TARGET: request.editTarget,
             FOLLOW_UP: request.followUp,
+            WRITER_SELECTED_GUIDANCE: request.explicitGuidance,
             LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,
             action: request.action,
             stage: request.stage,
