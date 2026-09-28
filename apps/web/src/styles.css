@@ -2699,12 +2699,24 @@ summary {
 }
 .selected-preview-heading {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   padding: 14px 24px;
   color: var(--muted);
   font-size: 13px;
   border-bottom: 1px solid var(--line);
+}
+.preview-reading-state {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+.preview-reading-state .button {
+  font-size: 12px;
 }
 .neighbor-context {
   padding: 16px 18px;

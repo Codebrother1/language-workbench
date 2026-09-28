@@ -165,6 +165,11 @@ test("reload and document switching orient Workbench and Preview to their select
   await preview.evaluate((pane) => {
     pane.scrollTop = 0;
   });
+  await page.route("**/api/documents", async (route) => {
+    if (route.request().method() === "GET")
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    await route.continue();
+  });
   await page.reload();
   await expect(page.getByLabel("Switch document")).toHaveValue(doc.id);
   await expect(card).toHaveClass(/active/);
@@ -210,6 +215,34 @@ test("reload and document switching orient Workbench and Preview to their select
       }, ".dock-preview .writing"),
     )
     .toBe(true);
+  const fresh = await page.context().newPage();
+  await fresh.goto("/");
+  await expect(fresh.getByLabel("Switch document")).toHaveValue(doc.id);
+  await expect
+    .poll(() =>
+      fresh.locator(`[data-section-id="${id}"]`).evaluate((node) => {
+        const a = node.getBoundingClientRect(),
+          b = node.closest(".structure")!.getBoundingClientRect();
+        return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+      }),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      fresh
+        .locator(
+          `[data-preview-section-id="${id}"], .dock-preview .writing-editor > section[id="${id}"]`,
+        )
+        .first()
+        .evaluate((node) => {
+          const a = node.getBoundingClientRect(),
+            b = node.closest(".writing")!.getBoundingClientRect();
+          return a.bottom > b.top + 40 && a.top < b.bottom - 40;
+        }),
+    )
+    .toBe(true);
+  await expect(fresh.getByTestId("writing-editor")).not.toBeFocused();
+  await fresh.close();
 });
 
 test("stacked Saved takes returns to the originating card without losing its place", async ({
@@ -420,6 +453,7 @@ test("Preview focus temporarily expands and restores the exact saved pane arrang
   await expect(workbench).toBeVisible();
   const before = (await preview.boundingBox())!.width;
   await page.getByRole("button", { name: "Focus preview" }).click();
+  await expect(page.getByTestId("preview-reading-state")).toHaveCount(0);
   await expect(workbench).toBeHidden();
   await expect(inspector).toBeHidden();
   await expect(
@@ -501,6 +535,149 @@ test("narrow Focus Preview restore keeps the selected section readable", async (
   );
   await expect(section).toBeInViewport();
   await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+});
+
+test("parked-card editing visibly marks Preview as reading and returning to draft restores direct editing", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await page.goto("/");
+  const parked = page.locator('.structure-item[data-placement="parked"]');
+  await parked.locator(".section-focus").click();
+  await parked.getByTestId("card-writing").getByRole("button").click();
+  await page.keyboard.insertText("Aside: ");
+  await expect(page.locator(".dock-preview .assembled-readout")).toBeVisible();
+  await expect(page.getByTestId("preview-reading-state")).toContainText(
+    "Reading preview",
+  );
+  await expect(page.getByTestId("preview-reading-state")).toContainText(
+    "parked",
+  );
+  await page.getByRole("button", { name: "Edit draft in preview" }).click();
+  await expect(page.locator(".dock-preview .writing-editor")).toBeVisible();
+  await expect(page.getByTestId("preview-reading-state")).toHaveCount(0);
+  await parked.locator(".section-focus").click();
+  await parked.getByTestId("card-writing").getByRole("button").click();
+  await expect(page.getByTestId("preview-reading-state")).toBeVisible();
+  const draft = page.locator(`[data-section-id="${doc.sections[7].id}"]`);
+  await draft.locator(".section-focus").click();
+  await expect(page.locator(".dock-preview .writing-editor")).toBeVisible();
+  await expect(page.getByTestId("preview-reading-state")).toHaveCount(0);
+  await page
+    .locator(
+      `.dock-preview .writing-editor > section[id="${doc.sections[7].id}"]`,
+    )
+    .click();
+  await expect(page.getByTestId("writing-editor")).toBeFocused();
+  await page.keyboard.insertText("! ");
+  await expect(page.getByTestId("writing-editor")).toContainText("! ");
+  await expect(parked).toContainText("Aside:");
+  await expect(parked).toContainText("A useful detour belongs");
+});
+
+test("draft card reading preview explains its mode and offers direct edit", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await page.goto("/");
+  const card = page.locator(`[data-section-id="${doc.sections[7].id}"]`);
+  await card.locator(".section-focus").click();
+  await card.getByTestId("card-writing").getByRole("button").click();
+  await expect(page.getByTestId("preview-reading-state")).toContainText(
+    "Reading preview · editing this section in Workbench",
+  );
+  await expect(page.locator(".dock-preview .assembled-readout")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Edit this section in preview" })
+    .click();
+  await expect(page.locator(".dock-preview .writing-editor")).toBeVisible();
+  await expect(page.getByTestId("writing-editor")).toBeFocused();
+  await expect(page.getByTestId("preview-reading-state")).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Save take" })).toBeVisible();
+});
+
+test("Preview section changes reveal the matching Workbench card without locking its scroll", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const pane = page.locator(".dock-workbench .structure");
+  await pane.evaluate((node) => {
+    node.scrollTop = 0;
+  });
+  const preview = page.locator(".dock-preview .writing-editor");
+  const seventh = doc.sections[6].id,
+    ninth = doc.sections[8].id;
+  await preview.locator(`section[id="${seventh}"]`).click();
+  await expect(page.locator(`[data-section-id="${seventh}"]`)).toHaveClass(
+    /active/,
+  );
+  await expect
+    .poll(() =>
+      page.locator(`[data-section-id="${seventh}"]`).evaluate((node) => {
+        const a = node.getBoundingClientRect(),
+          b = node.closest(".structure")!.getBoundingClientRect();
+        return a.bottom > b.top + 50 && a.top < b.bottom - 50;
+      }),
+    )
+    .toBe(true);
+  await expect
+    .poll(async () => {
+      const first = await pane.evaluate((node) => node.scrollTop);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return Math.abs((await pane.evaluate((node) => node.scrollTop)) - first);
+    })
+    .toBeLessThan(1);
+  const firstScroll = await pane.evaluate((node) => node.scrollTop);
+  await page.keyboard.insertText("! ");
+  await expect
+    .poll(() => pane.evaluate((node) => node.scrollTop))
+    .toBeCloseTo(firstScroll, 0);
+  await expect(page.getByTestId("writing-editor")).toBeFocused();
+  await preview.locator(`section[id="${ninth}"]`).click();
+  await expect(page.locator(`[data-section-id="${ninth}"]`)).toHaveClass(
+    /active/,
+  );
+  await expect
+    .poll(() =>
+      page.locator(`[data-section-id="${ninth}"]`).evaluate((node) => {
+        const a = node.getBoundingClientRect(),
+          b = node.closest(".structure")!.getBoundingClientRect();
+        return a.bottom > b.top + 50 && a.top < b.bottom - 50;
+      }),
+    )
+    .toBe(true);
+  await expect(
+    page
+      .locator(`[data-section-id="${ninth}"]`)
+      .getByRole("button", { name: "Save take" }),
+  ).toBeVisible();
+});
+
+test("stacked Preview section changes retain the reading position without pane locking", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/");
+  const id = doc.sections[7].id;
+  const preview = page.locator(
+    `.dock-preview .writing-editor > section[id="${id}"]`,
+  );
+  await preview.click();
+  await expect(page.locator(`[data-section-id="${id}"]`)).toHaveClass(/active/);
+  await expect(preview).toBeInViewport();
+  const pagePosition = await page.evaluate(() => window.scrollY);
+  await page.keyboard.insertText("! ");
+  await expect(preview).toBeInViewport();
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeCloseTo(pagePosition, 0);
 });
 
 test("parked navigation, editing, reinclusion and narrow writing keep the single editor", async ({

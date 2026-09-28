@@ -1378,6 +1378,11 @@ export default function App() {
     y: number;
   } | null>(null);
   const [editorCard, setEditorCard] = useState<string | null>(null);
+  const previewSelectionIntent = useRef(false);
+  const previewSectionContext = useRef<{
+    documentId: string;
+    sectionId: string | null;
+  }>({ documentId: w.doc.id, sectionId: w.selectedSectionId });
   const [confirmation, setConfirmation] = useState<{
     kind: "document" | "section" | "archive";
     id?: string;
@@ -1452,7 +1457,10 @@ export default function App() {
     previewScroll: number;
     inspectorVisible: boolean;
   } | null>(null);
-  useEffect(() => setTakeReturn(null), [w.doc.id]);
+  useEffect(() => {
+    setTakeReturn(null);
+    setEditorCard(null);
+  }, [w.doc.id]);
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
   const text = documentText(w.doc);
@@ -1497,23 +1505,68 @@ export default function App() {
     if (selected?.placement === "draft") lastDraftId.current = selected.id;
   }, [w.doc.sections, w.selectedSectionId]);
   const orientationToken = useRef(0);
-  useEffect(() => {
+  const orientedPanes = useRef({
+    documentId: "",
+    workbench: false,
+    preview: false,
+  });
+  useLayoutEffect(() => {
     if (!w.ready) return;
-    const id = w.doc.sections.some(
-      (section) => section.id === w.doc.selectedSectionId,
+    if (orientedPanes.current.documentId !== w.doc.id)
+      orientedPanes.current = {
+        documentId: w.doc.id,
+        workbench: false,
+        preview: false,
+      };
+    const id =
+      w.selectedSectionId &&
+      w.doc.sections.some((section) => section.id === w.selectedSectionId)
+        ? w.selectedSectionId
+        : w.doc.selectedSectionId;
+    if (!id || !w.doc.sections.some((section) => section.id === id)) return;
+    if (
+      (!workbenchShown || orientedPanes.current.workbench) &&
+      (!previewShown || orientedPanes.current.preview)
     )
-      ? w.doc.selectedSectionId
-      : w.selectedSectionId;
-    if (!id) return;
+      return;
     const token = ++orientationToken.current;
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        if (token !== orientationToken.current) return;
-        scrollWorkbenchToSection(id, false, true);
-        scrollPreviewToSection(id, false, window.innerWidth > 900);
-      }),
-    );
-  }, [w.ready, w.doc.id]);
+    let frame = 0,
+      tries = 0;
+    const orient = () => {
+      if (token !== orientationToken.current) return;
+      const current = orientedPanes.current;
+      if (current.documentId !== w.doc.id) return;
+      if (workbenchShown && !current.workbench)
+        current.workbench = scrollWorkbenchToSection(id, false, true);
+      if (previewShown && !current.preview) {
+        const visible = document.querySelector<HTMLElement>(
+          `.dock-preview [data-preview-section-id="${CSS.escape(id)}"], .dock-preview .writing-editor > section[id="${CSS.escape(id)}"]`,
+        );
+        if (visible) {
+          scrollPreviewToSection(id, false, window.innerWidth > 900);
+          current.preview = true;
+        }
+      }
+      if (
+        ((workbenchShown && !current.workbench) ||
+          (previewShown && !current.preview)) &&
+        tries++ < 6
+      )
+        frame = requestAnimationFrame(orient);
+    };
+    frame = requestAnimationFrame(orient);
+    return () => {
+      ++orientationToken.current;
+      cancelAnimationFrame(frame);
+    };
+  }, [
+    w.ready,
+    w.doc.id,
+    w.selectedSectionId,
+    w.doc.selectedSectionId,
+    workbenchShown,
+    previewShown,
+  ]);
   const restorePanes = () => {
     const previous = focusContext.current;
     setPreviewFocused(false);
@@ -1779,9 +1832,17 @@ export default function App() {
     w.layout.primaryView === "workbench" &&
     w.layout.density === "comfortable" &&
     editorCard &&
-    w.doc.sections.some((section) => section.id === w.selectedSectionId)
+    w.doc.sections.some((section) => section.id === editorCard) &&
+    w.doc.sections.some((section) => section.id === w.selectedSectionId) &&
+    (w.doc.sections.find((section) => section.id === editorCard)?.placement !==
+      "parked" ||
+      w.doc.sections.find((section) => section.id === w.selectedSectionId)
+        ?.placement === "parked")
       ? w.selectedSectionId
       : null;
+  const previewCard = w.doc.sections.find(
+    (section) => section.id === activeEditorCard,
+  );
   useLayoutEffect(() => {
     const dom = w.editor?.view.dom as HTMLElement | undefined;
     if (!dom) return;
@@ -1826,6 +1887,36 @@ export default function App() {
     w.doc.sections,
     activeEditorCard,
     parkedFocusId,
+    previewFocused,
+  ]);
+  useLayoutEffect(() => {
+    const previous = previewSectionContext.current;
+    previewSectionContext.current = {
+      documentId: w.doc.id,
+      sectionId: w.selectedSectionId,
+    };
+    if (previous.documentId !== w.doc.id) {
+      previewSelectionIntent.current = false;
+      return;
+    }
+    if (
+      !w.ready ||
+      !w.selectedSectionId ||
+      previous.sectionId === w.selectedSectionId ||
+      !previewSelectionIntent.current ||
+      activeEditorCard ||
+      previewFocused ||
+      !w.editor?.view.hasFocus() ||
+      !w.editor.view.dom.closest(".dock-preview")
+    )
+      return;
+    previewSelectionIntent.current = false;
+    scrollWorkbenchToSection(w.selectedSectionId);
+  }, [
+    w.ready,
+    w.doc.id,
+    w.selectedSectionId,
+    activeEditorCard,
     previewFocused,
   ]);
   useLayoutEffect(() => {
@@ -2300,6 +2391,21 @@ export default function App() {
         className={
           "workspace dock-workspace " + (paneCount === 3 ? "dock-three" : "")
         }
+        onPointerDownCapture={(event) => {
+          previewSelectionIntent.current = Boolean(
+            (event.target as HTMLElement).closest(
+              ".dock-preview .writing-editor",
+            ),
+          );
+        }}
+        onKeyDownCapture={(event) => {
+          if (
+            (event.target as HTMLElement).closest(
+              ".dock-preview .writing-editor",
+            )
+          )
+            previewSelectionIntent.current = true;
+        }}
       >
         <div
           className={
@@ -2391,6 +2497,43 @@ export default function App() {
                 ).find((s) => s.id === w.selectedSectionId)?.label ??
                   "Your document"}
               </b>
+              {activeEditorCard && !previewFocused && (
+                <div
+                  className="preview-reading-state"
+                  data-testid="preview-reading-state"
+                  role="status"
+                >
+                  <span>
+                    Reading preview · editing{" "}
+                    {previewCard?.placement === "parked"
+                      ? "a parked thought"
+                      : "this section"}{" "}
+                    in Workbench.
+                  </span>
+                  {previewCard?.placement === "parked" && !draft.length ? (
+                    <span>
+                      Include a thought or add a draft section to edit in
+                      Preview.
+                    </span>
+                  ) : (
+                    <Button
+                      onClick={() => {
+                        const next =
+                          previewCard?.placement === "parked"
+                            ? (draft.find(
+                                (section) => section.id === lastDraftId.current,
+                              )?.id ?? draft[0]?.id)
+                            : previewCard?.id;
+                        if (next) editInPreview(next);
+                      }}
+                    >
+                      {previewCard?.placement === "parked"
+                        ? "Edit draft in preview"
+                        : "Edit this section in preview"}
+                    </Button>
+                  )}
+                </div>
+              )}
               {parkedFocusId && (
                 <Button
                   onClick={() => {
