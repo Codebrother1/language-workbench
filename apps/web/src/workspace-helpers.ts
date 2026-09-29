@@ -104,6 +104,24 @@ export function makeRevisionCheckpoint(
     })),
   };
 }
+export function checkpointMatchesDraft(
+  checkpoint: RevisionCheckpoint,
+  doc: Document,
+  draftRevision: number,
+): boolean {
+  if (draftRevision === checkpoint.draftRevision) return true;
+  if (doc.sections.length !== checkpoint.sections.length) return false;
+  return doc.sections.every((section, index) => {
+    const saved = checkpoint.sections[index];
+    return (
+      section.id === saved.id &&
+      section.kind === saved.kind &&
+      section.label === saved.label &&
+      section.placement === saved.placement &&
+      JSON.stringify(section.content) === JSON.stringify(saved.content)
+    );
+  });
+}
 export type RevisionChange = {
   id: string;
   before?: RevisionCheckpoint["sections"][number];

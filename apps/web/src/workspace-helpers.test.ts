@@ -23,6 +23,7 @@ import {
   sectionReference,
   nextMoveSectionLabel,
   makeRevisionCheckpoint,
+  checkpointMatchesDraft,
   revisionChanges,
   revisionExcerpt,
   sectionMentions,
@@ -164,6 +165,72 @@ describe("writer-set revision checkpoint", () => {
     );
     return doc;
   };
+  it("treats a higher monotonic revision as clean when authored state exactly returns to the checkpoint", () => {
+    const doc = start();
+    const checkpoint = makeRevisionCheckpoint(doc, 56);
+    expect(checkpointMatchesDraft(checkpoint, doc, 56)).toBe(true);
+    expect(checkpointMatchesDraft(checkpoint, doc, 58)).toBe(true);
+    const original = structuredClone(doc.sections[0].content);
+    doc.sections[0].content = paragraphs("Opening remains,");
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    expect(checkpointMatchesDraft(checkpoint, doc, 57)).toBe(false);
+    doc.sections[0].content = original;
+    expect(checkpointMatchesDraft(checkpoint, doc, 58)).toBe(true);
+    doc.sections[0].content = paragraphs("A different opening.");
+    expect(checkpointMatchesDraft(checkpoint, doc, 59)).toBe(false);
+    doc.sections[0].content = structuredClone(original);
+    expect(checkpointMatchesDraft(checkpoint, doc, 60)).toBe(true);
+    doc.brief.audience = "Reader";
+    doc.pieceMemory.nextMove = "Next move";
+    doc.sections[0].variants.push({
+      id: "take",
+      label: "Saved",
+      text: "Opening remains.",
+      target: targetFor(doc, doc.sections[0].id),
+      origin: "human",
+      createdAt: doc.createdAt,
+    });
+    expect(checkpointMatchesDraft(checkpoint, doc, 60)).toBe(true);
+  });
+  it("checks each structural reversion without resetting draftRevision", () => {
+    const doc = start(),
+      checkpoint = makeRevisionCheckpoint(doc, 3);
+    const matches = () => checkpointMatchesDraft(checkpoint, doc, 11);
+    doc.sections[0].label = "Renamed";
+    expect(matches()).toBe(false);
+    doc.sections[0].label = checkpoint.sections[0].label;
+    doc.sections[1].kind = "Evidence";
+    expect(matches()).toBe(false);
+    doc.sections[1].kind = checkpoint.sections[1].kind;
+    doc.sections.unshift(doc.sections.pop()!);
+    expect(matches()).toBe(false);
+    doc.sections.push(doc.sections.shift()!);
+    doc.sections[1].placement = "parked";
+    expect(matches()).toBe(false);
+    doc.sections[1].placement = "draft";
+    doc.sections.push(newSection("Freeform", "Temporary."));
+    expect(matches()).toBe(false);
+    doc.sections.pop();
+    const removed = doc.sections.splice(1, 1)[0];
+    expect(matches()).toBe(false);
+    doc.sections.splice(1, 0, removed);
+    expect(matches()).toBe(true);
+    doc.sections[0].content = paragraphs("One difference remains.");
+    expect(matches()).toBe(false);
+  });
+  it("matches a mixed edit, move and rename only after every change is reverted", () => {
+    const doc = start(),
+      checkpoint = makeRevisionCheckpoint(doc, 4);
+    const original = structuredClone(doc.sections[0].content);
+    doc.sections[0].content = paragraphs("An edited opening.");
+    doc.sections.unshift(doc.sections.pop()!);
+    doc.sections[1].label = "Different label";
+    expect(checkpointMatchesDraft(checkpoint, doc, 9)).toBe(false);
+    doc.sections[1].label = checkpoint.sections[0].label;
+    doc.sections.push(doc.sections.shift()!);
+    doc.sections[0].content = original;
+    expect(checkpointMatchesDraft(checkpoint, doc, 10)).toBe(true);
+  });
   it("captures authored sections and reports only a pure move for a reorder", () => {
     const doc = start();
     const checkpoint = makeRevisionCheckpoint(doc, 0, "Before revision");
@@ -288,7 +355,9 @@ describe("writer-set revision checkpoint", () => {
         ),
       );
     const checkpoint = makeRevisionCheckpoint(doc, 0);
+    expect(checkpointMatchesDraft(checkpoint, doc, 12)).toBe(true);
     doc.sections[180].content = paragraphs("A new local thought.");
+    expect(checkpointMatchesDraft(checkpoint, doc, 13)).toBe(false);
     expect(revisionChanges(checkpoint, doc)).toHaveLength(1);
     expect(
       revisionExcerpt(

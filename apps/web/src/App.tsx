@@ -2335,7 +2335,7 @@ export default function App() {
             className="revision-entry"
             aria-label={
               w.doc.revisionCheckpoint
-                ? `Revision · ${w.draftRevision === w.doc.revisionCheckpoint.draftRevision ? "No changes since checkpoint" : "Changes since checkpoint"}`
+                ? `Revision · ${!w.revisionHasChanges ? "No changes since checkpoint" : "Changes since checkpoint"}`
                 : "Revision"
             }
             title={
@@ -2351,7 +2351,7 @@ export default function App() {
               <span className="revision-entry-status">
                 {" "}
                 ·{" "}
-                {w.draftRevision === w.doc.revisionCheckpoint.draftRevision
+                {!w.revisionHasChanges
                   ? "No changes since checkpoint"
                   : "Changes since checkpoint"}
               </span>

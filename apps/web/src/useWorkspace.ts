@@ -3,6 +3,7 @@ import { closeHistory } from "@tiptap/pm/history";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type SetStateAction,
@@ -91,6 +92,7 @@ import {
 import {
   getWorkbench,
   makeRevisionCheckpoint,
+  checkpointMatchesDraft,
   contextualBrief,
   chooseActiveDocument,
   updateWorkbench,
@@ -3147,13 +3149,21 @@ export function useWorkspace() {
       await copy(documentText(current.current));
     }
   };
+  const draftRevision =
+    doc.draftRevision +
+    Number(
+      persisted.current.id === doc.id &&
+        hasAuthoredDraftChange(persisted.current, doc),
+    );
+  const revisionHasChanges = useMemo(
+    () =>
+      !!doc.revisionCheckpoint &&
+      !checkpointMatchesDraft(doc.revisionCheckpoint, doc, draftRevision),
+    [doc.revisionCheckpoint, doc.sections, draftRevision],
+  );
   return {
-    draftRevision:
-      doc.draftRevision +
-      Number(
-        persisted.current.id === doc.id &&
-          hasAuthoredDraftChange(persisted.current, doc),
-      ),
+    draftRevision,
+    revisionHasChanges,
     layout,
     setPrimaryView,
     setDensity,

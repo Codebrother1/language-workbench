@@ -157,7 +157,7 @@ function RevisionPanel({
   const checkpoint = w.doc.revisionCheckpoint;
   const changes =
     reviewOpen && checkpoint ? revisionChanges(checkpoint, w.doc) : [];
-  const changed = checkpoint && w.draftRevision !== checkpoint.draftRevision;
+  const changed = w.revisionHasChanges;
   const setCheckpoint = () => {
     w.setRevisionCheckpoint(label);
     setReviewOpen(false);

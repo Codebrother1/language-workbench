@@ -1162,6 +1162,60 @@ test("a writer-set revision checkpoint reviews changed sections and replaces onl
   expect(calls).toHaveLength(0);
 });
 
+test("Revision returns to clean after undoing a suppressed punctuation edit", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Revision", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Revision" });
+  await review.getByRole("button", { name: "Set revision checkpoint" }).click();
+  await review.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  await select(page, "First sentence stays.");
+  await page.keyboard.insertText("First sentence stays,");
+  await expect(
+    page.getByRole("button", { name: /Revision · Changes since checkpoint/ }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /Revision · Changes since checkpoint/ })
+    .click();
+  await review.getByRole("button", { name: "Review changes" }).click();
+  await expect(review.getByTestId("revision-change")).toHaveCount(0);
+  await expect(review).toContainText(
+    "No section-level changes passed the low-noise comparison.",
+  );
+  await review.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(
+    page.getByRole("button", {
+      name: /Revision · No changes since checkpoint/,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /Revision · No changes since checkpoint/ })
+    .click();
+  await review.getByRole("button", { name: "Review changes" }).click();
+  await expect(review).toContainText(
+    "No section-level changes since this checkpoint.",
+  );
+  await review.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.draftRevision).toBeGreaterThan(
+    saved.revisionCheckpoint.draftRevision,
+  );
+  expect(documentText(saved)).toBe(documentText(doc));
+  expect(saved.pieceMemory).toEqual(doc.pieceMemory);
+  expect(calls).toHaveLength(0);
+});
+
 for (const width of [1440, 1024, 700])
   test(`checkpoint review distinguishes structural changes and removed history at ${width}px`, async ({
     page,
