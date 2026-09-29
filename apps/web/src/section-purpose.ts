@@ -12,6 +12,19 @@ export type SectionConcept = {
 };
 
 /** Teaching metadata only. Section kinds and editing behavior remain in the domain model. */
+const technicalConcept = (
+  name: WritingSection["kind"],
+  rhetoricalJob: string,
+  shortDescription: string,
+  whenToUse: string,
+  category: SectionConceptCategory = "Development",
+): SectionConcept => ({
+  name,
+  rhetoricalJob,
+  shortDescription,
+  whenToUse,
+  category,
+});
 export const sectionConcepts: Record<WritingSection["kind"], SectionConcept> = {
   Title: {
     name: "Title",
@@ -222,6 +235,151 @@ export const sectionConcepts: Record<WritingSection["kind"], SectionConcept> = {
     whenToUse: "The current installment ends but the larger thread continues.",
     category: "Ending",
   },
+  Goal: technicalConcept(
+    "Goal",
+    "Name the reader's aim",
+    "State what the reader hopes to accomplish.",
+    "The destination of the work matters.",
+  ),
+  Prerequisite: technicalConcept(
+    "Prerequisite",
+    "Surface an assumption",
+    "Name what must already be true.",
+    "A later action depends on earlier knowledge or setup.",
+  ),
+  Step: technicalConcept(
+    "Step",
+    "Describe an action",
+    "Show one action in a possible sequence.",
+    "The reader needs to do something.",
+  ),
+  "Expected Result": technicalConcept(
+    "Expected Result",
+    "Show what follows",
+    "Describe an observable result.",
+    "The reader needs to know what success might look like.",
+  ),
+  Verification: technicalConcept(
+    "Verification",
+    "Check the result",
+    "Show how the reader might tell whether it worked.",
+    "A claim or step needs a check.",
+  ),
+  Concept: technicalConcept(
+    "Concept",
+    "Name an idea",
+    "Introduce an idea the reader can use.",
+    "Understanding the idea changes later actions.",
+  ),
+  "Mental Model": technicalConcept(
+    "Mental Model",
+    "Offer a way to reason",
+    "Describe a representation that helps explain behavior.",
+    "A reader needs more than a command to reason about the system.",
+  ),
+  Counterexample: technicalConcept(
+    "Counterexample",
+    "Show a boundary",
+    "Use a contrasting case to test an explanation.",
+    "A successful example alone hides an important distinction.",
+  ),
+  Demo: technicalConcept(
+    "Demo",
+    "Make behavior observable",
+    "Let the reader or audience see the system respond.",
+    "Watching a result clarifies a claim.",
+  ),
+  Warning: technicalConcept(
+    "Warning",
+    "Mark a consequence",
+    "Name a risk without assuming the reader made a mistake.",
+    "A choice could have a significant cost.",
+  ),
+  Constraint: technicalConcept(
+    "Constraint",
+    "Name a limit",
+    "Explain the boundary a design or procedure works within.",
+    "A limitation changes the reader's options.",
+  ),
+  "Failure Mode": technicalConcept(
+    "Failure Mode",
+    "Explain how it can fail",
+    "Show the condition under which an approach breaks.",
+    "The happy path would conceal a consequential failure.",
+    "Turn",
+  ),
+  Troubleshooting: technicalConcept(
+    "Troubleshooting",
+    "Investigate a symptom",
+    "Link what the reader observes to evidence and possibilities.",
+    "The reader needs to diagnose before acting.",
+  ),
+  Recovery: technicalConcept(
+    "Recovery",
+    "Find a way forward",
+    "Describe a possible response after failure.",
+    "A diagnosis without a way forward would strand the reader.",
+  ),
+  Reference: technicalConcept(
+    "Reference",
+    "Support lookup",
+    "Present information the reader may need to find quickly.",
+    "The reader returns for details rather than reading linearly.",
+    "Flexible",
+  ),
+  "API Surface": technicalConcept(
+    "API Surface",
+    "Describe an interface",
+    "Name the conditions and boundaries of an interface.",
+    "The reader needs to locate precise interface details.",
+  ),
+  Decision: technicalConcept(
+    "Decision",
+    "Explain a choice",
+    "Identify what was chosen and the relevant reasons.",
+    "Readers need to understand why an option was taken.",
+    "Turn",
+  ),
+  Alternative: technicalConcept(
+    "Alternative",
+    "Show another route",
+    "Present a meaningful option without forcing a verdict.",
+    "A choice becomes clearer in comparison.",
+    "Turn",
+  ),
+  Tradeoff: technicalConcept(
+    "Tradeoff",
+    "Name what is exchanged",
+    "Show what a choice gains and gives up.",
+    "A one-sided account hides consequences.",
+    "Turn",
+  ),
+  Assumption: technicalConcept(
+    "Assumption",
+    "Expose a premise",
+    "Make a premise visible for readers to inspect.",
+    "The reasoning depends on something not yet established.",
+  ),
+  Why: technicalConcept(
+    "Why",
+    "Explain causality",
+    "Show a reason behind an action or behavior.",
+    "The reader needs an explanation, not just a command.",
+  ),
+  Recap: technicalConcept(
+    "Recap",
+    "Reconnect the ideas",
+    "Revisit useful distinctions without a compulsory lesson.",
+    "Readers need to orient after several moves.",
+    "Ending",
+  ),
+  "Next Step": technicalConcept(
+    "Next Step",
+    "Point beyond this part",
+    "Suggest a direction for later work without creating a task.",
+    "The reader has reached a useful stopping place.",
+    "Ending",
+  ),
   Freeform: {
     name: "Freeform",
     rhetoricalJob: "Get a thought down",

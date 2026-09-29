@@ -14,6 +14,8 @@ import {
 } from "@workbench/domain";
 import {
   developerInstructions,
+  technicalWritingInstructions,
+  technicalWritingContext,
   forbiddenPhrases,
   protectedSurrounding,
   validateProviderResponse,
@@ -90,6 +92,14 @@ export class OpenAIProvider implements LLMProvider {
       max_output_tokens: 8000,
       input: [
         { role: "developer", content: developerInstructions },
+        ...(request.action === "technical_writing"
+          ? [
+              {
+                role: "developer" as const,
+                content: technicalWritingInstructions,
+              },
+            ]
+          : []),
         ...(request.explicitGuidance?.length ||
         request.explicitBriefContext?.length
           ? [
@@ -116,6 +126,10 @@ export class OpenAIProvider implements LLMProvider {
             EDIT_TARGET: request.editTarget,
             WRITER_SELECTED_GUIDANCE: request.explicitGuidance,
             WRITER_SELECTED_BRIEF_CONTEXT: request.explicitBriefContext,
+            TECHNICAL_WRITING_CONTEXT:
+              request.action === "technical_writing"
+                ? technicalWritingContext(request)
+                : undefined,
             FOLLOW_UP: request.followUp,
             READ_CONTEXT: context,
             LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,

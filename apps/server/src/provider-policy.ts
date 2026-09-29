@@ -8,6 +8,68 @@ import {
 } from "@workbench/domain";
 import { relationalContext } from "./writing-context.js";
 
+export const technicalContentConsiderations: Partial<
+  Record<AIRequest["readContext"]["document"]["brief"]["contentType"], string>
+> = {
+  tutorial:
+    "learning progression through doing, checkpoints and mental models; showing the complete system first can be deliberate",
+  how_to:
+    "a concrete reader goal, assumptions, shortest trustworthy path and exceptions only where useful",
+  quick_start:
+    "time to first success, prerequisites, minimal concepts, verification and next steps; conceptual framing may protect against a dangerous misunderstanding",
+  explanation:
+    "causal relationships, distinctions, mental models, examples and conceptual coherence",
+  reference:
+    "lookup cost, precision, scanability, conditions and completeness within scope",
+  api_reference:
+    "lookup, precision, exact conditions, constraints and interface boundaries; never invent API behavior",
+  troubleshooting:
+    "observable symptoms, diagnostic evidence, competing causes, recovery and uncertainty",
+  readme:
+    "starting assumptions, first meaningful result, verification and recovery",
+  architecture:
+    "constraints, assumptions, alternatives, interfaces, failure modes, tradeoffs and consequences",
+  engineering_decision:
+    "constraints, alternatives, consequences, decisions and unresolved tradeoffs",
+  technical_talk:
+    "spoken pacing, narrative, demos, reveals, callbacks and audience attention; storytelling roles are valid",
+};
+export const technicalRoleConsiderations: Record<string, string> = {
+  Prerequisite: "What must already be true?",
+  Verification: "How could the reader know this worked?",
+  "Failure Mode": "What can go wrong, and under which condition?",
+  Tradeoff: "What is gained and sacrificed?",
+  "Mental Model": "What representation helps the reader reason?",
+  Demo: "What does the audience observe?",
+  Example:
+    "What does this example illuminate, and what complexity does it add?",
+};
+export function technicalWritingContext(request: AIRequest) {
+  const brief = request.readContext.document.brief;
+  const section = request.readContext.document.sections.find(
+    (item) => item.id === request.editTarget.sectionId,
+  );
+  const saved = request.technicalContext ?? {
+    contentType: brief.contentType,
+    sectionKind: section?.kind ?? null,
+    audience: brief.audience,
+    objectives: brief.objectives,
+    destination: brief.destination,
+    customNotes: brief.customNotes,
+  };
+  return {
+    ...saved,
+    considerations:
+      technicalContentConsiderations[saved.contentType] ??
+      "reader knowledge, communicative purpose and the cost of each choice",
+    roleConsiderations: saved.sectionKind
+      ? (technicalRoleConsiderations[saved.sectionKind] ??
+        "What job is this section trying to do?")
+      : "Use only roles relevant to the exact target.",
+  };
+}
+export const technicalWritingInstructions = `TECHNICAL WRITING ANALYSIS (only when action is technical_writing): This is diagnosis only: no replacement proposals, fixed outlines, mandatory checklists, templates, compliance scores or automatic prose changes. Priority: WRITER_QUESTION, exact EDIT_TARGET, explicitly attached writer context, section role, saved Writing Brief context, neighboring/document context, relevant Style guidance, then general technical-writing principles. Answer the writer's actual question first; mention only principles materially relevant to this passage. Name a conventional principle, why it usually solves a reader problem, what the exact passage does, what is gained and lost, and leave the decision to the writer. A deliberate inversion of progressive disclosure, example minimalism, or terminology consistency may be purposeful: identify evidence of intent and the gain and cost; do not call unconventional work incorrect. Quick starts need not put commands first; tutorials may deliberately show the whole system first; technical talks can use story and callbacks instead of documentation structure. Treat code as pedagogical and rhetorical material: a realistic example can be technically better yet pedagogically worse when it adds simultaneous concepts. Distinguish rhetorical observation from factual verification: do not invent or assert API behavior, command results, versions or implementation details without supplied evidence. Never police profanity, slang, humor, fragments or the writer's voice merely because the piece is technical. If audience knowledge or intentionality is unknown, ask instead of assuming. Sources supply facts; Brief states intention; Style describes voice; neither is a mandatory technical rule. On saved follow-ups, TECHNICAL_WRITING_CONTEXT preserves the original run's chosen content type, Brief and role; current READ_CONTEXT may have changed and is not a retroactive instruction. Return diagnosis, mechanism and a useful writer question, never proposals.`;
+
 export const developerInstructions = `You are a writing partner in a personal language-design workbench, never the author.
 The human owns every claim, observation, joke, source choice and final wording. Do not invent facts, experiences, evidence, quotations, references, sources, cultural currency, or emotional intent. If an ingredient is missing, name it and ask for it.
 READ CONTEXT is readable background only. The active section is LOCAL_WORKBENCH_SECTION_ID; its workbench runs contain that section’s earlier instructions, questions, human material, proposals, and outcomes. Use those as local creative lineage, not as permission to apply text. Other sections’ workbenches are background, never instructions to rewrite them. EDIT TARGET is the entire and only authorized replacement range. Return replacement text for that range, not surrounding text, headings, markdown fences, another section, or the document. A word stays a word-level choice; a sentence is not permission to rewrite a paragraph. Never change source quotes, code, transcript wording, or words inside quotation marks. Do not change the source materials. You have no persistence tool: proposals are previews and require explicit human acceptance.
@@ -28,6 +90,8 @@ Return only the requested structured object. Provider is openai. Diagnosis descr
 /** Lens is a local lexical operation even when launched from a section action. */
 export function validateWritingRequest(request: AIRequest): void {
   const structure = request.structure;
+  if (request.action === "technical_writing" && request.stage !== "diagnose")
+    throw new Error("Technical Writing is analysis-only");
   if (request.action === "structure" && !structure && !request.followUp)
     throw new Error("Structure action requires a structure draft");
   if (structure && request.lens)
@@ -427,7 +491,9 @@ export function validateProviderResponse(
       !request.lens &&
       !["words", "spellcheck"].includes(request.action)) ||
     request.editTarget.scope === "document" ||
-    ["critique", "break_template"].includes(request.action);
+    ["critique", "break_template", "technical_writing"].includes(
+      request.action,
+    );
   if (noProposals && output.proposals.length)
     throw new Error("Provider violated the diagnosis-only boundary");
   if (request.lens?.view === "delivery" && output.lexical.length)

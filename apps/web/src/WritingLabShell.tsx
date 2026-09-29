@@ -26,6 +26,9 @@ import {
   labFor,
   resolveModel,
   writingActions,
+  technicalContentTypes,
+  technicalSectionRoles,
+  contentTypeConfig,
   structuralMechanisms,
   sectionText,
   type WritingAction,
@@ -450,7 +453,18 @@ export function WritingLabShell({
         .toLowerCase()
         .replace(/^(?:current|selected|whole) /, "")
     : "passage";
-  const relevantActions = lab.actions.slice(0, 5);
+  const technicalContext =
+    technicalContentTypes.some((type) => type === w.doc.brief.contentType) ||
+    technicalSectionRoles.some((role) => role === section?.kind);
+  const relevantActions = technicalContext
+    ? (
+        [
+          "coach",
+          "technical_writing",
+          ...lab.actions.filter((item) => item !== "coach"),
+        ] as WritingAction[]
+      ).slice(0, 5)
+    : lab.actions.slice(0, 5);
   const responseSection = w.doc.sections.find(
     (s) => s.id === responseTarget?.sectionId,
   );
@@ -1003,7 +1017,37 @@ export function WritingLabShell({
               </div>
             </section>
           ) : deliveryActive || w.isLensTarget ? (
-            <WordLensControls w={w} />
+            <>
+              <WordLensControls w={w} />
+              {!deliveryActive && (
+                <details className="control-details technical-writing-target">
+                  <summary>Technical writing analysis</summary>
+                  <Field label="Your technical-writing question">
+                    <GrowingTextarea
+                      data-technical-writing-direction
+                      rows={2}
+                      value={w.instruction}
+                      onChange={(e) => w.setInstruction(e.target.value)}
+                      placeholder="What reader problem or tradeoff should this passage be examined for?"
+                    />
+                  </Field>
+                  <p
+                    className="small muted"
+                    data-testid="technical-analysis-route"
+                  >
+                    Technical Writing run with:{" "}
+                    {modelLabel(w.catalog, w.technicalWritingModel.model)} ·{" "}
+                    {w.technicalWritingModel.source.replaceAll("_", " ")}
+                  </p>
+                  <Button
+                    disabled={w.busy || !w.ready || !w.canCoachTarget}
+                    onClick={() => w.runTechnicalAnalysis()}
+                  >
+                    Run Technical Writing analysis
+                  </Button>
+                </details>
+              )}
+            </>
           ) : (
             <>
               <Field
@@ -1153,6 +1197,19 @@ export function WritingLabShell({
       )}
       {response && (
         <section className="response" ref={responseRef} aria-live="polite">
+          {w.activeRun?.action === "technical_writing" &&
+            w.activeRun.technicalContext && (
+              <p className="small muted" data-testid="technical-run-context">
+                Context at run ·{" "}
+                {
+                  contentTypeConfig[w.activeRun.technicalContext.contentType]
+                    .label
+                }
+                {w.activeRun.technicalContext.sectionKind
+                  ? ` · ${w.activeRun.technicalContext.sectionKind}`
+                  : ""}
+              </p>
+            )}
           {restoreLabRun?.runId === w.activeRun?.id && (
             <p className="small muted" data-testid="saved-run-context">
               Saved Lab result · {w.activeRun?.action} ·{" "}
@@ -1525,6 +1582,7 @@ export function WritingLabShell({
           )}
           {!isLexicalRun &&
             !w.activeRun?.structure &&
+            w.activeRun?.action !== "technical_writing" &&
             responseTarget?.scope !== "document" && (
               <>
                 <Field
@@ -1995,6 +2053,15 @@ export function WritingLabShell({
             : "Whole-piece critique"}{" "}
           <ArrowUpRight size={14} />
         </Button>
+        {technicalContext && (
+          <Button
+            className="full"
+            disabled={w.busy || !w.ready || !hasWriting}
+            onClick={() => w.ask("diagnose", "technical_writing")}
+          >
+            Run Technical Writing analysis · whole piece
+          </Button>
+        )}
         <details>
           <summary>Break a familiar template</summary>
           <p className="small muted">

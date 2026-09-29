@@ -312,6 +312,11 @@ export function createApp({
         409,
         "Ask about the current passage in a new run before requesting alternatives.",
       );
+    if (options && saved.action === "technical_writing")
+      throw new APIError(
+        409,
+        "Technical Writing is analysis-only; no options were generated.",
+      );
     if (options && (saved.action === "structure" || saved.lens))
       throw new APIError(
         409,
@@ -350,6 +355,9 @@ export function createApp({
       ...(saved.guidance.length ? { explicitGuidance: saved.guidance } : {}),
       ...(saved.briefContext.length
         ? { explicitBriefContext: saved.briefContext }
+        : {}),
+      ...(saved.technicalContext
+        ? { technicalContext: saved.technicalContext }
         : {}),
       action: saved.action,
       stage: options ? "propose" : "diagnose",

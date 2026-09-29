@@ -18,7 +18,8 @@ export type ToolDestination =
   | "sentence"
   | "help"
   | "sections"
-  | "technical";
+  | "technical"
+  | "technical-writing";
 export type LibraryNavigation = { token: number; query: string; kind: string };
 export type ToolNavigation = {
   token: number;
@@ -38,6 +39,7 @@ const selectorFor: Record<ToolDestination, string> = {
   help: ".context-help",
   sections: ".structure",
   technical: ".all-actions",
+  "technical-writing": ".technical-writing-target, [data-lab-direction]",
 };
 /** UI-only routing. No document/library/provider state is owned here. */
 export function useWayfinding(w: Workspace) {
@@ -331,6 +333,21 @@ export function useWayfinding(w: Workspace) {
           return;
         }
         showTool("save");
+        return;
+      case "technical-writing":
+        if (!w.target?.text.trim()) {
+          w.setNotice(
+            "Select a passage or section before opening Technical Writing analysis.",
+          );
+          return;
+        }
+        w.setAction("technical_writing");
+        showTool(
+          "technical-writing",
+          w.isLensTarget
+            ? "[data-technical-writing-direction]"
+            : "[data-lab-direction]",
+        );
         return;
       case "technical":
         if (!w.target?.text.trim()) {

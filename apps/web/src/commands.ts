@@ -257,7 +257,7 @@ export const commands: CommandDefinition[] = [
   },
   {
     id: "sources",
-    label: "Sources — what they actually said",
+    label: "Sources / reference material — what they actually said",
     description: "Keep reference material separate from your writing.",
     keywords: [
       "source",
@@ -351,6 +351,23 @@ export const commands: CommandDefinition[] = [
       "gateway",
     ],
     group: "Find your tools",
+  },
+  {
+    id: "technical-writing",
+    label: "Technical writing analysis",
+    description:
+      "Examine the reader problem, convention and tradeoff for your selected passage in Lab.",
+    keywords: [
+      "tutorial",
+      "quick start",
+      "how-to",
+      "api reference",
+      "troubleshooting",
+      "mental model",
+      "technical talk",
+      "inversion",
+    ],
+    group: "Work on language",
   },
   {
     id: "technical",

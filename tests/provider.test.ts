@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   aiRequestSchema,
   defaultSettings,
+  emptyWorkbench,
   documentTarget,
   newDocument,
   newSection,
@@ -280,6 +281,220 @@ describe("writer-selected context framing (injected Responses fixtures)", () => 
       expect(instructions).toMatch(/irrelevant|does not materially/i);
       expect(instructions).toMatch(/avoid (a )?checklist|not a checklist/i);
       expect(instructions).toMatch(/never apply|never the author/i);
+    });
+});
+
+describe("technical-writing analysis contract", () => {
+  const cases = [
+    {
+      type: "quick_start",
+      kind: "Prerequisite",
+      passage: "First we explain the architecture. Then run the first command.",
+      question: "Does this opening work?",
+      context: /time to first success/i,
+    },
+    {
+      type: "tutorial",
+      kind: "Mental Model",
+      passage: "Here is the finished system. Now we're going to take it apart.",
+      question: "Is this backwards?",
+      context: /learning progression/i,
+    },
+    {
+      type: "technical_talk",
+      kind: "Demo",
+      passage: "Cold open, story, concept, demo, failure and callback.",
+      question: "Does this talk work?",
+      context: /pacing/i,
+    },
+    {
+      type: "reference",
+      kind: "Reference",
+      passage: "Three paragraphs of story before the parameter conditions.",
+      question: "Can readers find the conditions?",
+      context: /lookup/i,
+    },
+    {
+      type: "tutorial",
+      kind: "Example",
+      passage: "This pagination example also uses auth, retries and logging.",
+      question: "Is this example doing too much?",
+      context: /learning progression/i,
+    },
+    {
+      type: "how_to",
+      kind: "Step",
+      passage:
+        "The client needs a token. Without it, the server has no idea who the hell you are.",
+      question: "Is my voice working?",
+      context: /goal/i,
+    },
+    {
+      type: "explanation",
+      kind: "Concept",
+      passage: "We call it a thingy. Later we introduce the formal term.",
+      question: "Is this terminology shift deliberate?",
+      context: /mental model/i,
+    },
+    {
+      type: "api_reference",
+      kind: "API Surface",
+      passage: "This endpoint returns immediately.",
+      question: "Is this technically accurate?",
+      context: /precision/i,
+    },
+  ] as const;
+  it("uses a saved technical context for follow-ups rather than retroactively adopting the edited Brief", async () => {
+    const ai = request("Explain the model before the commands.");
+    ai.action = "technical_writing";
+    ai.stage = "diagnose";
+    ai.instruction = "Why explain this first?";
+    ai.technicalContext = {
+      contentType: "quick_start",
+      sectionKind: "Mental Model",
+      audience: "Developers who know HTTP",
+      objectives: ["Prevent a wrong mental model"],
+      destination: "Docs",
+      customNotes: "",
+    };
+    ai.readContext.document.brief.contentType = "reference";
+    ai.readContext.document.sections[0].kind = "Reference";
+    ai.readContext.document.sections[0].workbench = emptyWorkbench();
+    ai.readContext.document.sections[0].workbench!.runs.push({
+      id: "saved-run",
+      createdAt: ai.readContext.document.createdAt,
+      target: ai.editTarget,
+      action: ai.action,
+      stage: "diagnose",
+      instruction: ai.instruction,
+      answer: "",
+      controls: {},
+      model: null,
+      conversation: [],
+      guidance: [],
+      briefContext: [],
+      technicalContext: ai.technicalContext,
+      response: output(),
+    });
+    ai.followUp = {
+      runId: "saved-run",
+      question: "Would showing the command first help?",
+      originalInstruction: ai.instruction,
+      originalResult: {
+        diagnosis: "Earlier reading",
+        mechanism: "First explain the tradeoff",
+        question: "What should be protected?",
+      },
+      turns: [],
+      targetStatus: "exact",
+    };
+    const { provider, requests } = harness(wire(output()));
+    await provider.run(ai);
+    const data = JSON.parse(
+      requests[0].input.find((part: any) => part.role === "user").content,
+    );
+    expect(data.WRITER_QUESTION).toBe(ai.followUp.question);
+    expect(data.TECHNICAL_WRITING_CONTEXT).toMatchObject(ai.technicalContext);
+    expect(data.TECHNICAL_WRITING_CONTEXT.considerations).toMatch(
+      /time to first success/i,
+    );
+    expect(data.READ_CONTEXT.document.brief.contentType).toBe("reference");
+    expect(data.READ_CONTEXT.document.sections[0].kind).toBe("Reference");
+  });
+  it("rejects proposals in analysis, never silently falls back offline, and keeps nontechnical runs unchanged", async () => {
+    const ai = request(
+      "The example is realistic and may distract from pagination.",
+    );
+    ai.action = "technical_writing";
+    ai.stage = "diagnose";
+    ai.instruction = "Is the example doing too much?";
+    ai.answer = "";
+    const offline = await new MockProvider().run(ai);
+    expect(offline.proposals).toEqual([]);
+    expect(offline.diagnosis).toMatch(/offline cannot evaluate/i);
+    expect(offline.diagnosis).not.toMatch(/too complex|must simplify/i);
+    await expect(
+      new MockProvider().run({ ...ai, stage: "propose" }),
+    ).rejects.toThrow(/analysis-only/i);
+    expect(() =>
+      validateProviderResponse(
+        ai,
+        {
+          ...output(),
+          proposals: [
+            {
+              id: "unsolicited",
+              label: "Rewrite",
+              text: "Replace everything",
+              explanation: "",
+            },
+          ],
+        },
+        "openai",
+      ),
+    ).toThrow(/diagnosis-only/i);
+    const { provider, requests } = harness(wire(output()));
+    await provider.run({ ...ai, action: "coach" });
+    const body = JSON.parse(
+      requests[0].input.find((part: any) => part.role === "user").content,
+    );
+    expect(body.TECHNICAL_WRITING_CONTEXT).toBeUndefined();
+  });
+  for (const sample of cases)
+    it(`keeps ${sample.type} / ${sample.kind} advisory and writer-led`, async () => {
+      const ai = request(sample.passage);
+      ai.action = "technical_writing";
+      ai.stage = "diagnose";
+      ai.instruction = sample.question;
+      ai.readContext.document.brief.contentType = sample.type;
+      ai.readContext.document.brief.audience = "Engineers who know HTTP";
+      ai.readContext.document.sections[0].kind = sample.kind;
+      ai.readContext.document.sections[0].label = sample.kind;
+      ai.explicitGuidance = [
+        {
+          source: "style_dna",
+          key: "register",
+          title: "Keep the voice",
+          text: "Prefer conversational clarity.",
+        },
+      ];
+      ai.explicitBriefContext = [
+        {
+          source: "writing_brief",
+          field: "audience",
+          value: "Engineers who know HTTP",
+        },
+      ];
+      const { provider, requests } = harness(wire(output()));
+      await provider.run(ai);
+      const body = requests[0];
+      const instructions = body.input
+        .filter((part: any) => part.role === "developer")
+        .map((part: any) => part.content)
+        .join("\n");
+      const data = JSON.parse(
+        body.input.find((part: any) => part.role === "user").content,
+      );
+      expect(data.WRITER_QUESTION).toBe(sample.question);
+      expect(data.EDIT_TARGET).toEqual(ai.editTarget);
+      expect(data.READ_CONTEXT.document.brief.contentType).toBe(sample.type);
+      expect(data.READ_CONTEXT.document.sections[0].kind).toBe(sample.kind);
+      expect(data.WRITER_SELECTED_GUIDANCE).toEqual(ai.explicitGuidance);
+      expect(data.WRITER_SELECTED_BRIEF_CONTEXT).toEqual(
+        ai.explicitBriefContext,
+      );
+      expect(data.TECHNICAL_WRITING_CONTEXT.considerations).toMatch(
+        sample.context,
+      );
+      expect(instructions).toMatch(/deliberate inversion/i);
+      expect(instructions).toMatch(/tradeoff/i);
+      expect(instructions).toMatch(/not.*mandatory|not.*checklist/i);
+      expect(instructions).toMatch(/profani|writer.s voice/i);
+      expect(instructions).toMatch(
+        /do not (invent|assert).*api|factual verification/i,
+      );
+      expect(instructions).toMatch(/code.*pedagogical/i);
+      expect(instructions).toMatch(/no replacement proposals/i);
     });
 });
 

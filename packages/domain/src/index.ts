@@ -16,6 +16,44 @@ import { aiResponseSchema, type AIResponse } from "./ai-output";
 export * from "./routing";
 export * from "./ai-output";
 
+export const technicalContentTypes = [
+  "tutorial",
+  "how_to",
+  "quick_start",
+  "explanation",
+  "reference",
+  "api_reference",
+  "troubleshooting",
+  "readme",
+  "architecture",
+  "engineering_decision",
+  "technical_talk",
+] as const;
+export const technicalSectionRoles = [
+  "Goal",
+  "Prerequisite",
+  "Step",
+  "Expected Result",
+  "Verification",
+  "Concept",
+  "Mental Model",
+  "Counterexample",
+  "Demo",
+  "Warning",
+  "Constraint",
+  "Failure Mode",
+  "Troubleshooting",
+  "Recovery",
+  "Reference",
+  "API Surface",
+  "Decision",
+  "Alternative",
+  "Tradeoff",
+  "Assumption",
+  "Why",
+  "Recap",
+  "Next Step",
+] as const;
 export const contentTypes = [
   "narration",
   "article",
@@ -27,6 +65,7 @@ export const contentTypes = [
   "announcement",
   "marketing",
   "story",
+  ...technicalContentTypes,
   "freeform",
 ] as const;
 export const sectionKinds = [
@@ -56,6 +95,7 @@ export const sectionKinds = [
   "Sign-off",
   "Cliffhanger",
   "To Be Continued",
+  ...technicalSectionRoles,
   "Freeform",
 ] as const;
 export const writingBriefSchema = z.object({
@@ -146,6 +186,15 @@ export const savedBriefContextSchema = z.object({
   value: z.string().trim().min(1).max(3000),
 });
 export type SavedBriefContext = z.infer<typeof savedBriefContextSchema>;
+export const technicalContextSchema = z.object({
+  contentType: z.enum(contentTypes),
+  sectionKind: z.enum(sectionKinds).nullable(),
+  audience: z.string(),
+  objectives: z.array(z.string()),
+  destination: z.string(),
+  customNotes: z.string(),
+});
+export type TechnicalContext = z.infer<typeof technicalContextSchema>;
 export const labConversationTurnSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["writer", "assistant"]),
@@ -172,6 +221,7 @@ export const workbenchRunSchema = z.object({
   conversation: z.array(labConversationTurnSchema).max(24).default([]),
   guidance: z.array(savedGuidanceSchema).max(3).default([]),
   briefContext: z.array(savedBriefContextSchema).max(3).default([]),
+  technicalContext: technicalContextSchema.optional(),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -521,6 +571,7 @@ export const writingActions = [
   "humor",
   "exaggeration",
   "technical",
+  "technical_writing",
   "words",
   "spellcheck",
   "split",
@@ -575,6 +626,7 @@ export const aiRequestSchema = z.object({
   lens: lensOptionsSchema.optional(),
   explicitGuidance: z.array(savedGuidanceSchema).max(3).optional(),
   explicitBriefContext: z.array(savedBriefContextSchema).max(3).optional(),
+  technicalContext: technicalContextSchema.optional(),
   followUp: z
     .object({
       runId: z.string().min(1),
@@ -889,7 +941,7 @@ export function validateAIRequest(req: AIRequest): void {
   } else validateTarget(req.readContext.document, req.editTarget);
   if (
     req.editTarget.scope === "document" &&
-    !["critique", "break_template"].includes(req.action)
+    !["critique", "break_template", "technical_writing"].includes(req.action)
   )
     throw new Error(
       "Document scope is analysis-only. Select a section or sentence to propose an edit.",
@@ -1134,6 +1186,72 @@ export const contentTypeConfig: Record<
     label: "Story",
     units: ["Scene", "Beat", "Reveal"],
     guidance: "Preserve voice, implication, and intentional asymmetry.",
+  },
+  tutorial: {
+    label: "Tutorial",
+    units: [],
+    guidance:
+      "Learning through doing can build a mental model; progression is a choice, not a required outline.",
+  },
+  how_to: {
+    label: "How-to guide",
+    units: [],
+    guidance:
+      "A reader with a goal may value the shortest trustworthy route; explain detours when they protect understanding.",
+  },
+  quick_start: {
+    label: "Quick start",
+    units: [],
+    guidance:
+      "Time to first success matters, unless earlier framing prevents a costly misunderstanding.",
+  },
+  explanation: {
+    label: "Explanation / conceptual guide",
+    units: [],
+    guidance:
+      "Causality and mental models may matter more than procedural speed.",
+  },
+  reference: {
+    label: "Reference",
+    units: [],
+    guidance:
+      "Lookup, precision and conditions matter; narrative can help when it earns its place.",
+  },
+  api_reference: {
+    label: "API reference",
+    units: [],
+    guidance:
+      "Look for exact conditions, scope and lookup paths, without inventing API behavior.",
+  },
+  troubleshooting: {
+    label: "Troubleshooting guide",
+    units: [],
+    guidance:
+      "Symptoms, evidence, competing causes and recovery may matter more than a single happy path.",
+  },
+  readme: {
+    label: "README / setup guide",
+    units: [],
+    guidance:
+      "Consider the starting assumptions, a useful first result and ways to verify it.",
+  },
+  architecture: {
+    label: "Architecture document",
+    units: [],
+    guidance:
+      "Constraints, interfaces, alternatives and failure modes can clarify a design without prescribing an outline.",
+  },
+  engineering_decision: {
+    label: "Engineering decision / proposal",
+    units: [],
+    guidance:
+      "State the decision context and the consequences readers need, including unresolved tradeoffs.",
+  },
+  technical_talk: {
+    label: "Technical talk",
+    units: [],
+    guidance:
+      "Pacing, demos, analogies, story and callbacks can support spoken comprehension.",
   },
   freeform: {
     label: "Freeform",

@@ -558,6 +558,60 @@ describe("local API and SQLite persistence", () => {
         .nextMove,
     ).toBe(memory.nextMove);
   });
+  it("round-trips technical Brief types and mixed section roles without enforcing a template", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Quick start",
+        text: "First explain the model.",
+      })
+    ).json();
+    doc.brief.contentType = "quick_start";
+    doc.brief.audience = "Engineers who know HTTP";
+    doc.sections[0].kind = "Mental Model";
+    doc.sections.push({
+      ...doc.sections[0],
+      id: "narrative-role",
+      kind: "Story",
+      label: "Story",
+    });
+    doc.sections.push({
+      ...doc.sections[0],
+      id: "first-check",
+      kind: "Verification",
+      label: "Verification",
+    });
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    expect(doc.sections.map((item: any) => item.kind)).toEqual([
+      "Mental Model",
+      "Story",
+      "Verification",
+    ]);
+    await request("/api/documents/archive", "POST", { ids: [doc.id] });
+    await stop();
+    await start();
+    const archived = await (await request(`/api/documents/${doc.id}`)).json();
+    expect(archived.brief.contentType).toBe("quick_start");
+    await request("/api/documents/restore", "POST", { ids: [doc.id] });
+    const imported = await (
+      await request("/api/import", "POST", { document: archived })
+    ).json();
+    expect(imported.brief).toEqual(archived.brief);
+    expect(imported.sections.map((item: any) => item.kind)).toEqual([
+      "Mental Model",
+      "Story",
+      "Verification",
+    ]);
+    expect(imported.sections[0].id).not.toBe(doc.sections[0].id);
+    const legacy = structuredClone(archived);
+    delete legacy.brief.contentType;
+    expect(
+      (
+        await (
+          await request("/api/import", "POST", { document: legacy })
+        ).json()
+      ).brief.contentType,
+    ).toBe("freeform");
+  });
   it("keeps writer revision intentions across restart, archive and import without guessing missing links", async () => {
     let doc = await (
       await request("/api/documents", "POST", {

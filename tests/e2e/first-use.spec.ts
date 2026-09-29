@@ -7,6 +7,7 @@ import {
 import {
   newDocument,
   defaultSettings,
+  sectionKinds,
   documentText,
 } from "../../packages/domain/src/index";
 async function seed(request: APIRequestContext, text = "") {
@@ -469,7 +470,7 @@ test("starting from structure never forces a template or Writing Brief", async (
   ).toBeVisible();
   await expect(
     page.getByLabel("All section types").locator("option"),
-  ).toHaveCount(27);
+  ).toHaveCount(sectionKinds.length);
   await page.getByRole("button", { name: "Insert Point", exact: true }).click();
   await page.keyboard.insertText("Begin with the point, not a hook.");
   await expect(page.getByRole("dialog", { name: "Writing brief" })).toHaveCount(

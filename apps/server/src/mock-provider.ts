@@ -486,6 +486,15 @@ export class MockProvider implements LLMProvider {
       ];
       return validateProviderResponse(request, output, "mock");
     }
+    if (request.action === "technical_writing") {
+      output.diagnosis =
+        "Offline cannot evaluate technical-writing tradeoffs or deliberate rhetorical choices. No semantic diagnosis was made.";
+      output.mechanism =
+        "Technical Writing analysis requires a writer-selected available model; no fallback was used.";
+      output.question =
+        "Which reader problem or deliberate tradeoff do you want to examine with an available model?";
+      return validateProviderResponse(request, output, "mock");
+    }
     if (request.lens?.view === "delivery")
       return offlineDelivery(request, output);
     if (request.structure) {

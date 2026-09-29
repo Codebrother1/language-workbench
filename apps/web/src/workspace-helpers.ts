@@ -24,6 +24,8 @@ import { patchTargetDraft, resolveHistoricalTarget } from "./target-drafts";
 
 export function labActionLabel(action: WritingAction, target: string): string {
   switch (action) {
+    case "technical_writing":
+      return "Run Technical Writing analysis";
     case "humor":
       return "Try humor";
     case "register":
@@ -620,6 +622,7 @@ export type RunCapture = {
   chainModel?: ModelRef;
   guidance?: WorkbenchRun["guidance"];
   briefContext?: WorkbenchRun["briefContext"];
+  technicalContext?: WorkbenchRun["technicalContext"];
   question: string;
 };
 export function writerResultReason(reason: string): string {
@@ -670,6 +673,9 @@ export function makeRun(
     conversation: [],
     guidance: capture.guidance ?? [],
     briefContext: capture.briefContext ?? [],
+    ...(capture.technicalContext
+      ? { technicalContext: structuredClone(capture.technicalContext) }
+      : {}),
     controls: { ...capture.controls },
     model: response.model ?? capture.model,
     ...(capture.chainModel ? { chainModel: capture.chainModel } : {}),

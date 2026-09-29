@@ -1081,6 +1081,157 @@ test("Piece memory entry follows per-document freshness through switch, duplicat
   await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
 });
 
+for (const width of [1440, 1024, 700])
+  test(`Technical Writing analysis stays explicit and offline-honest at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(
+      request,
+      "First explain the system. Then run the request.",
+    );
+    doc.brief.contentType = "quick_start";
+    doc.brief.audience = "Developers familiar with HTTP";
+    doc.sections[0].kind = "Mental Model";
+    doc.sections[0].label = "Mental Model";
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    const calls: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.url());
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    await page
+      .getByRole("combobox", { name: "Search writing tools" })
+      .fill("technical writing analysis");
+    await page
+      .getByRole("option", { name: /Technical writing analysis/ })
+      .click();
+    await expect(
+      page.getByLabel("Writing action", { exact: true }),
+    ).toHaveValue("technical_writing");
+    expect(calls).toHaveLength(0);
+    await page
+      .getByLabel("Your direction")
+      .fill("Does this opening work for the intended audience?");
+    expect(calls).toHaveLength(0);
+    await page
+      .getByRole("button", {
+        name: "Run Technical Writing analysis",
+        exact: true,
+      })
+      .click();
+    await expect(page.locator(".diagnosis")).toContainText(
+      "Offline cannot evaluate technical-writing tradeoffs",
+    );
+    await expect(
+      page.getByRole("button", { name: "Propose options" }),
+    ).toHaveCount(0);
+    expect(calls).toHaveLength(1);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    const run = saved.sections[0].workbench.runs.at(-1);
+    expect(run.action).toBe("technical_writing");
+    expect(run.technicalContext).toMatchObject({
+      contentType: "quick_start",
+      sectionKind: "Mental Model",
+      audience: "Developers familiar with HTTP",
+    });
+    expect(run.target.sectionId).toBe(doc.sections[0].id);
+    expect(documentText(saved)).toBe(documentText(doc));
+    expect(saved.pieceMemory).toEqual(doc.pieceMemory);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    await page.reload();
+    const edited = await (await request.get(`/api/documents/${doc.id}`)).json();
+    edited.brief.contentType = "reference";
+    edited.brief.audience = "Readers looking up an API";
+    await request.put(`/api/documents/${doc.id}`, { data: edited });
+    await page.reload();
+    const reloaded = await (
+      await request.get(`/api/documents/${doc.id}`)
+    ).json();
+    expect(reloaded.brief.contentType).toBe("reference");
+    expect(reloaded.sections[0].workbench.runs.at(-1).technicalContext).toEqual(
+      run.technicalContext,
+    );
+    await expect(page.getByTestId("technical-run-context")).toContainText(
+      "Quick start · Mental Model",
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+test("Technical Writing analyzes an exact phrase or whole piece only after an explicit Run", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.brief.contentType = "technical_talk";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const settings = defaultSettings();
+  settings.routing = {
+    applicationDefault: null,
+    sectionTypeDefaults: {},
+    taskDefaults: {
+      technical_writing: { providerId: "mock", modelId: "plain" },
+    },
+  };
+  await request.put("/api/settings", { data: settings });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await select(page, "I really utilize tools");
+  await expect(page.locator(".technical-writing-target summary")).toBeVisible();
+  await page.locator(".technical-writing-target summary").click();
+  await expect(page.getByTestId("technical-analysis-route")).toContainText(
+    "Offline plain · Offline · task",
+  );
+  await page
+    .getByLabel("Your technical-writing question")
+    .fill("Does this phrase assume too much?");
+  expect(calls).toHaveLength(0);
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".diagnosis")).toContainText(
+    "Offline cannot evaluate",
+  );
+  expect(calls).toHaveLength(1);
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis · whole piece",
+    })
+    .click();
+  await expect(
+    page.getByText("WHOLE-PIECE ANALYSIS", { exact: true }),
+  ).toBeVisible();
+  expect(calls).toHaveLength(2);
+  await save(page);
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(
+    saved.sections[0].workbench.runs.some(
+      (run: any) =>
+        run.action === "technical_writing" && run.target.scope === "selection",
+    ),
+  ).toBe(true);
+  expect(saved.sections[0].workbench.runs.at(-1).model).toMatchObject({
+    providerId: "mock",
+    modelId: "plain",
+  });
+  expect(saved.workbench.runs.at(-1)).toMatchObject({
+    action: "technical_writing",
+    target: { scope: "document" },
+  });
+  expect(documentText(saved)).toBe(documentText(doc));
+});
+
 test("a revision-plan jump leaves only that section's active notes at the Workbench work site", async ({
   page,
   request,

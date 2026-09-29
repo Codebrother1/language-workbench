@@ -2177,6 +2177,18 @@ export function useWorkspace() {
       modelId: "conservative",
     },
   });
+  const technicalWritingModel = resolveModel({
+    oneOff: oneOffModel ?? (!activeRun ? chainModel : null),
+    sectionOverride: selectedSection?.modelOverride,
+    sectionType: selectedSection?.kind,
+    task: "technical_writing",
+    documentDefault: doc.defaultModel,
+    preferences: settings.routing,
+    applicationDefault: catalog?.applicationDefault ?? {
+      providerId: "mock",
+      modelId: "conservative",
+    },
+  });
   const setSectionModel = (model: ModelRef | null) => {
     if (sectionId)
       update((d) => ({
@@ -2196,6 +2208,7 @@ export function useWorkspace() {
     comparing = false,
     explicitTarget?: EditTarget,
     structureInput?: StructureRequest,
+    explicitAction?: WritingAction,
   ) => {
     if (requestBusy.current || navigating.current) return;
     const historical =
@@ -2242,7 +2255,7 @@ export function useWorkspace() {
       ? "structure"
       : lensMode
         ? "words"
-        : (override ?? action);
+        : (explicitAction ?? override ?? action);
     const t =
       explicitTarget ??
       (structureInput
@@ -2255,6 +2268,10 @@ export function useWorkspace() {
     if (!t)
       return setError(
         "Select text within one section. Cross-section selections are read-only.",
+      );
+    if (stage === "propose" && chosen === "technical_writing")
+      return setError(
+        "Technical Writing is analysis-only. Ask a follow-up question instead.",
       );
     if (stage === "propose" && t.scope === "document")
       return setError(
@@ -2342,6 +2359,18 @@ export function useWorkspace() {
       stage,
       guidance: guidanceForRequest,
       briefContext: briefForRequest,
+      ...(chosen === "technical_writing"
+        ? {
+            technicalContext: {
+              contentType: current.current.brief.contentType,
+              sectionKind: section?.kind ?? null,
+              audience: current.current.brief.audience,
+              objectives: [...current.current.brief.objectives],
+              destination: current.current.brief.destination,
+              customNotes: current.current.brief.customNotes,
+            },
+          }
+        : {}),
       ...(chosen === "words"
         ? {
             lens: {
@@ -2418,6 +2447,9 @@ export function useWorkspace() {
           : {}),
         ...(capture.briefContext?.length
           ? { explicitBriefContext: capture.briefContext }
+          : {}),
+        ...(capture.technicalContext
+          ? { technicalContext: capture.technicalContext }
           : {}),
         action: chosen,
         stage,
@@ -2543,6 +2575,16 @@ export function useWorkspace() {
     }
     return operate(stage, override);
   };
+  const runTechnicalAnalysis = () =>
+    operate(
+      "diagnose",
+      undefined,
+      undefined,
+      false,
+      targetRef.current ?? undefined,
+      undefined,
+      "technical_writing",
+    );
   const stageCurrentPassage = (runId: string): void => {
     const run = current.current.sections
       .flatMap((section) => section.workbench?.runs ?? [])
@@ -3370,6 +3412,7 @@ export function useWorkspace() {
     catalog,
     refreshCatalog,
     effectiveModel,
+    technicalWritingModel,
     setSectionModel,
     setDocumentModel,
     setSectionTypeModel,
@@ -3450,6 +3493,7 @@ export function useWorkspace() {
     splitSection,
     mergeSection,
     ask,
+    runTechnicalAnalysis,
     askFollowUp,
     stagedCurrentPassage,
     stageCurrentPassage,
