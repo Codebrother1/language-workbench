@@ -29,6 +29,7 @@ import {
   documentBackup,
   duplicateDocumentCue,
   hasPieceMemoryContent,
+  nextMoveSectionLabel,
 } from "./workspace-helpers";
 const words = (value: string) =>
   value
@@ -140,8 +141,17 @@ function Brief({ w }: { w: Workspace }) {
     </>
   );
 }
-function PieceMemory({ w }: { w: Workspace }) {
+function PieceMemory({
+  w,
+  onGoToSection,
+}: {
+  w: Workspace;
+  onGoToSection: (id: string) => void;
+}) {
   const memory = w.doc.pieceMemory;
+  const linkedSectionLabel = memory.nextMove.trim()
+    ? nextMoveSectionLabel(w.doc, memory.nextMoveSectionId)
+    : null;
   const [unresolvedDraft, setUnresolvedDraft] = useState("");
   const [decisionDraft, setDecisionDraft] = useState("");
   const [suggestedQuestion, setSuggestedQuestion] = useState<string | null>(
@@ -221,10 +231,20 @@ function PieceMemory({ w }: { w: Workspace }) {
           <h3>Where I left off</h3>
         )}
         {fields.map(([label, value]) => (
-          <p key={label}>
+          <div className="piece-memory-summary-item" key={label}>
             <b>{label}</b>
             <span>{value}</span>
-          </p>
+            {label === "Next move" && linkedSectionLabel && (
+              <span className="piece-memory-location">
+                {linkedSectionLabel}
+                <Button
+                  onClick={() => onGoToSection(memory.nextMoveSectionId!)}
+                >
+                  Go to section
+                </Button>
+              </span>
+            )}
+          </div>
         ))}
         {(unresolvedCount > 0 || decisionCount > 0) && (
           <small>
@@ -251,6 +271,42 @@ function PieceMemory({ w }: { w: Workspace }) {
             placeholder="What were you about to do?"
           />
         </Field>
+        {(memory.nextMove.trim() || memory.nextMoveSectionId) && (
+          <div className="piece-memory-link">
+            <Field label="Next-move section link">
+              <Select
+                value={
+                  nextMoveSectionLabel(w.doc, memory.nextMoveSectionId)
+                    ? memory.nextMoveSectionId!
+                    : ""
+                }
+                onChange={(event) =>
+                  change((old) => ({
+                    ...old,
+                    nextMoveSectionId: event.target.value || null,
+                  }))
+                }
+              >
+                <option value="">No linked section</option>
+                {w.doc.sections.map((section) => (
+                  <option value={section.id} key={section.id}>
+                    {nextMoveSectionLabel(w.doc, section.id)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {memory.nextMoveSectionId && (
+              <Button
+                className="text-button"
+                onClick={() =>
+                  change((old) => ({ ...old, nextMoveSectionId: null }))
+                }
+              >
+                Clear link
+              </Button>
+            )}
+          </div>
+        )}
       </div>
       <Field label="Purpose">
         <textarea
@@ -1353,10 +1409,12 @@ function ManageDocuments({ w }: { w: Workspace }) {
 
 export function UtilityPanel({
   w,
+  onGoToSection,
   libraryNavigation,
   returnToMenu,
 }: {
   w: Workspace;
+  onGoToSection: (id: string) => void;
   libraryNavigation?: LibraryNavigation;
   returnToMenu?: () => HTMLElement | null;
 }) {
@@ -1410,7 +1468,7 @@ export function UtilityPanel({
       ) : w.panel === "brief" ? (
         <Brief w={w} />
       ) : w.panel === "memory" ? (
-        <PieceMemory w={w} />
+        <PieceMemory w={w} onGoToSection={onGoToSection} />
       ) : w.panel === "sources" ? (
         <Sources w={w} />
       ) : w.panel === "style" ? (

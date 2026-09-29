@@ -1237,6 +1237,17 @@ export function useWorkspace() {
     selectExactTarget(next, false);
     return next;
   };
+  const navigateToSection = (id: string): boolean => {
+    if (!current.current.sections.some((section) => section.id === id))
+      return false;
+    if (inspectionRef.current && inspectionRef.current.sectionId !== id)
+      changeInspection(null);
+    explicitAnchor.current = null;
+    explicitFocusIntent.current = true;
+    setTarget(targetFor(current.current, id));
+    setDocumentWorkbench(false);
+    return true;
+  };
   const noteRevisionContext = (
     runId: string,
     sectionId: string,
@@ -3142,6 +3153,7 @@ export function useWorkspace() {
     applyLayoutPreset,
     selectedSectionId: target?.sectionId ?? null,
     prepareSectionTarget,
+    navigateToSection,
     canCoachTarget,
     showLocalWorkbench: () => setDocumentWorkbench(false),
     addSectionAfter,

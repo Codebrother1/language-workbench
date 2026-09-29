@@ -80,6 +80,7 @@ import {
   sectionMentions,
   duplicateDocumentCue,
   hasPieceMemoryContent,
+  nextMoveSectionLabel,
 } from "./workspace-helpers";
 
 function draftPositionLabel(section: WritingSection, index: number): string {
@@ -1503,6 +1504,9 @@ export default function App() {
   const memoryDraftChanged =
     hasPieceMemoryContent(w.doc.pieceMemory) &&
     w.doc.pieceMemory.reviewedDraftRevision !== w.draftRevision;
+  const linkedNextMoveLabel = w.doc.pieceMemory.nextMove.trim()
+    ? nextMoveSectionLabel(w.doc, w.doc.pieceMemory.nextMoveSectionId)
+    : null;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
   const widths = dragWidths ?? w.layout.paneWidths;
@@ -1839,10 +1843,11 @@ export default function App() {
   const jumpToSection = (
     id: string,
     anchor?: { runId: string; findingIndex: number },
+    focusProse = true,
   ) => {
     const section = w.doc.sections.find((item) => item.id === id);
     if (!section) return;
-    if (w.activeRun?.target.sectionId === w.selectedSectionId)
+    if (focusProse && w.activeRun?.target.sectionId === w.selectedSectionId)
       setLabOrigin({
         documentId: w.doc.id,
         sectionId: w.selectedSectionId!,
@@ -1884,7 +1889,11 @@ export default function App() {
     setPreviewFocused(false);
     setParkedFocusId(null);
     setReadingMode(false);
-    w.focusSection(id);
+    if (focusProse) w.focusSection(id);
+    else {
+      w.navigateToSection(id);
+      requestAnimationFrame(() => scrollPreviewToSection(id, false, true));
+    }
     setPendingJump(id);
   };
   const returnToTakeSection = () => {
@@ -2632,10 +2641,24 @@ export default function App() {
           <span>
             <b>{memoryDraftChanged ? "Earlier next move:" : "Next move:"}</b>{" "}
             {w.doc.pieceMemory.nextMove.trim()}
+            {linkedNextMoveLabel && <small>{linkedNextMoveLabel}</small>}
             {memoryDraftChanged && (
               <small>Draft changed since this was saved.</small>
             )}
           </span>
+          {linkedNextMoveLabel && (
+            <Button
+              onClick={() =>
+                jumpToSection(
+                  w.doc.pieceMemory.nextMoveSectionId!,
+                  undefined,
+                  false,
+                )
+              }
+            >
+              Go to section
+            </Button>
+          )}
           <Button onClick={() => w.setPanel("memory")}>
             {memoryDraftChanged ? "Review Piece memory" : "Open Piece memory"}
           </Button>
@@ -2920,6 +2943,10 @@ export default function App() {
       </div>
       <UtilityPanel
         w={w}
+        onGoToSection={(id) => {
+          w.setPanel(null);
+          jumpToSection(id, undefined, false);
+        }}
         libraryNavigation={navigation.libraryNavigation}
         returnToMenu={() =>
           document.querySelector<HTMLElement>('[aria-label="Document actions"]')

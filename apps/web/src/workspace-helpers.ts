@@ -1,6 +1,7 @@
 import {
   emptyWorkbench,
   documentText,
+  draftSections,
   sectionText,
   structuralMechanisms,
   uid,
@@ -263,6 +264,23 @@ export function customSectionLabel(section: WritingSection): string | null {
   const label = section.label.trim();
   return label && label !== section.kind ? label : null;
 }
+export function nextMoveSectionLabel(
+  doc: Document,
+  id: string | null | undefined,
+): string | null {
+  const section = doc.sections.find((item) => item.id === id);
+  if (!section) return null;
+  const position =
+    section.placement === "parked"
+      ? "Parked"
+      : String(
+          draftSections(doc).findIndex((item) => item.id === id) + 1,
+        ).padStart(2, "0");
+  return [position, customSectionLabel(section), section.kind]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function sectionReference(doc: Document, id: string): string | null {
   const index = doc.sections.findIndex((section) => section.id === id);
   if (index < 0) return null;

@@ -19,6 +19,7 @@ import {
   isLensTarget,
   isDeliveryTarget,
   sectionReference,
+  nextMoveSectionLabel,
   sectionMentions,
   humanTargetLabel,
   currentTakeIds,
@@ -152,6 +153,7 @@ describe("document backup", () => {
     const a = newDocument("A", "Human text.");
     const b = newDocument("B", "Different draft.");
     a.pieceMemory.nextMove = "Revise the last line.";
+    a.pieceMemory.nextMoveSectionId = a.sections[0].id;
     a.pieceMemory.decisions.push({
       id: "decision",
       text: "Keep the pause.",
@@ -179,6 +181,9 @@ describe("document backup", () => {
     expect(backup.documents).not.toContain(b);
     expect(backup.documents[0].pieceMemory.nextMove).toBe(
       "Revise the last line.",
+    );
+    expect(backup.documents[0].pieceMemory.nextMoveSectionId).toBe(
+      a.sections[0].id,
     );
     a.pieceMemory.nextMove = "A later edit.";
     expect(backup.documents[0].pieceMemory.nextMove).toBe(
@@ -432,6 +437,21 @@ describe("Lab result and action truthfulness", () => {
       third,
     );
     expect(getWorkbench(same, a.id).questionAnswers[third.id]).toBe("Answer B");
+  });
+});
+
+describe("linked Next move section labels", () => {
+  it("resolves current order, custom label and role by stable section ID", () => {
+    const doc = newDocument("Resume", "First.");
+    const ending = newSection("Closer", "End.");
+    ending.label = "Ending";
+    doc.sections.push(ending);
+    expect(nextMoveSectionLabel(doc, ending.id)).toBe("02 · Ending · Closer");
+    doc.sections.reverse();
+    expect(nextMoveSectionLabel(doc, ending.id)).toBe("01 · Ending · Closer");
+    ending.kind = "Point";
+    expect(nextMoveSectionLabel(doc, ending.id)).toBe("01 · Ending · Point");
+    expect(nextMoveSectionLabel(doc, "missing")).toBeNull();
   });
 });
 

@@ -516,7 +516,7 @@ hr {
 .piece-memory-summary h3 {
   margin-top: 0;
 }
-.piece-memory-summary p {
+.piece-memory-summary-item {
   display: grid;
   gap: 2px;
   margin: 8px 0;
@@ -525,6 +525,31 @@ hr {
 }
 .piece-memory-summary small {
   color: var(--muted);
+}
+.piece-memory-location {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.piece-memory-location .button,
+.piece-memory-link .button {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.piece-memory-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.piece-memory-link .field {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 .piece-memory-next {
   padding: 10px;

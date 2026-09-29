@@ -287,6 +287,9 @@ export class Repository {
       }),
       pieceMemory: {
         ...doc.pieceMemory,
+        nextMoveSectionId: doc.pieceMemory.nextMoveSectionId
+          ? (sectionIds.get(doc.pieceMemory.nextMoveSectionId) ?? null)
+          : null,
         decisions: doc.pieceMemory.decisions.map((decision) => ({
           ...decision,
           id: uid(),

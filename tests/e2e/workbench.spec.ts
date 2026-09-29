@@ -1080,6 +1080,199 @@ test("Piece memory entry follows per-document freshness through switch, duplicat
   await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
 });
 
+test("linked Next move navigates deliberately without focusing prose or reviewing memory", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  const memory = page.getByRole("dialog", { name: "Piece memory" });
+  await expect(memory.getByLabel("Next-move section link")).toHaveCount(0);
+  await memory
+    .getByLabel("Next move")
+    .fill("Tighten the reveal in the ending.");
+  await memory
+    .getByLabel("Next-move section link")
+    .selectOption(doc.sections[2].id);
+  await expect(memory.getByLabel("Next move")).toHaveValue(
+    "Tighten the reveal in the ending.",
+  );
+  await expect(
+    memory.getByRole("region", { name: "Where I left off" }),
+  ).toContainText("03 · Closer");
+  await memory
+    .getByLabel("Next move")
+    .fill("Tighten the ending after the turn.");
+  await expect(memory.getByLabel("Next-move section link")).toHaveValue(
+    doc.sections[2].id,
+  );
+  await memory.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  const reviewed = (
+    await (await request.get(`/api/documents/${doc.id}`)).json()
+  ).pieceMemory.reviewedDraftRevision;
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await memory.getByRole("button", { name: "Go to section" }).click();
+  const card = page.locator(`[data-section-id="${doc.sections[2].id}"]`);
+  await expect(card).toHaveClass(/active/);
+  await expect(card).toBeInViewport();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await expect(
+    page.getByText("Tighten the ending after the turn."),
+  ).toBeVisible();
+  expect(calls).toHaveLength(0);
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.pieceMemory.nextMoveSectionId).toBe(doc.sections[2].id);
+  expect(saved.pieceMemory.reviewedDraftRevision).toBe(reviewed);
+  expect(saved.draftRevision).toBe(doc.draftRevision);
+  expect(documentText(saved)).toBe(documentText(doc));
+  await page.getByRole("button", { name: "Piece memory", exact: true }).click();
+  await memory.getByLabel("Next-move section link").selectOption("");
+  await expect(memory.getByLabel("Next move")).toHaveValue(
+    "Tighten the ending after the turn.",
+  );
+  await expect(
+    memory.getByRole("button", { name: "Go to section" }),
+  ).toHaveCount(0);
+});
+
+test("duplicating a piece preserves Next move text and remaps its section link to the independent copy", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.nextMove = "Return to the closer.";
+  doc.pieceMemory.nextMoveSectionId = doc.sections[2].id;
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  const picker = page.getByLabel("Switch document");
+  await expect.poll(() => picker.inputValue()).not.toBe(doc.id);
+  const copy = await (
+    await request.get(`/api/documents/${await picker.inputValue()}`)
+  ).json();
+  expect(copy.pieceMemory.nextMove).toBe(doc.pieceMemory.nextMove);
+  expect(copy.pieceMemory.nextMoveSectionId).toBe(copy.sections[2].id);
+  expect(copy.pieceMemory.nextMoveSectionId).not.toBe(doc.sections[2].id);
+  await expect(
+    page.locator(`[data-section-id="${copy.sections[0].id}"]`),
+  ).toHaveClass(/active/);
+  await page
+    .locator(".piece-next-move")
+    .getByRole("button", { name: "Go to section" })
+    .click();
+  await expect(
+    page.locator(`[data-section-id="${copy.sections[2].id}"]`),
+  ).toHaveClass(/active/);
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+});
+
+test("linked Next move follows section reorder and current label, then safely loses its destination on deletion", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.nextMove = "Tighten the ending.";
+  doc.pieceMemory.nextMoveSectionId = doc.sections[2].id;
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  const strip = page.locator(".piece-next-move");
+  await expect(strip).toContainText("03 · Closer");
+  const items = page.getByTestId("structure-item");
+  const height = (await items.first().boundingBox())!.height;
+  await items
+    .nth(2)
+    .dragTo(items.nth(0), { targetPosition: { x: 20, y: height - 12 } });
+  await expect(items.first()).toHaveAttribute(
+    "data-section-id",
+    doc.sections[2].id,
+  );
+  await expect(strip).toContainText("01 · Closer");
+  await expect(strip).toContainText("Earlier next move:");
+  await strip.getByRole("button", { name: "Go to section" }).click();
+  await expect(strip).toContainText("Earlier next move:");
+  await save(page);
+  const afterReorder = await (
+    await request.get(`/api/documents/${doc.id}`)
+  ).json();
+  expect(afterReorder.pieceMemory.reviewedDraftRevision).toBe(0);
+  const renamed = {
+    ...afterReorder,
+    sections: afterReorder.sections.map((section: any) =>
+      section.id === doc.sections[2].id
+        ? { ...section, kind: "Point", label: "Ending" }
+        : section,
+    ),
+  };
+  await request.put(`/api/documents/${doc.id}`, { data: renamed });
+  await page.reload();
+  await expect(strip).toContainText("01 · Ending · Point");
+  await expect(
+    strip.getByRole("button", { name: "Go to section" }),
+  ).toBeVisible();
+  await items.first().locator(".section-options summary").click();
+  await items
+    .first()
+    .getByRole("button", { name: "Remove section", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete section", exact: true })
+    .click();
+  await expect(strip).toContainText("Tighten the ending.");
+  await expect(
+    strip.getByRole("button", { name: "Go to section" }),
+  ).toHaveCount(0);
+  await save(page);
+  const deleted = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(deleted.pieceMemory.nextMove).toBe("Tighten the ending.");
+  expect(
+    deleted.sections.some((section: any) => section.id === doc.sections[2].id),
+  ).toBe(false);
+  await page.reload();
+  await expect(strip).toContainText("Tighten the ending.");
+  await expect(
+    strip.getByRole("button", { name: "Go to section" }),
+  ).toHaveCount(0);
+});
+
+for (const width of [1440, 1024, 700])
+  test(`linked memory destination is keyboard accessible without horizontal overflow at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page
+      .getByRole("button", { name: "Piece memory", exact: true })
+      .click();
+    const memory = page.getByRole("dialog", { name: "Piece memory" });
+    await memory.getByLabel("Next move").fill("Return to the ending.");
+    const link = memory.getByLabel("Next-move section link");
+    await expect(link).toBeVisible();
+    await link.selectOption(doc.sections[2].id);
+    await expect(
+      memory.getByRole("region", { name: "Where I left off" }),
+    ).toContainText("03 · Closer");
+    await memory.getByRole("button", { name: "Go to section" }).focus();
+    await memory.getByRole("button", { name: "Go to section" }).press("Enter");
+    await expect(
+      page.locator(`[data-section-id="${doc.sections[2].id}"]`),
+    ).toHaveClass(/active/);
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+  });
+
 test("Piece memory keeps writer-authored intention, decisions and unresolved notes outside canonical prose", async ({
   page,
   request,
@@ -1468,6 +1661,7 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
 }) => {
   const first = await seed(request);
   first.pieceMemory.nextMove = "Reread the bridge.";
+  first.pieceMemory.nextMoveSectionId = first.sections[1].id;
   first.pieceMemory.decisions.push({
     id: "choice",
     text: "Keep the closer.",
@@ -1490,6 +1684,7 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
     readFileSync((await (await singleDownload).path())!, "utf8"),
   );
   expect(single.pieceMemory.nextMove).toBe("Reread the bridge.");
+  expect(single.pieceMemory.nextMoveSectionId).toBe(first.sections[1].id);
   expect(single.pieceMemory.reviewedDraftRevision).toBe(single.draftRevision);
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("button", { name: "Manage documents" }).click();
@@ -1506,6 +1701,9 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   expect(selected.documents[0].pieceMemory.decisions[0].text).toBe(
     "Keep the closer.",
   );
+  expect(selected.documents[0].pieceMemory.nextMoveSectionId).toBe(
+    first.sections[1].id,
+  );
   expect(selected.documents[0].pieceMemory.reviewedDraftRevision).toBe(
     selected.documents[0].draftRevision,
   );
@@ -1519,6 +1717,10 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
       .nextMove,
   ).toBe("Reread the bridge.");
   expect(
+    all.documents.find((item: any) => item.id === first.id).pieceMemory
+      .nextMoveSectionId,
+  ).toBe(first.sections[1].id);
+  expect(
     all.documents.find((item: any) => item.id === second.id).pieceMemory
       .nextMove,
   ).toBe("");
@@ -1531,6 +1733,9 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
     await request.get(`/api/documents/${duplicateId}`)
   ).json();
   expect(duplicate.pieceMemory.nextMove).toBe("Reread the bridge.");
+  expect(duplicate.pieceMemory.nextMoveSectionId).toBe(
+    duplicate.sections[1].id,
+  );
   expect(duplicate.pieceMemory.reviewedDraftRevision).toBe(
     duplicate.draftRevision,
   );
@@ -1556,6 +1761,10 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   await manage.getByRole("button", { name: "Close dialog" }).click();
   await switcher.selectOption(first.id);
   await expect(page.getByText("Next move: Reread the bridge.")).toBeVisible();
+  expect(
+    (await (await request.get(`/api/documents/${first.id}`)).json()).pieceMemory
+      .nextMoveSectionId,
+  ).toBe(first.sections[1].id);
 });
 
 test("archiving an active document preserves its work and restores it without changing the current draft", async ({

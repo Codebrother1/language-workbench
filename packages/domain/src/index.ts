@@ -298,6 +298,7 @@ export const pieceMemorySchema = z.object({
   unresolved: z.array(z.string().max(1200)).max(200).default([]),
   decisions: z.array(memoryDecisionSchema).max(200).default([]),
   nextMove: z.string().max(1200).default(""),
+  nextMoveSectionId: z.string().min(1).nullable().default(null),
   lastSessionNote: z.string().max(3000).default(""),
   updatedAt: z.string().optional(),
   reviewedDraftRevision: z.number().int().min(0).default(0),

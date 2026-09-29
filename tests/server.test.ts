@@ -470,6 +470,7 @@ describe("local API and SQLite persistence", () => {
       unresolved: [],
       decisions: [],
       nextMove: "",
+      nextMoveSectionId: null,
       lastSessionNote: "",
       reviewedDraftRevision: 0,
     });
@@ -485,6 +486,7 @@ describe("local API and SQLite persistence", () => {
         },
       ],
       nextMove: "Rewrite the middle.",
+      nextMoveSectionId: first.sections[0].id,
       lastSessionNote: "Opening is settled.",
     };
     const saved = await (
@@ -509,7 +511,23 @@ describe("local API and SQLite persistence", () => {
       nextMove: memory.nextMove,
       decisions: [{ text: memory.decisions[0].text }],
     });
+    expect(copied.pieceMemory.nextMoveSectionId).toBe(copied.sections[0].id);
+    expect(copied.pieceMemory.nextMoveSectionId).not.toBe(first.sections[0].id);
     expect(copied.pieceMemory.decisions[0].id).not.toBe(memory.decisions[0].id);
+    const oldLink = structuredClone(saved);
+    delete oldLink.pieceMemory.nextMoveSectionId;
+    const importedOld = await (
+      await request("/api/import", "POST", { document: oldLink })
+    ).json();
+    expect(importedOld.pieceMemory.nextMove).toBe(memory.nextMove);
+    expect(importedOld.pieceMemory.nextMoveSectionId).toBeNull();
+    const missingLink = structuredClone(saved);
+    missingLink.pieceMemory.nextMoveSectionId = "missing-section";
+    const importedMissing = await (
+      await request("/api/import", "POST", { document: missingLink })
+    ).json();
+    expect(importedMissing.pieceMemory.nextMove).toBe(memory.nextMove);
+    expect(importedMissing.pieceMemory.nextMoveSectionId).toBeNull();
     expect(
       (await (await request(`/api/documents/${second.id}`)).json()).pieceMemory
         .nextMove,
