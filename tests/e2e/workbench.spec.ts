@@ -1408,6 +1408,104 @@ test("unmatched Sources do not create a Technical Writing source-context block",
   ).toBe(documentText(doc));
 });
 
+for (const width of [1440, 1024, 700])
+  test(`procedural Technical Writing stays explicit across phrase, Step and whole-piece targets at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(
+      request,
+      "Run ledger init. The server is now configured.",
+    );
+    doc.brief.contentType = "quick_start";
+    doc.sections[0].kind = "Step";
+    doc.sections[0].label = "Step";
+    doc.sections[1].kind = "Verification";
+    doc.sections[1].label = "Verification";
+    doc.sources = [
+      {
+        id: "setup",
+        title: "Ledger setup note",
+        kind: "notes",
+        text: "After ledger init, check ledger status for an initialized state.",
+        url: "",
+      },
+    ];
+    doc.revisionPlan = [
+      {
+        id: "note",
+        sectionId: doc.sections[0].id,
+        text: "Check the first success signal.",
+        createdAt: doc.createdAt,
+        completedAt: null,
+      },
+    ];
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    await page.setViewportSize({ width, height: 900 });
+    const calls: any[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+    });
+    await open(page);
+    await select(page, "ledger init");
+    await page.locator(".technical-writing-target > summary").click();
+    await page
+      .getByLabel("Your technical-writing question")
+      .fill("What should they observe after the action?");
+    expect(calls).toHaveLength(0);
+    await page
+      .getByRole("button", {
+        name: "Run Technical Writing analysis",
+        exact: true,
+      })
+      .click();
+    await expect(page.locator(".diagnosis")).toContainText(
+      "Offline cannot evaluate",
+    );
+    expect(calls[0].editTarget.scope).toBe("selection");
+    await page.getByRole("button", { name: "Whole section" }).click();
+    await expect(
+      page.getByLabel("Writing action", { exact: true }),
+    ).toHaveValue("technical_writing");
+    await page
+      .getByLabel("Your direction")
+      .fill("Does the Step depend on a token from before?");
+    await page
+      .getByRole("button", {
+        name: "Run Technical Writing analysis",
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => calls.length).toBe(2);
+    expect(calls[1].editTarget.scope).toBe("section");
+    expect(calls[1].technicalSources[0].title).toBe("Ledger setup note");
+    await page
+      .getByLabel("Your direction")
+      .fill("Where does verification depend on earlier steps?");
+    await page
+      .getByRole("button", {
+        name: "Run Technical Writing analysis · whole piece",
+      })
+      .click();
+    await expect(
+      page.getByText("WHOLE-PIECE ANALYSIS", { exact: true }),
+    ).toBeVisible();
+    expect(calls[2].editTarget.scope).toBe("document");
+    expect(calls[2].instruction).toBe(
+      "Where does verification depend on earlier steps?",
+    );
+    await expect(
+      page.getByRole("button", { name: "Propose options" }),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(saved.revisionPlan).toEqual(doc.revisionPlan);
+    expect(documentText(saved)).toBe(documentText(doc));
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+  });
+
 test("first whole-piece Technical Writing run keeps the visible question without inheriting an unchosen mechanism", async ({
   page,
   request,

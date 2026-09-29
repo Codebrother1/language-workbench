@@ -839,6 +839,183 @@ describe("technical-writing analysis contract", () => {
     });
 });
 
+describe("procedural Technical Writing prompt boundaries", () => {
+  const cases = [
+    {
+      name: "action without observable result",
+      kind: "Step",
+      type: "how_to",
+      text: "Run `ledger init`.",
+      question: "How does the reader know this worked?",
+      expected: /action.*expected result.*verification/i,
+    },
+    {
+      name: "claimed configuration without evidence",
+      kind: "Expected Result",
+      type: "readme",
+      text: "The service is now configured.",
+      question: "Can the reader distinguish success from a no-op?",
+      expected: /false confidence|observable/i,
+    },
+    {
+      name: "missing token dependency",
+      kind: "Step",
+      type: "quick_start",
+      text: "In step 4, use a token that was never created earlier.",
+      question: "What am I assuming before this step?",
+      expected: /prerequisit|state transition/i,
+    },
+    {
+      name: "hidden platform branch",
+      kind: "Step",
+      type: "how_to",
+      text: "Run this command on Apple Silicon.",
+      question: "Where does this branch belong?",
+      expected: /branch|identify which state/i,
+    },
+    {
+      name: "symptom to cause leap",
+      kind: "Troubleshooting",
+      type: "troubleshooting",
+      text: "If login fails, the token expired.",
+      question: "Am I jumping from symptom to cause?",
+      expected: /distinguishing evidence|competing causes/i,
+    },
+    {
+      name: "recovery without confirmation",
+      kind: "Recovery",
+      type: "troubleshooting",
+      text: "Restart the service.",
+      question: "How do they know the issue is resolved?",
+      expected: /verify recovery|observable/i,
+    },
+    {
+      name: "quick-start blocker",
+      kind: "Failure Mode",
+      type: "quick_start",
+      text: "If setup fails, rerun the whole process.",
+      question: "Is this too much troubleshooting for a quick start?",
+      expected: /essential recovery|first success/i,
+    },
+    {
+      name: "tutorial intentional failed attempt",
+      kind: "Step",
+      type: "tutorial",
+      text: "First run the command that fails. We will use that failure to inspect the mechanism.",
+      question: "Is the failure intentional?",
+      expected: /teaching|experiment/i,
+    },
+    {
+      name: "source-grounded missing poll",
+      kind: "Verification",
+      type: "api_reference",
+      text: "POST /exports and download the file.",
+      question: "Does this skip a state?",
+      expected: /response value|intermediate state/i,
+    },
+    {
+      name: "unsupported restart fact",
+      kind: "Step",
+      type: "readme",
+      text: "Restart to reload the config.",
+      question: "Is this actually verified?",
+      expected: /source|factual/i,
+    },
+  ] as const;
+  for (const sample of cases)
+    it(`frames ${sample.name} as a reader problem, not an automatic rewrite`, async () => {
+      const ai = request(sample.text);
+      ai.action = "technical_writing";
+      ai.stage = "diagnose";
+      ai.instruction = sample.question;
+      ai.readContext.document.brief.contentType = sample.type;
+      ai.readContext.document.sections[0].kind = sample.kind;
+      ai.readContext.document.sections[0].label = sample.kind;
+      if (sample.name === "source-grounded missing poll")
+        ai.technicalSources = [
+          {
+            title: "Export API notes",
+            kind: "notes",
+            excerpt:
+              "After POST /exports, poll GET /exports/{id} until status=complete.",
+            truncated: false,
+          },
+        ];
+      const { provider, requests } = harness(wire(output()));
+      await provider.run(ai);
+      const body = requests[0];
+      const data = JSON.parse(
+        body.input.find((part: any) => part.role === "user").content,
+      );
+      const instructions = body.input
+        .filter((part: any) => part.role === "developer")
+        .map((part: any) => part.content)
+        .join("\n");
+      expect(data.WRITER_QUESTION).toBe(sample.question);
+      expect(data.EDIT_TARGET.text).toBe(sample.text);
+      expect(data.TECHNICAL_WRITING_CONTEXT.procedureConsiderations).toMatch(
+        sample.expected,
+      );
+      expect(instructions).toMatch(/action.*expected result.*verification/i);
+      expect(instructions).toMatch(/not.*headings|no.*checklist/i);
+      expect(instructions).toMatch(/no replacement proposals/i);
+      expect(data.TECHNICAL_SOURCE_CONTEXT.items).toEqual(
+        ai.technicalSources ?? [],
+      );
+      if (!ai.technicalSources)
+        expect(instructions).toMatch(
+          /without supplied evidence|no source excerpt/i,
+        );
+    });
+  it("deepens procedural role semantics and cross-section dependencies without requiring every section to be a step", async () => {
+    const ai = request(
+      "Set APP_MODE=prod. The server starts. GET /health returns 200.",
+    );
+    ai.action = "technical_writing";
+    ai.stage = "diagnose";
+    ai.instruction = "Does verification prove the new mode took effect?";
+    ai.readContext.document.brief.contentType = "how_to";
+    for (const kind of [
+      "Step",
+      "Expected Result",
+      "Verification",
+      "Failure Mode",
+      "Troubleshooting",
+      "Recovery",
+    ] as const) {
+      ai.readContext.document.sections[0].kind = kind;
+      const { provider, requests } = harness(wire(output()));
+      await provider.run(ai);
+      const data = JSON.parse(
+        requests[0].input.find((part: any) => part.role === "user").content,
+      );
+      expect(data.TECHNICAL_WRITING_CONTEXT.sectionKind).toBe(kind);
+      expect(
+        data.TECHNICAL_WRITING_CONTEXT.roleConsiderations.length,
+      ).toBeGreaterThan(80);
+    }
+    ai.readContext.document.sections.push(
+      newSection("Prerequisite", "Create the token before step four."),
+    );
+    ai.editTarget = documentTarget(ai.readContext.document);
+    const { provider, requests } = harness(wire(output()));
+    await provider.run(ai);
+    const data = JSON.parse(
+      requests[0].input.find((part: any) => part.role === "user").content,
+    );
+    const instructions = requests[0].input
+      .filter((part: any) => part.role === "developer")
+      .map((part: any) => part.content)
+      .join("\n");
+    expect(data.EDIT_TARGET.scope).toBe("document");
+    expect(
+      data.READ_CONTEXT.document.sections.map((section: any) => section.id),
+    ).toEqual(ai.readContext.document.sections.map((section) => section.id));
+    expect(instructions).toMatch(/stable section (?:ID|identity).*order/i);
+    expect(instructions).toMatch(/do not.*reorder/i);
+  });
+});
+
 describe("official OpenAI Responses SDK contract (injected offline transport)", () => {
   it("uses structured Responses, store:false, filtered context, and keeps credentials outside browser-facing output", async () => {
     const ai = request();

@@ -35,15 +35,44 @@ export const technicalContentConsiderations: Partial<
     "Audience attention, spoken pacing, concept density and spoken memory load, demo setup and demo payoff, story, reveal, repetition, callback and transitions. Consider what slides carry beyond speech and whether a listener can recover after missing one point; narrative roles are valid rather than reference-document errors.",
 };
 export const technicalRoleConsiderations: Record<string, string> = {
-  Prerequisite: "What must already be true?",
-  Verification: "How could the reader know this worked?",
-  "Failure Mode": "What can go wrong, and under which condition?",
+  Prerequisite:
+    "What must already be true before the reader acts, and has the document established it?",
+  Step: "What action can the reader take from their current state? Check prerequisites, variable substitution, hidden branches, state transition and immediate observable result without requiring imperative voice.",
+  "Expected Result":
+    "What should the reader observe after the action? Distinguish actual output or state change from the writer's interpretation; do not mistake a claimed result for verified success.",
+  Verification:
+    "What claim is this checking, what evidence is observable, and could the check pass during partial success or a no-op? What would a failed check mean?",
+  "Failure Mode":
+    "What trigger or condition makes this possible, what symptom and impact are observable, how could the reader detect it, and what recovery is relevant without formal FMEA language?",
+  Troubleshooting:
+    "What symptom is observable, what diagnostic evidence distinguishes competing causes, where does uncertainty remain, and how would recovery be confirmed without requiring a decision tree?",
+  Recovery:
+    "What intended state should be restored, what might change or be lost, does it depend on an unresolved diagnosis, and how could the reader verify recovery? Do not invent destructive consequences.",
   Tradeoff: "What is gained and sacrificed?",
   "Mental Model": "What representation helps the reader reason?",
-  Demo: "What does the audience observe?",
+  Demo: "What does the audience observe, and can a failed demo still communicate the concept?",
   Example:
     "What does this example illuminate, and what complexity does it add?",
 };
+export const proceduralJobConsiderations: Partial<
+  Record<AIRequest["readContext"]["document"]["brief"]["contentType"], string>
+> = {
+  quick_start:
+    "Prioritize the first executable action, prerequisite friction, first meaningful success, one trustworthy verification signal and only essential recovery. Balance a minimal happy path with a common failure that would block it; a concept-first safety explanation can be deliberate.",
+  how_to:
+    "Prioritize the reader's concrete goal, trustworthy action sequence and necessary branches. Ask whether enough observation proves completion, where common blockers need recovery and whether an explanatory detour helps this action rather than becoming a tutorial.",
+  readme:
+    "If this README includes a procedure, consider environment assumptions, install/configure/start state transitions, startup signal, the most likely setup blocker and the next useful destination. A README need not be only an installation checklist.",
+  tutorial:
+    "A procedure may be an experiment, deliberate mistake or exploratory command used to teach, not merely the shortest path to completion. Consider what the reader learns from a failed attempt, observable checkpoints and the transfer beyond the exact example.",
+  api_reference:
+    "For an API example, consider authentication, request, response, pagination or retry dependencies, response values carried from an intermediate state, illustrative versus normative behavior, error branches and visible success criteria. Do not assert API behavior without supplied source evidence.",
+  troubleshooting:
+    "Move from an observable symptom through evidence or a diagnostic test to plausible causes, recovery and verification after recovery. Preserve uncertainty when evidence does not distinguish causes.",
+  technical_talk:
+    "A demo is a live procedure for a listener: what is set up, what outcome the audience expects or can see, and whether the presenter can recover or still teach the concept if it fails. Do not turn a spoken demo into a documentation checklist.",
+};
+export const proceduralWritingInstructions = `PROCEDURAL WRITING (only when procedureConsiderations are present): Diagnose the writer's exact question and target using only materially relevant parts of action, expected result, verification, failure and recovery. These are distinct concepts, not mandatory headings, separate sections, a rigid order or a checklist. An action can require a token, working directory, running server, prior output or permission; name the specific dependency or placeholder without inventing it. Distinguish the state before the action, the state it may change and the observable after state; ask whether a branch matters before the action and whether the reader can identify it. An expected result is not by itself verification; test whether the offered evidence can pass during a no-op or partial failure before accepting rhetoric like 'It worked.' Do not claim the system failed. A symptom alone does not establish a cause: ask which supplied evidence or test distinguishes competing causes before proposing recovery. Recovery may require state, access, retries or verification after repair; ask about unsupported risks rather than inventing technical consequences. Quick starts may deliberately keep the happy path short, tutorials may deliberately fail to teach, and demos may succeed rhetorically even when a command fails. A single paragraph can do several jobs; never require separate headings, produce a template, execute commands, auto-reorder, or create replacement prose. When the exact target is a whole document, examine ordered sections by stable section ID and reader dependency rather than guessing identity from labels; identify cross-section prerequisites or distant checks without proposing automatic reordering. Source excerpts may support a procedure or reveal a missing intermediate state; when none support a factual claim, discuss the assumption without factual verification. Focus on the smallest useful distinction, explain the tradeoff and leave the decision to the writer.`;
 export function technicalWritingContext(request: AIRequest) {
   const brief = request.readContext.document.brief;
   const section = request.readContext.document.sections.find(
@@ -57,8 +86,26 @@ export function technicalWritingContext(request: AIRequest) {
     destination: brief.destination,
     customNotes: brief.customNotes,
   };
+  const procedural =
+    [
+      "Step",
+      "Expected Result",
+      "Verification",
+      "Failure Mode",
+      "Troubleshooting",
+      "Recovery",
+      "Demo",
+    ].includes(saved.sectionKind ?? "") ||
+    /\b(?:run|step|command|configur(?:e|ed|ation)|restart|start|install|token|branch|fail(?:s|ed|ure)?|recover(?:y)?|verify|verification|worked|result|status|output|poll|migrat(?:e|ion)|demo|success|health)\b/i.test(
+      `${request.followUp?.question ?? request.instruction} ${request.editTarget.text.slice(0, 4000)}`,
+    );
   return {
     ...saved,
+    ...(procedural
+      ? {
+          procedureConsiderations: `Action, expected result and verification are distinct reader questions, not headings. A claimed result without observable evidence can create false confidence. Ask what state applies before the action, which branch the reader can identify and how failure or recovery can be distinguished; withhold factual verification without supplied Source evidence. ${saved.sectionKind ? (technicalRoleConsiderations[saved.sectionKind] ?? "") : ""} ${proceduralJobConsiderations[saved.contentType] ?? "Only use procedural distinctions relevant to this question."}`,
+        }
+      : {}),
     considerations:
       technicalContentConsiderations[saved.contentType] ??
       "reader knowledge, communicative purpose and the cost of each choice",

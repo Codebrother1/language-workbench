@@ -18,6 +18,7 @@ import {
 import {
   developerInstructions,
   technicalWritingInstructions,
+  proceduralWritingInstructions,
   technicalWritingContext,
   forbiddenPhrases,
   protectedSurrounding,
@@ -75,6 +76,9 @@ export class OpenAIProvider implements LLMProvider {
     validateWritingRequest(request);
     // The server filters in addition to telling the model what is authoritative.
     const technical = request.action === "technical_writing";
+    const technicalContext = technical
+      ? technicalWritingContext(request)
+      : undefined;
     const sourceItems = technical
       ? (request.technicalSources ??
         (request.followUp
@@ -163,6 +167,14 @@ export class OpenAIProvider implements LLMProvider {
               },
             ]
           : []),
+        ...(technicalContext?.procedureConsiderations
+          ? [
+              {
+                role: "developer" as const,
+                content: proceduralWritingInstructions,
+              },
+            ]
+          : []),
         ...(request.explicitGuidance?.length ||
         request.explicitBriefContext?.length
           ? [
@@ -189,10 +201,7 @@ export class OpenAIProvider implements LLMProvider {
             EDIT_TARGET: request.editTarget,
             WRITER_SELECTED_GUIDANCE: request.explicitGuidance,
             WRITER_SELECTED_BRIEF_CONTEXT: request.explicitBriefContext,
-            TECHNICAL_WRITING_CONTEXT:
-              request.action === "technical_writing"
-                ? technicalWritingContext(request)
-                : undefined,
+            TECHNICAL_WRITING_CONTEXT: technicalContext,
             TECHNICAL_SOURCE_CONTEXT: technical
               ? {
                   items: sourceItems,
