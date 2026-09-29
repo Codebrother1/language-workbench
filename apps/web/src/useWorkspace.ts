@@ -40,6 +40,8 @@ import {
   documentText,
   documentTarget,
   sectionText,
+  structuralMechanisms,
+  technicalRunControls,
   targetFor,
   validateTarget,
   paragraphs,
@@ -229,6 +231,9 @@ function guidanceKey(target: EditTarget): string {
 export function useWorkspace() {
   const initial = useRef(newDocument());
   const [doc, setDoc] = useState(initial.current);
+  const [technicalSectionReturnId, setTechnicalSectionReturnId] = useState<
+    string | null
+  >(null);
   const [stagedPassage, setStagedPassage] = useState<{
     documentId: string;
     sourceRunId: string;
@@ -249,6 +254,7 @@ export function useWorkspace() {
     setStagedPassage(null);
     setGuidanceDraft(null);
     setBriefDraft(null);
+    setTechnicalSectionReturnId(null);
   }, [doc.id]);
   const persisted = useRef(doc);
   // Preserve section metadata when rich-editor undo resurrects a removed/reordered node.
@@ -1772,6 +1778,64 @@ export function useWorkspace() {
   };
   const setInstruction = (v: SetStateAction<string>) =>
     setDraftField("instruction", v);
+  const setTechnicalInstruction = (value: string) => {
+    const activeTarget = historicalDraftTarget ?? targetRef.current;
+    const owner = activeTarget?.sectionId ?? sectionId;
+    patchWorkbench(
+      (wb) => ({
+        ...patchTargetDraft(wb, activeTarget, { instruction: value }),
+        action: "technical_writing",
+      }),
+      owner,
+    );
+  };
+  const carryTechnicalQuestion = (destination: EditTarget, replace = false) => {
+    const source = documentWorkbench
+      ? documentTarget(current.current)
+      : targetRef.current;
+    const sourceWorkbench = getWorkbench(
+      current.current,
+      documentWorkbench ? null : (source?.sectionId ?? null),
+    );
+    const question = getTargetDraft(sourceWorkbench, source).instruction;
+    const mechanism = sourceWorkbench.controls.mechanism;
+    const selectedMechanism =
+      mechanism !== undefined &&
+      (sourceWorkbench.selectedControlKeys?.includes("mechanism") ||
+        mechanism !== structuralMechanisms[0].name);
+    if (!question.trim() && !selectedMechanism) return;
+    const owner =
+      destination.scope === "document" ? null : destination.sectionId;
+    const existing = getTargetDraft(
+      getWorkbench(current.current, owner),
+      destination,
+    ).instruction;
+    if (existing === question && !selectedMechanism) return;
+    if (question.trim() && existing && existing !== question && !replace) {
+      setNotice(
+        "This target has its own saved direction. Your earlier question remains with its original target.",
+      );
+      return;
+    }
+    update((doc) =>
+      updateWorkbench(doc, owner, (wb) => ({
+        ...patchTargetDraft(
+          wb,
+          destination,
+          question.trim() ? { instruction: question } : {},
+        ),
+        action: "technical_writing",
+        ...(selectedMechanism
+          ? {
+              controls: { ...wb.controls, mechanism },
+              selectedControlKeys: [
+                ...new Set([...(wb.selectedControlKeys ?? []), "mechanism"]),
+              ],
+            }
+          : {}),
+      })),
+    );
+  };
   const setAnswer = (v: SetStateAction<string>) => setDraftField("answer", v);
   const responseAnswer =
     activeRun && responseTarget
@@ -1796,7 +1860,21 @@ export function useWorkspace() {
       action: typeof v === "function" ? v(wb.action as WritingAction) : v,
     }));
   const setControls = (v: SetStateAction<SectionWorkbench["controls"]>) =>
-    setField("controls", v);
+    patchWorkbench((wb) => {
+      const next = typeof v === "function" ? v(wb.controls) : v;
+      return {
+        ...wb,
+        controls: next,
+        selectedControlKeys: [
+          ...new Set([
+            ...(wb.selectedControlKeys ?? []),
+            ...Object.keys(next).filter(
+              (key) => next[key] !== wb.controls[key],
+            ),
+          ]),
+        ],
+      };
+    });
   const setLens = (v: SetStateAction<LensOptions>) => setField("lens", v);
   const setOneOffModel = (v: ModelRef | null) =>
     patchWorkbench((wb) => ({
@@ -2393,7 +2471,13 @@ export function useWorkspace() {
             ? ""
             : answerForRequest,
       ...(structureInput ? { structure: structureInput } : {}),
-      controls: { ...wb.controls },
+      controls:
+        chosen === "technical_writing"
+          ? technicalRunControls(wb.controls, wb.selectedControlKeys)
+          : { ...wb.controls },
+      ...(chosen === "technical_writing" && wb.selectedControlKeys?.length
+        ? { selectedControlKeys: wb.selectedControlKeys }
+        : {}),
       model: route.model,
       ...(chosenOneOff ? { chainModel: chosenOneOff } : {}),
       question:
@@ -2574,6 +2658,30 @@ export function useWorkspace() {
       );
     }
     return operate(stage, override);
+  };
+  const switchToTechnicalDocument = () => {
+    const source = targetRef.current;
+    if (source?.sectionId) setTechnicalSectionReturnId(source.sectionId);
+    const destination = documentTarget(current.current);
+    carryTechnicalQuestion(destination, true);
+    setTarget(documentTarget(current.current));
+    setDocumentWorkbench(true);
+  };
+  const returnToTechnicalSection = () => {
+    if (!technicalSectionReturnId) return;
+    carryTechnicalQuestion(
+      targetFor(current.current, technicalSectionReturnId),
+    );
+    focusSection(technicalSectionReturnId);
+    setTechnicalSectionReturnId(null);
+  };
+  const runWholeTechnicalAnalysis = () => {
+    if (!documentWorkbench) {
+      const source = targetRef.current;
+      if (source?.sectionId) setTechnicalSectionReturnId(source.sectionId);
+      carryTechnicalQuestion(documentTarget(current.current), true);
+    }
+    return operate("diagnose", "technical_writing");
   };
   const runTechnicalAnalysis = () =>
     operate(
@@ -3443,7 +3551,11 @@ export function useWorkspace() {
       kind: (typeof rhetoricalTargets)[number]["kind"],
     ) => {
       const choice = rhetoricalTargets.find((item) => item.kind === kind);
-      if (choice) selectExactTarget(choice.target);
+      if (choice) {
+        if (currentWorkbench.action === "technical_writing")
+          carryTechnicalQuestion(choice.target);
+        selectExactTarget(choice.target);
+      }
     },
     askLens,
     askAboutCandidate,
@@ -3471,6 +3583,10 @@ export function useWorkspace() {
     setResponseAnswer,
     instruction,
     setInstruction,
+    setTechnicalInstruction,
+    technicalSectionReturnId,
+    switchToTechnicalDocument,
+    returnToTechnicalSection,
     action,
     setAction,
     controls,
@@ -3494,6 +3610,7 @@ export function useWorkspace() {
     mergeSection,
     ask,
     runTechnicalAnalysis,
+    runWholeTechnicalAnalysis,
     askFollowUp,
     stagedCurrentPassage,
     stageCurrentPassage,

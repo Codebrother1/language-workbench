@@ -216,6 +216,7 @@ export const workbenchRunSchema = z.object({
   instruction: z.string(),
   answer: z.string(),
   controls: z.record(z.union([z.string(), z.number(), z.boolean()])),
+  selectedControlKeys: z.array(z.string()).optional(),
   model: modelRefSchema.nullable(),
   chainModel: modelRefSchema.optional(),
   conversation: z.array(labConversationTurnSchema).max(24).default([]),
@@ -246,6 +247,7 @@ export const sectionWorkbenchSchema = z.object({
   controls: z
     .record(z.union([z.string(), z.number(), z.boolean()]))
     .default({}),
+  selectedControlKeys: z.array(z.string()).optional(),
   lens: lensOptionsSchema.default({}),
   oneOffModel: modelRefSchema.nullable().default(null),
   runChain: z
@@ -1300,6 +1302,18 @@ export const structuralMechanisms = [
       "Order known material by what the reader should understand at each moment.",
   },
 ];
+export function technicalRunControls(
+  controls: SectionWorkbench["controls"],
+  selectedControlKeys?: string[],
+): SectionWorkbench["controls"] {
+  const filtered = { ...controls };
+  if (
+    filtered.mechanism === structuralMechanisms[0].name &&
+    !selectedControlKeys?.includes("mechanism")
+  )
+    delete filtered.mechanism;
+  return filtered;
+}
 export const defaultPacks: KnowledgePack[] = [
   [
     "technical",

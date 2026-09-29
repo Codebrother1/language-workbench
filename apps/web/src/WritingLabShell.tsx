@@ -446,7 +446,8 @@ export function WritingLabShell({
       },
     }).model.providerId === "mock";
   const isWholeAnalysis = Boolean(
-    response && responseTarget?.scope === "document",
+    target?.scope === "document" ||
+    (response && responseTarget?.scope === "document"),
   );
   const targetLabel = target
     ? humanTargetLabel(target)
@@ -872,10 +873,14 @@ export function WritingLabShell({
               placeholder="What should the critique examine?"
             />
           </Field>
-          {target?.sectionId && (
+          {(w.technicalSectionReturnId || target?.sectionId) && (
             <Button
               className="full"
-              onClick={() => w.focusSection(target.sectionId!)}
+              onClick={() =>
+                w.technicalSectionReturnId
+                  ? w.returnToTechnicalSection()
+                  : w.focusSection(target!.sectionId!)
+              }
             >
               Return to selected section
             </Button>
@@ -940,6 +945,15 @@ export function WritingLabShell({
                         : choice.label}
                     </Button>
                   ))}
+                  {technicalContext && (
+                    <Button
+                      className="text-button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => w.switchToTechnicalDocument()}
+                    >
+                      Whole piece
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -1027,7 +1041,9 @@ export function WritingLabShell({
                       data-technical-writing-direction
                       rows={2}
                       value={w.instruction}
-                      onChange={(e) => w.setInstruction(e.target.value)}
+                      onChange={(e) =>
+                        w.setTechnicalInstruction(e.target.value)
+                      }
                       placeholder="What reader problem or tradeoff should this passage be examined for?"
                     />
                   </Field>
@@ -2057,7 +2073,7 @@ export function WritingLabShell({
           <Button
             className="full"
             disabled={w.busy || !w.ready || !hasWriting}
-            onClick={() => w.ask("diagnose", "technical_writing")}
+            onClick={() => w.runWholeTechnicalAnalysis()}
           >
             Run Technical Writing analysis · whole piece
           </Button>

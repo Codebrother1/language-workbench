@@ -618,6 +618,7 @@ export type RunCapture = {
   instruction: string;
   answer: string;
   controls: SectionWorkbench["controls"];
+  selectedControlKeys?: SectionWorkbench["selectedControlKeys"];
   model: ModelRef | null;
   chainModel?: ModelRef;
   guidance?: WorkbenchRun["guidance"];
@@ -677,6 +678,9 @@ export function makeRun(
       ? { technicalContext: structuredClone(capture.technicalContext) }
       : {}),
     controls: { ...capture.controls },
+    ...(capture.selectedControlKeys?.length
+      ? { selectedControlKeys: [...capture.selectedControlKeys] }
+      : {}),
     model: response.model ?? capture.model,
     ...(capture.chainModel ? { chainModel: capture.chainModel } : {}),
     ...(capture.lens ? { lens: capture.lens } : {}),

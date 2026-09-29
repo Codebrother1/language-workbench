@@ -1163,6 +1163,128 @@ for (const width of [1440, 1024, 700])
     expect(calls).toHaveLength(1);
   });
 
+test("first whole-piece Technical Writing run keeps the visible question without inheriting an unchosen mechanism", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(
+    request,
+    "First explain the system. Then run the request.",
+  );
+  doc.brief.contentType = "quick_start";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const question =
+    "Does this opening work for a quick start, or am I making the reader wait too long before doing anything?";
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await open(page);
+  await page.getByLabel("Your direction").fill(question);
+  expect(calls).toHaveLength(0);
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis · whole piece",
+    })
+    .click();
+  await expect(
+    page.getByText("WHOLE-PIECE ANALYSIS", { exact: true }),
+  ).toBeVisible();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({
+    action: "technical_writing",
+    instruction: question,
+    editTarget: { scope: "document" },
+  });
+  expect(calls[0].controls.mechanism).toBeUndefined();
+  await expect(page.getByLabel("Whole-piece direction")).toHaveValue(question);
+  await save(page);
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.workbench.runs.at(-1)).toMatchObject({
+    instruction: question,
+    action: "technical_writing",
+    target: { scope: "document" },
+  });
+  expect(saved.workbench.runs.at(-1).controls.mechanism).toBeUndefined();
+  expect(documentText(saved)).toBe(documentText(doc));
+  await page.locator(".local-history > summary").click();
+  await expect(page.locator(".local-history .run-question").last()).toHaveText(
+    question,
+  );
+});
+
+test("an explicitly chosen fine-tune remains attributable on a whole-piece Technical Writing run", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.brief.contentType = "quick_start";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await open(page);
+  const question = "Would the reader benefit from seeing the result first?";
+  await page.getByLabel("Your direction").fill(question);
+  await page.locator(".whole-piece details summary").click();
+  const mechanism = page.getByLabel("Structural mechanism");
+  await mechanism.selectOption("Open on a strange detail");
+  await mechanism.selectOption("Begin with consequence");
+  expect(calls).toHaveLength(0);
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis · whole piece",
+    })
+    .click();
+  await expect(
+    page.getByText("WHOLE-PIECE ANALYSIS", { exact: true }),
+  ).toBeVisible();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].instruction).toBe(question);
+  expect(calls[0].controls.mechanism).toBe("Begin with consequence");
+  await save(page);
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.workbench.selectedControlKeys).toContain("mechanism");
+  expect(saved.workbench.runs.at(-1).controls.mechanism).toBe(
+    "Begin with consequence",
+  );
+  expect(saved.workbench.runs.at(-1).selectedControlKeys).toContain(
+    "mechanism",
+  );
+  expect(documentText(saved)).toBe(documentText(doc));
+});
+
+test("a pending Technical Writing question survives phrase, section and whole-piece scope changes without a call", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.brief.contentType = "quick_start";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await select(page, "I really utilize tools");
+  await page.locator(".technical-writing-target summary").click();
+  const question = "Is the example doing too many things?";
+  await page.getByLabel("Your technical-writing question").fill(question);
+  await page.getByRole("button", { name: "Whole section" }).click();
+  await expect(page.getByLabel("Your direction")).toHaveValue(question);
+  await page.getByRole("button", { name: "Whole piece", exact: true }).click();
+  await expect(page.getByLabel("Whole-piece direction")).toHaveValue(question);
+  await page
+    .getByRole("button", { name: "Return to selected section" })
+    .click();
+  await expect(page.getByLabel("Your direction")).toHaveValue(question);
+  expect(calls).toHaveLength(0);
+  expect(
+    documentText(await (await request.get(`/api/documents/${doc.id}`)).json()),
+  ).toBe(documentText(doc));
+});
+
 test("Technical Writing analyzes an exact phrase or whole piece only after an explicit Run", async ({
   page,
   request,

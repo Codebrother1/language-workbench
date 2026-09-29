@@ -7,7 +7,9 @@ import {
   modelResponseSchema,
   radarItemSchema,
   uid,
+  technicalRunControls,
   type AIRequest,
+  type SectionWorkbench,
   type AIResponse,
   type LanguageRadarItem,
   type LLMProvider,
@@ -71,12 +73,50 @@ export class OpenAIProvider implements LLMProvider {
   async run(request: AIRequest): Promise<AIResponse> {
     validateWritingRequest(request);
     // The server filters in addition to telling the model what is authoritative.
+    const technical = request.action === "technical_writing";
+    const sanitizeWorkbench = (wb: SectionWorkbench | undefined) =>
+      technical && wb
+        ? {
+            ...wb,
+            controls: technicalRunControls(wb.controls, wb.selectedControlKeys),
+            runs: wb.runs.map((run) => ({
+              ...run,
+              controls: technicalRunControls(
+                run.controls,
+                run.selectedControlKeys,
+              ),
+            })),
+          }
+        : wb;
+    const owner =
+      request.editTarget.scope === "document"
+        ? request.readContext.document.workbench
+        : request.readContext.document.sections.find(
+            (section) => section.id === request.editTarget.sectionId,
+          )?.workbench;
+    const selectedControlKeys = request.followUp?.runId
+      ? (owner?.runs.find((run) => run.id === request.followUp?.runId)
+          ?.selectedControlKeys ?? owner?.selectedControlKeys)
+      : owner?.selectedControlKeys;
     const context = {
       ...request.readContext,
       document: {
         ...request.readContext.document,
         revisionCheckpoint: undefined,
         revisionPlan: undefined,
+        ...(technical
+          ? {
+              workbench: sanitizeWorkbench(
+                request.readContext.document.workbench,
+              ),
+              sections: request.readContext.document.sections.map(
+                (section) => ({
+                  ...section,
+                  workbench: sanitizeWorkbench(section.workbench),
+                }),
+              ),
+            }
+          : {}),
       },
       RELATIONAL_CONTEXT: relationalContext(request),
       knowledgePacks: request.readContext.knowledgePacks.filter(
@@ -137,7 +177,9 @@ export class OpenAIProvider implements LLMProvider {
             stage: request.stage,
             instruction: request.instruction,
             humanAnswer: request.answer,
-            controls: request.controls,
+            controls: technical
+              ? technicalRunControls(request.controls, selectedControlKeys)
+              : request.controls,
             lens: request.lens,
             STRUCTURE: request.structure,
             PROTECTED_SURROUNDING: request.lens

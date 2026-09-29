@@ -344,6 +344,90 @@ describe("technical-writing analysis contract", () => {
       context: /precision/i,
     },
   ] as const;
+  it("does not present an unchosen structural default as writer-stated on a quick-start question", async () => {
+    const question =
+      "Does this opening work for a quick start, or am I making the reader wait too long before doing anything?";
+    const ai = request("First explain the system. Then run the request.");
+    ai.action = "technical_writing";
+    ai.stage = "diagnose";
+    ai.instruction = question;
+    ai.readContext.document.brief.contentType = "quick_start";
+    ai.controls = { mechanism: "Begin with consequence" };
+    ai.readContext.document.sections[0].workbench = {
+      ...emptyWorkbench(),
+      controls: { mechanism: "Begin with consequence" },
+    };
+    ai.explicitGuidance = [
+      {
+        source: "style_dna",
+        key: "register",
+        title: "Voice",
+        text: "Keep a conversational voice.",
+      },
+    ];
+    ai.explicitBriefContext = [
+      {
+        source: "writing_brief",
+        field: "audience",
+        value: "Developers who know HTTP",
+      },
+    ];
+    const { provider, requests } = harness(wire(output()));
+    await provider.run(ai);
+    const data = JSON.parse(
+      requests[0].input.find((part: any) => part.role === "user").content,
+    );
+    expect(data.WRITER_QUESTION).toBe(question);
+    expect(data.controls.mechanism).toBeUndefined();
+    expect(
+      data.READ_CONTEXT.document.sections[0].workbench.controls.mechanism,
+    ).toBeUndefined();
+    expect(data.TECHNICAL_WRITING_CONTEXT.considerations).toMatch(
+      /time to first success/i,
+    );
+    expect(data.WRITER_SELECTED_GUIDANCE).toEqual(ai.explicitGuidance);
+    expect(data.WRITER_SELECTED_BRIEF_CONTEXT).toEqual(ai.explicitBriefContext);
+    ai.readContext.document.sections[0].workbench.selectedControlKeys = [
+      "mechanism",
+    ];
+    const chosen = harness(wire(output()));
+    await chosen.provider.run(ai);
+    const selected = JSON.parse(
+      chosen.requests[0].input.find((part: any) => part.role === "user")
+        .content,
+    );
+    expect(selected.controls.mechanism).toBe("Begin with consequence");
+    expect(
+      selected.READ_CONTEXT.document.sections[0].workbench.controls.mechanism,
+    ).toBe("Begin with consequence");
+    ai.readContext.document.sections[0].workbench.selectedControlKeys =
+      undefined;
+    ai.readContext.document.sections[0].workbench.controls.mechanism =
+      "Open on a strange detail";
+    ai.controls.mechanism = "Open on a strange detail";
+    const persisted = harness(wire(output()));
+    await persisted.provider.run(ai);
+    const retained = JSON.parse(
+      persisted.requests[0].input.find((part: any) => part.role === "user")
+        .content,
+    );
+    expect(retained.controls.mechanism).toBe("Open on a strange detail");
+    ai.editTarget = documentTarget(ai.readContext.document);
+    ai.readContext.document.workbench = {
+      ...emptyWorkbench(),
+      controls: { mechanism: "Begin with consequence" },
+    };
+    ai.controls.mechanism = "Begin with consequence";
+    const whole = harness(wire(output()));
+    await whole.provider.run(ai);
+    const entire = JSON.parse(
+      whole.requests[0].input.find((part: any) => part.role === "user").content,
+    );
+    expect(entire.controls.mechanism).toBeUndefined();
+    expect(
+      entire.READ_CONTEXT.document.workbench.controls.mechanism,
+    ).toBeUndefined();
+  });
   it("uses a saved technical context for follow-ups rather than retroactively adopting the edited Brief", async () => {
     const ai = request("Explain the model before the commands.");
     ai.action = "technical_writing";
