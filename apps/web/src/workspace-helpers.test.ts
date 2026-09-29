@@ -157,6 +157,169 @@ describe("contextual Brief retrieval", () => {
 });
 
 describe("bounded deterministic technical source context", () => {
+  const choose = (
+    passage: string,
+    question: string,
+    sources: { title: string; text: string }[],
+  ) => {
+    const doc = newDocument("Technical draft", passage);
+    doc.sources = sources.map((source, index) => ({
+      id: String(index),
+      kind: "notes",
+      url: "",
+      ...source,
+    }));
+    return selectTechnicalSources(
+      doc,
+      targetFor(doc, doc.sections[0].id),
+      question,
+    );
+  };
+  it("prefers a retry policy over incidental client/network words", () => {
+    const selected = choose(
+      "The client retries transient network failures.",
+      "Are retries clear?",
+      [
+        {
+          title: "General engineering notes",
+          text: "Client laptops connect to the corporate network.",
+        },
+        {
+          title: "Retry policy",
+          text: "The client retries failed requests up to three times.",
+        },
+      ],
+    );
+    expect(selected.map((source) => source.title)).toEqual(["Retry policy"]);
+  });
+  it("ranks a strong title and numeric evidence ahead of generic API and token-bucket overlap", () => {
+    expect(
+      choose(
+        "How many requests per minute are allowed?",
+        "What is the rate limit?",
+        [
+          { title: "Exports API", text: "The API supports exporting reports." },
+          {
+            title: "Rate limits and quotas",
+            text: "Allow 60 requests per minute per key.",
+          },
+        ],
+      ).map((source) => source.title),
+    ).toEqual(["Rate limits and quotas"]);
+    expect(
+      choose(
+        "How long does the session token last?",
+        "Is the session lifetime clear?",
+        [
+          {
+            title: "Rate limits",
+            text: "Requests replenish after one minute per token bucket.",
+          },
+          {
+            title: "Session lifetime",
+            text: "The session token expires 15 minutes after issuance.",
+          },
+        ],
+      ).map((source) => source.title),
+    ).toEqual(["Session lifetime"]);
+  });
+  it("keeps exact status codes, flags, paths and identifiers meaningful without weak filler", () => {
+    const selected = choose(
+      "HTTP 202 for /exports? Set page_size and --retry-count.",
+      "Is the 202 behavior clear for /exports?",
+      [
+        {
+          title: "Generic API notes",
+          text: "Use the client for requests after install.",
+        },
+        {
+          title: "Export status details",
+          text: "HTTP 202 for /exports with page_size=100 and --retry-count 3.",
+        },
+        { title: "Install notes", text: "Client installation uses the API." },
+        {
+          title: "Network notes",
+          text: "Network requests sometimes work after install.",
+        },
+        {
+          title: "Client guide",
+          text: "The client uses the API after installation.",
+        },
+        {
+          title: "System log",
+          text: "The system logs request and response data.",
+        },
+      ],
+    );
+    expect(selected.map((source) => source.title)).toEqual([
+      "Export status details",
+    ]);
+    expect(
+      choose("Set cursor.", "What does cursor mean?", [
+        { title: "Pagination", text: "cursor" },
+      ]),
+    ).toHaveLength(1);
+  });
+  it("prioritizes two distinctive question matches over target-only support", () => {
+    const selected = choose(
+      "The session token expires 15 minutes after issuance.",
+      "Is the limit 60 requests per minute per key?",
+      [
+        {
+          title: "Session lifetime",
+          text: "The session token expires 15 minutes after issuance.",
+        },
+        {
+          title: "Quota detail",
+          text:
+            "Requests can be made. " +
+            "Unrelated background. ".repeat(105) +
+            "Limit: 60 requests per minute per key. Over 60 per minute returns 429.",
+        },
+      ],
+    );
+    expect(selected.map((source) => source.title)).toEqual([
+      "Quota detail",
+      "Session lifetime",
+    ]);
+  });
+  it("centers on a later dense evidence cluster and bounds its window", () => {
+    const body =
+      "Requests are accepted. " +
+      "Unrelated background. ".repeat(102) +
+      "Limit: 60 requests per minute per key. Requests above 60 per minute return 429. " +
+      "More background. ".repeat(150);
+    const selected = choose(
+      "60 requests per minute per key",
+      "Does the key have a 60 requests/minute limit?",
+      [{ title: "Quota", text: body }],
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0].excerpt).toContain("60 requests per minute per key");
+    expect(selected[0].excerpt).not.toContain("Requests are accepted.");
+    expect(selected[0].excerpt.length).toBeLessThanOrEqual(1500);
+    expect(selected[0].truncated).toBe(true);
+  });
+  it("distinguishes a complete short Source from an excerpt and sends zero for no meaningful match", () => {
+    const text = "The session token expires 15 minutes after issuance.";
+    expect(
+      choose(
+        "The session token expires 15 minutes.",
+        "How long is the session lifetime?",
+        [{ title: "Session lifetime", text }],
+      )[0],
+    ).toMatchObject({ excerpt: text, truncated: false });
+    expect(
+      choose("Does this command work on macOS?", "Is macOS supported?", [
+        {
+          title: "Client installation",
+          text: "Install the client on Windows.",
+        },
+        { title: "API overview", text: "Requests use the API." },
+        { title: "Network guide", text: "The network connection is required." },
+      ]),
+    ).toEqual([]);
+  });
   it("selects relevant supplied excerpts, never unrelated sources or unbounded bodies", () => {
     const doc = newDocument(
       "API reference",
@@ -194,12 +357,11 @@ describe("bounded deterministic technical source context", () => {
       "Does this endpoint always return 200?",
     );
     expect(selected.map((source) => source.title)).toEqual([
-      "Endpoint response",
       "Response conditions",
     ]);
     expect(selected[0].excerpt.length).toBeLessThanOrEqual(1500);
-    expect(selected[0].truncated).toBe(true);
-    expect(selected[1].excerpt).toContain("200");
+    expect(selected[0].excerpt).toContain("200");
+    expect(selected[0].truncated).toBe(false);
     expect(
       selectTechnicalSources(
         { ...doc, sources: [] },

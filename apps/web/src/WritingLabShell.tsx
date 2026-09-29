@@ -1233,7 +1233,7 @@ export function WritingLabShell({
                 data-testid="technical-source-context"
               >
                 <summary>
-                  Source context used ·{" "}
+                  Source excerpts supplied ·{" "}
                   {w.activeRun.technicalSources
                     .map((item) => item.title)
                     .join(" · ")}
@@ -1243,7 +1243,9 @@ export function WritingLabShell({
                     <b>{item.title}</b>
                     <p className="small">
                       {item.excerpt}
-                      {item.truncated ? "… (excerpt only)" : ""}
+                      {item.truncated
+                        ? "… (excerpt only)"
+                        : " (complete Source supplied)"}
                     </p>
                   </article>
                 ))}

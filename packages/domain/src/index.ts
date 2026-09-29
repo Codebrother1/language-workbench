@@ -241,6 +241,7 @@ export const workbenchRunSchema = z.object({
   briefContext: z.array(savedBriefContextSchema).max(3).default([]),
   technicalContext: technicalContextSchema.optional(),
   technicalSources: z.array(technicalSourceSchema).max(3).optional(),
+  technicalSourceCount: z.number().int().min(0).optional(),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -460,50 +461,193 @@ export function selectTechnicalSources(
   target: EditTarget,
   question: string,
 ): TechnicalSource[] {
-  const words = (value: string) => [
-    ...new Set(
-      (value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
-        (token) =>
-          token.length > 2 &&
-          !/^(?:the|and|for|with|from|that|this|are|was|you|your|does|what|when|where|which|should|would|could|have|about|source|sources|notes|note|material|reference|draft|writing)$/.test(
-            token,
-          ),
-      ),
+  const ignored = new Set(
+    "the and for with from that this are was you your does what when where which should would could have about source sources notes note material reference draft writing after before works using use".split(
+      " ",
     ),
-  ];
-  const query = new Set(words(`${question} ${target.text.slice(0, 5000)}`));
+  );
+  const weak = new Set(
+    "api client network system data request response install token minute key endpoint".split(
+      " ",
+    ),
+  );
+  const tokens = (value: string) =>
+    [
+      ...value
+        .toLowerCase()
+        .matchAll(
+          /--[\p{L}][\p{L}\p{N}_-]*|\/[\p{L}][\p{L}\p{N}_/-]*|[\p{L}\p{N}][\p{L}\p{N}_-]*/gu,
+        ),
+    ].flatMap((match) => {
+      const raw = match[0];
+      const term =
+        raw.length > 4 && raw.endsWith("ies")
+          ? `${raw.slice(0, -3)}y`
+          : raw.length > 4 && raw.endsWith("s") && !raw.endsWith("ss")
+            ? raw.slice(0, -1)
+            : raw;
+      if (ignored.has(term) || (term.length < 3 && !/^\d+$/.test(term)))
+        return [];
+      const weight =
+        /^\d{3}$/.test(term) ||
+        (/^--|^\//.test(term) && !weak.has(term.slice(1))) ||
+        (/[_-]/.test(term) && term.length > 5)
+          ? 7
+          : /^\d+$/.test(term)
+            ? 6
+            : weak.has(term)
+              ? 1
+              : term === "cursor"
+                ? 6
+                : term.length >= 5 || term === "rate"
+                  ? 4
+                  : 2;
+      return [{ term, start: match.index, weight }];
+    });
+  const questionTerms = new Map(
+    tokens(question)
+      .filter((hit) => hit.weight >= 3)
+      .map((hit) => [hit.term, hit.weight]),
+  );
+  const query = new Map<string, number>();
+  for (const hit of tokens(target.text.slice(0, 5000)))
+    query.set(hit.term, hit.weight);
+  for (const hit of tokens(question))
+    query.set(
+      hit.term,
+      Math.max(
+        query.get(hit.term) ?? 0,
+        hit.weight >= 3 ? hit.weight * 2 : hit.weight,
+      ),
+    );
+  for (const quoted of `${question} ${target.text.slice(0, 5000)}`.matchAll(
+    /["“'`]([^"”'`]{2,80})["”'`]/gu,
+  ))
+    for (const hit of tokens(quoted[1]))
+      query.set(hit.term, Math.max(query.get(hit.term) ?? 0, hit.weight + 2));
   if (!query.size) return [];
   return doc.sources
     .flatMap((source, index) => {
       const body = source.text.slice(0, 8000);
-      const titleMatches = words(source.title).filter((token) =>
-        query.has(token),
+      if (!body.trim()) return [];
+      const titleHits = tokens(source.title).filter((hit) =>
+        query.has(hit.term),
       );
-      const bodyMatches = words(body).filter((token) => query.has(token));
-      const score = titleMatches.length * 4 + bodyMatches.length;
-      if (!score || !source.text.trim()) return [];
-      const offsets = [...titleMatches, ...bodyMatches]
-        .map((token) => body.toLowerCase().indexOf(token))
-        .filter((offset) => offset >= 0);
-      const start = Math.max(
+      const titleTerms = new Set(titleHits.map((hit) => hit.term));
+      const titleScore = [...titleTerms].reduce(
+        (score, term) => score + (query.get(term) ?? 0) * 2,
         0,
-        (offsets.length ? Math.min(...offsets) : 0) - 200,
       );
-      const excerpt = source.text.slice(start, start + 1500);
+      const hits = tokens(body)
+        .filter((hit) => query.has(hit.term))
+        .map((hit) => ({ ...hit, weight: query.get(hit.term)! }));
+      const maxStart = Math.max(0, body.length - 1500);
+      let bestStart = 0,
+        bestScore = 0,
+        left = 0,
+        right = 0,
+        windowScore = 0;
+      const counts = new Map<string, number>();
+      for (const anchor of hits) {
+        const start = Math.min(maxStart, Math.max(0, anchor.start - 750));
+        while (right < hits.length && hits[right].start < start + 1500) {
+          const hit = hits[right++],
+            count = counts.get(hit.term) ?? 0;
+          if (count < 2) windowScore += hit.weight + (count === 0 ? 2 : 0);
+          counts.set(hit.term, count + 1);
+        }
+        while (left < right && hits[left].start < start) {
+          const hit = hits[left++],
+            count = counts.get(hit.term)!;
+          if (count <= 2) windowScore -= hit.weight + (count === 1 ? 2 : 0);
+          counts.set(hit.term, count - 1);
+        }
+        if (windowScore > bestScore) {
+          bestScore = windowScore;
+          bestStart = start;
+        }
+      }
+      const strongBody = hits.some((hit) => hit.weight >= 3);
+      const strongTitle =
+        [...titleTerms].filter((term) => (query.get(term) ?? 0) >= 3).length >=
+        2;
+      const score = titleScore + bestScore;
+      const questionMatches = new Set(
+        [...titleHits, ...hits]
+          .map((hit) => hit.term)
+          .filter((term) => questionTerms.has(term)),
+      );
+      const questionScore =
+        questionMatches.size >= 2
+          ? [...questionMatches].reduce(
+              (total, term) => total + questionTerms.get(term)!,
+              0,
+            )
+          : 0;
+      if (score < 8 || (!strongBody && !strongTitle)) return [];
+      let start = bestStart;
+      const before = Math.max(
+        ...["\n", ". ", "! ", "? "].map((mark) => {
+          const index = body.lastIndexOf(mark, start);
+          return index < 0 ? -1 : index + mark.length - 1;
+        }),
+      );
+      if (start > 0 && before >= start - 60) start = before + 1;
+      else if (
+        start > 0 &&
+        /[\p{L}\p{N}]/u.test(body[start - 1]) &&
+        /[\p{L}\p{N}]/u.test(body[start])
+      ) {
+        const next = body.indexOf(" ", start);
+        if (next >= 0 && next - start < 60) start = next + 1;
+      }
+      let end = Math.min(body.length, start + 1500);
+      const after = Math.max(
+        ...["\n", ". ", "! ", "? "].map((mark) => {
+          const index = body.lastIndexOf(mark, end);
+          return index < 0 ? -1 : index + mark.length;
+        }),
+      );
+      if (
+        end < body.length &&
+        after <= end &&
+        after > start + 100 &&
+        after >= end - 60
+      )
+        end = after;
+      else if (
+        end < body.length &&
+        /[\p{L}\p{N}]/u.test(body[end - 1]) &&
+        /[\p{L}\p{N}]/u.test(body[end])
+      ) {
+        const previous = body.lastIndexOf(" ", end);
+        if (previous > end - 60) end = previous;
+      }
+      const excerpt = body.slice(start, end);
       return [
         {
           index,
           score,
+          questionScore,
+          titleScore,
+          bodyScore: bestScore,
           source: {
             title: source.title.slice(0, 240),
             kind: source.kind,
             excerpt,
-            truncated: start > 0 || start + excerpt.length < source.text.length,
+            truncated: start > 0 || end < source.text.length,
           },
         },
       ];
     })
-    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .sort(
+      (a, b) =>
+        b.questionScore - a.questionScore ||
+        b.score - a.score ||
+        b.titleScore - a.titleScore ||
+        b.bodyScore - a.bodyScore ||
+        a.index - b.index,
+    )
     .slice(0, 3)
     .map((item) => item.source);
 }
@@ -691,6 +835,7 @@ export const aiRequestSchema = z.object({
   explicitBriefContext: z.array(savedBriefContextSchema).max(3).optional(),
   technicalContext: technicalContextSchema.optional(),
   technicalSources: z.array(technicalSourceSchema).max(3).optional(),
+  technicalSourceCount: z.number().int().min(0).optional(),
   followUp: z
     .object({
       runId: z.string().min(1),

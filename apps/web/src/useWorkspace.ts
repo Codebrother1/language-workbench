@@ -2445,6 +2445,7 @@ export function useWorkspace() {
               t,
               draft.instruction,
             ),
+            technicalSourceCount: current.current.sources.length,
           }
         : {}),
       ...(chosen === "technical_writing"
@@ -2550,6 +2551,9 @@ export function useWorkspace() {
           : {}),
         ...(capture.technicalSources
           ? { technicalSources: capture.technicalSources }
+          : {}),
+        ...(capture.technicalSourceCount !== undefined
+          ? { technicalSourceCount: capture.technicalSourceCount }
           : {}),
         action: chosen,
         stage,

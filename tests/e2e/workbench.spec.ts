@@ -1177,7 +1177,7 @@ for (const width of [1440, 1024, 700])
         kind: "notes",
         text:
           "The endpoint may return 202 while creation is pending; it can return 200 when complete. " +
-          "x".repeat(900),
+          "x".repeat(1700),
         url: "",
       },
       {
@@ -1216,8 +1216,12 @@ for (const width of [1440, 1024, 700])
     expect(calls[0].technicalSources).toHaveLength(1);
     expect(calls[0].technicalSources[0].excerpt).toContain("202");
     await expect(page.getByTestId("technical-source-context")).toContainText(
-      "Endpoint response notes",
+      "Source excerpts supplied · Endpoint response notes",
     );
+    await expect(
+      page.getByTestId("technical-source-context"),
+    ).not.toContainText("Source context used");
+    expect(calls[0].technicalSources[0].truncated).toBe(true);
     await expect(page.getByTestId("save-state")).toHaveText("Saved");
     let saved = await (await request.get(`/api/documents/${doc.id}`)).json();
     const original = saved.sections[0].workbench.runs.at(-1);
@@ -1263,6 +1267,146 @@ for (const width of [1440, 1024, 700])
     ).toEqual(original.technicalSources);
     expect(documentText(saved)).toBe(documentText(doc));
   });
+
+test("a later evidence cluster anchors the saved excerpt while a short Source is marked complete", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(
+    request,
+    "The session token expires 15 minutes after issuance.",
+  );
+  doc.brief.contentType = "api_reference";
+  doc.sources = [
+    {
+      id: "short",
+      title: "Session lifetime",
+      kind: "notes",
+      text: "The session token expires 15 minutes after issuance.",
+      url: "",
+    },
+    {
+      id: "long",
+      title: "Quota detail",
+      kind: "notes",
+      text:
+        "Requests can be made. " +
+        "Unrelated background. ".repeat(105) +
+        "Limit: 60 requests per minute per key. Over 60 per minute returns 429. " +
+        "Unrelated background. ".repeat(115),
+      url: "",
+    },
+  ];
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await open(page);
+  await page
+    .getByLabel("Writing action", { exact: true })
+    .selectOption("technical_writing");
+  await page
+    .getByLabel("Your direction")
+    .fill("Does the session token expire after 15 minutes?");
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".diagnosis")).toContainText(
+    "Offline cannot evaluate",
+  );
+  expect(calls[0].technicalSources.map((source: any) => source.title)).toEqual([
+    "Session lifetime",
+  ]);
+  expect(calls[0].technicalSources[0].truncated).toBe(false);
+  await page.getByTestId("technical-source-context").locator("summary").click();
+  await expect(page.getByTestId("technical-source-context")).toContainText(
+    "complete Source supplied",
+  );
+  await page
+    .getByLabel("Your direction")
+    .fill("Is the limit 60 requests per minute per key?");
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis",
+      exact: true,
+    })
+    .click();
+  await expect.poll(() => calls.length).toBe(2);
+  expect(calls[1].instruction).toBe(
+    "Is the limit 60 requests per minute per key?",
+  );
+  expect(calls[1].technicalSources[0].title).toBe("Quota detail");
+  expect(calls[1].technicalSources[0].excerpt).toContain(
+    "60 requests per minute per key",
+  );
+  expect(calls[1].technicalSources[0].excerpt).not.toContain(
+    "Requests can be made.",
+  );
+  expect(calls[1].technicalSources[0].truncated).toBe(true);
+});
+
+test("unmatched Sources do not create a Technical Writing source-context block", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request, "Does this command work on macOS?");
+  doc.brief.contentType = "readme";
+  doc.sources = [
+    {
+      id: "client",
+      title: "Client install",
+      kind: "notes",
+      text: "Install on Windows.",
+      url: "",
+    },
+    {
+      id: "network",
+      title: "Network notes",
+      kind: "notes",
+      text: "Corporate network setup.",
+      url: "",
+    },
+    {
+      id: "api",
+      title: "API guide",
+      kind: "notes",
+      text: "Requests use the API.",
+      url: "",
+    },
+  ];
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await open(page);
+  await page
+    .getByLabel("Writing action", { exact: true })
+    .selectOption("technical_writing");
+  await page
+    .getByLabel("Your direction")
+    .fill("Does this command work on macOS?");
+  expect(calls).toHaveLength(0);
+  await page
+    .getByRole("button", {
+      name: "Run Technical Writing analysis",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".diagnosis")).toContainText(
+    "Offline cannot evaluate",
+  );
+  expect(calls[0].technicalSources).toEqual([]);
+  expect(calls[0].technicalSourceCount).toBe(3);
+  await expect(page.getByTestId("technical-source-context")).toHaveCount(0);
+  expect(
+    documentText(await (await request.get(`/api/documents/${doc.id}`)).json()),
+  ).toBe(documentText(doc));
+});
 
 test("first whole-piece Technical Writing run keeps the visible question without inheriting an unchosen mechanism", async ({
   page,

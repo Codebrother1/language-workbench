@@ -447,6 +447,13 @@ describe("technical-writing analysis contract", () => {
       kind: "notes",
     });
     expect(data.TECHNICAL_SOURCE_CONTEXT.items[0].excerpt).toContain("202");
+    expect(data.TECHNICAL_SOURCE_CONTEXT.items[0].truncated).toBe(false);
+    expect(data.TECHNICAL_SOURCE_CONTEXT.availability).toBe(
+      "excerpts_supplied",
+    );
+    expect(data.TECHNICAL_SOURCE_CONTEXT.selection).toMatch(
+      /complete.*source|entire.*source/i,
+    );
     expect(instructions).toMatch(/source.*provenance|source.*supplied/i);
     expect(instructions).toMatch(/fail to establish|stronger assertion/i);
     expect(instructions).toMatch(/no.*source.*factual verification/i);
@@ -459,6 +466,31 @@ describe("technical-writing analysis contract", () => {
         .content,
     );
     expect(without.TECHNICAL_SOURCE_CONTEXT.items).toEqual([]);
+    expect(without.TECHNICAL_SOURCE_CONTEXT.availability).toBe("no_sources");
+    ai.readContext.document.sources = [
+      {
+        id: "unrelated",
+        title: "Meeting calendar",
+        kind: "notes",
+        text: "Team lunch is on Friday.",
+        url: "",
+      },
+    ];
+    ai.technicalSources = [];
+    ai.technicalSourceCount = 1;
+    const unselected = harness(wire(output()));
+    await unselected.provider.run(ai);
+    const present = JSON.parse(
+      unselected.requests[0].input.find((part: any) => part.role === "user")
+        .content,
+    );
+    expect(present.TECHNICAL_SOURCE_CONTEXT.items).toEqual([]);
+    expect(present.TECHNICAL_SOURCE_CONTEXT.availability).toBe(
+      "no_relevant_excerpt_selected",
+    );
+    expect(present.TECHNICAL_SOURCE_CONTEXT.selection).toMatch(
+      /no relevant source excerpt/i,
+    );
   });
   it("does not present an unchosen structural default as writer-stated on a quick-start question", async () => {
     const question =

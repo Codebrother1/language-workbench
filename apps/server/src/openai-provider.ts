@@ -85,6 +85,16 @@ export class OpenAIProvider implements LLMProvider {
               request.instruction,
             )))
       : [];
+    const sourceCount =
+      request.technicalSourceCount ??
+      (request.followUp ? null : request.readContext.document.sources.length);
+    const sourceAvailability = sourceItems.length
+      ? "excerpts_supplied"
+      : sourceCount === 0
+        ? "no_sources"
+        : sourceCount === null
+          ? "source_status_unknown_no_excerpt"
+          : "no_relevant_excerpt_selected";
     const sanitizeWorkbench = (wb: SectionWorkbench | undefined) =>
       technical && wb
         ? {
@@ -186,8 +196,8 @@ export class OpenAIProvider implements LLMProvider {
             TECHNICAL_SOURCE_CONTEXT: technical
               ? {
                   items: sourceItems,
-                  selection:
-                    "Deterministic lexical overlap in the first 8000 characters per source; at most 3 excerpts of 1500 characters. Unselected or truncated material was not examined; no external verification.",
+                  availability: sourceAvailability,
+                  selection: `Deterministic weighted overlap in the first 8000 characters per Source; at most 3 excerpts of 1500 characters. ${sourceAvailability === "no_sources" ? "No Sources were in this document at Run time." : sourceAvailability === "no_relevant_excerpt_selected" ? "Sources exist, but no relevant source excerpt was supplied for this claim." : sourceAvailability === "source_status_unknown_no_excerpt" ? "No source excerpt was supplied to this historical run; whether Sources existed is unknown." : "Each item with truncated:false is the complete supplied Source; truncated:true means only part of that Source was supplied."} Absence from a partial excerpt does not prove absence from the full Source. No external verification.`,
                 }
               : undefined,
             FOLLOW_UP: request.followUp,

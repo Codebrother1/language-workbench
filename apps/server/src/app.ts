@@ -361,7 +361,10 @@ export function createApp({
         ? { technicalContext: saved.technicalContext }
         : {}),
       ...(saved.action === "technical_writing"
-        ? { technicalSources: saved.technicalSources ?? [] }
+        ? {
+            technicalSources: saved.technicalSources ?? [],
+            technicalSourceCount: saved.technicalSourceCount,
+          }
         : {}),
       action: saved.action,
       stage: options ? "propose" : "diagnose",
