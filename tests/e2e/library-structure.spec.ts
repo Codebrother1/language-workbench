@@ -92,6 +92,175 @@ async function fillThoughts(page: Page) {
     .fill("it was too expensive");
 }
 
+for (const width of [1440, 1024, 700])
+  test(`From the brief stays contextual and explicit at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    doc.brief.audience = "Readers who know the basics but dislike jargon";
+    doc.brief.destination = "Short video";
+    doc.brief.objectives = ["Make the reader reconsider the habit"];
+    doc.pieceMemory.nextMove = "Rewrite the ending later.";
+    doc.sources.push({
+      id: "evidence",
+      title: "Evidence",
+      kind: "quote",
+      text: "A source quotation stays separate.",
+      url: "",
+    });
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    await page.setViewportSize({ width, height: width === 1024 ? 768 : 900 });
+    const calls: any[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+    });
+    await open(page);
+    await focus(page, "Hook");
+    const brief = page.getByTestId("brief-context");
+    await expect(brief).toBeVisible();
+    if (width <= 1024) await brief.locator("summary").click();
+    await expect(brief).toContainText("WRITING BRIEF · AUDIENCE");
+    await expect(brief).toContainText(doc.brief.audience);
+    await expect(brief).toContainText("WRITING BRIEF · DESTINATION");
+    await expect(brief).not.toContainText(doc.brief.objectives[0]);
+    await expect(brief).not.toContainText(doc.pieceMemory.nextMove);
+    await expect(brief).not.toContainText("A source quotation stays separate.");
+    expect(calls).toHaveLength(0);
+    const audience = brief.locator("[data-brief-field='audience']");
+    await audience.getByRole("button", { name: "View brief" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Writing brief" }),
+    ).toBeVisible();
+    await page
+      .getByRole("dialog", { name: "Writing brief" })
+      .getByRole("button", { name: "Close dialog" })
+      .click();
+    await expect(
+      page.locator(`[data-section-id="${doc.sections[0].id}"]`),
+    ).toHaveClass(/active/);
+    if (
+      width <= 1024 &&
+      !(await brief.evaluate((node) => node.hasAttribute("open")))
+    )
+      await brief.locator("summary").click();
+    await audience.getByRole("button", { name: "Use as context" }).click();
+    await expect(page.getByTestId("run-brief-context")).toContainText(
+      "WRITING BRIEF · AUDIENCE",
+    );
+    await page
+      .getByTestId("run-brief-context")
+      .getByRole("button", { name: "Remove Brief context" })
+      .click();
+    await expect(page.getByTestId("run-brief-context")).toHaveCount(0);
+    await audience.getByRole("button", { name: "Use as context" }).click();
+    await brief
+      .locator("[data-brief-field='destination']")
+      .getByRole("button", { name: "Use as context" })
+      .click();
+    expect(calls).toHaveLength(0);
+    await page.getByRole("button", { name: /Diagnose this/ }).click();
+    await expect(page.getByTestId("run-brief-snapshot")).toContainText(
+      doc.brief.audience,
+    );
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0].explicitBriefContext).toMatchObject([
+      { field: "audience", value: doc.brief.audience },
+      { field: "destination", value: doc.brief.destination },
+    ]);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const saved = await stored(request, doc.id);
+    expect(saved.sections[0].workbench.runs[0].briefContext).toMatchObject([
+      { source: "writing_brief", field: "audience", value: doc.brief.audience },
+      {
+        source: "writing_brief",
+        field: "destination",
+        value: doc.brief.destination,
+      },
+    ]);
+    expect(documentText(saved)).toBe(documentText(doc));
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+  });
+
+test("Brief and style context stay distinct across later Brief edits and a new explicit run", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.brief.audience = "People familiar with the basics.";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const initialLibrary = await library(request);
+  const move = {
+    ...createLibraryItem({
+      kind: "move",
+      title: "Opening move",
+      content: "Name the object, then stop.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  await request.put("/api/library", {
+    data: { ...initialLibrary, items: [move] },
+  });
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await open(page);
+  await focus(page, "Hook");
+  const brief = page.getByTestId("brief-context"),
+    style = page.getByTestId("your-writing");
+  await expect(style).toContainText("PERSONAL LIBRARY · MOVE");
+  await expect(brief).toContainText("WRITING BRIEF · AUDIENCE");
+  await style.getByRole("button", { name: "Use as guidance" }).click();
+  await brief.getByRole("button", { name: "Use as context" }).click();
+  await expect(page.getByTestId("run-guidance")).toContainText(move.content);
+  await expect(page.getByTestId("run-brief-context")).toContainText(
+    doc.brief.audience,
+  );
+  expect(calls).toHaveLength(0);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-brief-snapshot")).toContainText(
+    doc.brief.audience,
+  );
+  await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
+    move.content,
+  );
+  await expect.poll(() => calls.length).toBe(1);
+  expect(calls[0].explicitGuidance[0].itemId).toBe(move.id);
+  expect(calls[0].explicitBriefContext[0].field).toBe("audience");
+  await save(page);
+  await brief.getByRole("button", { name: "View brief" }).click();
+  const editor = page.getByRole("dialog", { name: "Writing brief" });
+  await editor.getByLabel("Audience").fill("A different stated audience.");
+  await editor.getByRole("button", { name: "Close dialog" }).click();
+  await expect(page.getByTestId("run-brief-snapshot")).toContainText(
+    doc.brief.audience,
+  );
+  await expect(brief).toContainText("A different stated audience.");
+  await brief.getByRole("button", { name: "Use for next run" }).click();
+  await expect(page.getByTestId("run-brief-context")).toContainText(
+    "A different stated audience.",
+  );
+  expect(calls).toHaveLength(1);
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  await expect(page.getByTestId("run-brief-snapshot")).toContainText(
+    "A different stated audience.",
+  );
+  await save(page);
+  const saved = await stored(request, doc.id);
+  expect(saved.sections[0].workbench.runs[0].briefContext[0].value).toBe(
+    doc.brief.audience,
+  );
+  expect(saved.sections[0].workbench.runs[1].briefContext[0].value).toBe(
+    "A different stated audience.",
+  );
+  expect(saved.sections[0].workbench.runs[1].guidance).toEqual([]);
+  expect(documentText(saved)).toBe(documentText(doc));
+});
+
 test("Your writing retrieves saved Hook guidance locally and attaches only an explicit run snapshot", async ({
   page,
   request,

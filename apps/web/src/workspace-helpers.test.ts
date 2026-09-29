@@ -32,6 +32,7 @@ import {
   resultOutcome,
   writerResultReason,
   labActionLabel,
+  contextualBrief,
   type RunCapture,
 } from "./workspace-helpers";
 
@@ -88,6 +89,61 @@ describe("Piece memory presence", () => {
       createdAt: "2026-01-01",
     });
     expect(hasPieceMemoryContent(memory)).toBe(true);
+  });
+});
+
+describe("contextual Brief retrieval", () => {
+  it("keeps blank Brief quiet and selects only saved Hook audience/destination", () => {
+    const doc = newDocument("Brief", "A beginning.");
+    doc.sections[0].kind = "Hook";
+    const target = targetFor(doc, doc.sections[0].id);
+    expect(contextualBrief(doc, target, "coach")).toEqual([]);
+    doc.brief.audience = "Experienced readers who dislike jargon";
+    doc.brief.destination = "Short video";
+    doc.brief.objectives = ["Make the reader reconsider the habit"];
+    expect(
+      contextualBrief(doc, target, "coach").map((item) => [
+        item.field,
+        item.value,
+      ]),
+    ).toEqual([
+      ["audience", doc.brief.audience],
+      ["destination", doc.brief.destination],
+    ]);
+  });
+  it("surfaces a stated destination for Delivery without inventing platform conventions", () => {
+    const doc = newDocument("Delivery", "Wait—then stop.");
+    doc.brief.destination = "Short video";
+    const target = targetFor(doc, doc.sections[0].id, "selection", 0, 9);
+    expect(contextualBrief(doc, target, "words")).toEqual([]);
+    expect(contextualBrief(doc, target, "words", true)).toMatchObject([
+      { source: "writing_brief", field: "destination", value: "Short video" },
+    ]);
+  });
+  it("keeps evidence, ending and framework preferences tied to their explicit context", () => {
+    const doc = newDocument("Partial", "A factual section.");
+    doc.brief.objectives = ["Keep the source claim narrow"];
+    doc.brief.sourceMaterialType = "article";
+    doc.brief.frameworkPreference = "reference_only";
+    doc.brief.contentType = "article";
+    const target = () => targetFor(doc, doc.sections[0].id);
+    doc.sections[0].kind = "Evidence";
+    expect(
+      contextualBrief(doc, target(), "coach").map((item) => item.field),
+    ).toContain("source_material_type");
+    expect(
+      contextualBrief(doc, target(), "coach").map((item) => item.field),
+    ).not.toContain("framework_preference");
+    doc.sections[0].kind = "Closer";
+    expect(
+      contextualBrief(doc, target(), "coach").map((item) => item.field),
+    ).toEqual(["objective"]);
+    expect(
+      contextualBrief(doc, target(), "structure").map((item) => item.field),
+    ).toContain("framework_preference");
+    doc.brief.audience = "Already familiar readers";
+    doc.brief.destination = "Newsletter";
+    expect(contextualBrief(doc, target(), "critique")).toHaveLength(3);
   });
 });
 

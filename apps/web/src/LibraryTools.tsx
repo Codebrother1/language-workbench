@@ -238,6 +238,77 @@ export function ContextualWriting({
   );
 }
 
+export function ContextualBrief({ w }: { w: Workspace }) {
+  if (!w.briefItems.length && !w.selectedBrief.length) return null;
+  const label = (field: string) =>
+    `WRITING BRIEF · ${field.replaceAll("_", " ").toUpperCase()}`;
+  return (
+    <details
+      className="contextual-brief"
+      data-testid="brief-context"
+      open={window.innerWidth > 1180}
+    >
+      <summary>
+        From the brief · {w.briefItems.length} relevant{" "}
+        {w.briefItems.length === 1 ? "item" : "items"}
+      </summary>
+      <p className="small muted">
+        Only setup you saved for this piece. You decide whether it matters here.
+      </p>
+      {w.briefItems.map((item, index) => (
+        <article key={`${item.field}:${index}`} data-brief-field={item.field}>
+          <span className="eyebrow">{label(item.field)}</span>
+          <p title={item.value}>
+            {item.value.length > 200
+              ? item.value.slice(0, 200).trimEnd() + "…"
+              : item.value}
+          </p>
+          <div className="row wrap">
+            <Button onClick={() => w.setPanel("brief")}>View brief</Button>
+            <Button
+              disabled={
+                w.selectedBrief.length >= 3 ||
+                w.selectedBrief.some(
+                  (selected) =>
+                    selected.field === item.field &&
+                    selected.value === item.value,
+                )
+              }
+              onClick={() => w.attachBrief(item)}
+            >
+              {w.activeRun ? "Use for next run" : "Use as context"}
+            </Button>
+          </div>
+        </article>
+      ))}
+      {!!w.selectedBrief.length && (
+        <div className="run-brief-context" data-testid="run-brief-context">
+          <b>
+            {w.activeRun
+              ? "Context for next new run · not this saved conversation"
+              : "Context for this run"}
+          </b>
+          {w.selectedBrief.map((item, index) => (
+            <div className="row wrap" key={`${item.field}:${index}`}>
+              <span>
+                <small className="eyebrow">{label(item.field)}</small>
+                <br />
+                {item.value}
+              </span>
+              <Button
+                aria-label="Remove Brief context"
+                onClick={() => w.removeBrief(item)}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
 export function ContextLibrary({ w }: { w: Workspace }) {
   const section = w.doc.sections.find((s) => s.id === w.target?.sectionId);
   return (

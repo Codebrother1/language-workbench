@@ -129,6 +129,23 @@ export const savedGuidanceSchema = z.object({
   text: z.string().trim().min(1).max(3000),
 });
 export type SavedGuidance = z.infer<typeof savedGuidanceSchema>;
+export const savedBriefContextSchema = z.object({
+  source: z.literal("writing_brief"),
+  field: z.enum([
+    "audience",
+    "objective",
+    "destination",
+    "content_type",
+    "source_material_type",
+    "framework_preference",
+    "excluded_frameworks",
+    "custom_notes",
+    "desired_length",
+    "desired_reaction",
+  ]),
+  value: z.string().trim().min(1).max(3000),
+});
+export type SavedBriefContext = z.infer<typeof savedBriefContextSchema>;
 export const labConversationTurnSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["writer", "assistant"]),
@@ -154,6 +171,7 @@ export const workbenchRunSchema = z.object({
   chainModel: modelRefSchema.optional(),
   conversation: z.array(labConversationTurnSchema).max(24).default([]),
   guidance: z.array(savedGuidanceSchema).max(3).default([]),
+  briefContext: z.array(savedBriefContextSchema).max(3).default([]),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -510,6 +528,7 @@ export const aiRequestSchema = z.object({
   modelOverride: modelRefSchema.nullable().optional(),
   lens: lensOptionsSchema.optional(),
   explicitGuidance: z.array(savedGuidanceSchema).max(3).optional(),
+  explicitBriefContext: z.array(savedBriefContextSchema).max(3).optional(),
   followUp: z
     .object({
       runId: z.string().min(1),

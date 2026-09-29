@@ -94,6 +94,15 @@ export class OpenAIProvider implements LLMProvider {
               },
             ]
           : []),
+        ...(request.explicitBriefContext?.length
+          ? [
+              {
+                role: "developer" as const,
+                content:
+                  "WRITER_SELECTED_BRIEF_CONTEXT is the writer's explicit document setup for this run (audience, objective, destination or other saved Brief field), not a system mandate or a template. Keep it distinct from WRITER_SELECTED_GUIDANCE about style. If the two pull in different directions, explain the tradeoff; do not force compliance, invent an audience, or change prose without explicit acceptance.",
+              },
+            ]
+          : []),
         ...(request.followUp
           ? [
               {
@@ -110,6 +119,7 @@ export class OpenAIProvider implements LLMProvider {
             EDIT_TARGET: request.editTarget,
             FOLLOW_UP: request.followUp,
             WRITER_SELECTED_GUIDANCE: request.explicitGuidance,
+            WRITER_SELECTED_BRIEF_CONTEXT: request.explicitBriefContext,
             LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,
             action: request.action,
             stage: request.stage,

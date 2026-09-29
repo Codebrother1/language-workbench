@@ -28,6 +28,7 @@ import {
   type EditTarget,
   type WorkbenchRun,
   type SavedGuidance,
+  type SavedBriefContext,
   type AIResponse,
   type WritingAction,
   type Variant,
@@ -89,6 +90,7 @@ import {
 } from "./editor";
 import {
   getWorkbench,
+  contextualBrief,
   chooseActiveDocument,
   updateWorkbench,
   isLensTarget as detectsLensTarget,
@@ -232,10 +234,16 @@ export function useWorkspace() {
     key: string;
     items: SavedGuidance[];
   } | null>(null);
+  const [briefDraft, setBriefDraft] = useState<{
+    documentId: string;
+    key: string;
+    items: SavedBriefContext[];
+  } | null>(null);
   const current = useRef(doc);
   useEffect(() => {
     setStagedPassage(null);
     setGuidanceDraft(null);
+    setBriefDraft(null);
   }, [doc.id]);
   const persisted = useRef(doc);
   // Preserve section metadata when rich-editor undo resurrects a removed/reordered node.
@@ -1927,6 +1935,48 @@ export function useWorkspace() {
     register: settings.styleDNA.register,
   };
   const relevantItems = relevantLibraryItems(library.items, libraryContext);
+  const briefItems = contextualBrief(
+    doc,
+    target,
+    action,
+    isDeliveryTarget && lens.view === "delivery",
+  );
+  const selectedBrief =
+    target &&
+    briefDraft?.documentId === doc.id &&
+    briefDraft.key === guidanceKey(target)
+      ? briefDraft.items
+      : [];
+  const attachBrief = (item: SavedBriefContext) => {
+    if (!target) return;
+    const key = guidanceKey(target);
+    setBriefDraft((previous) => {
+      const currentItems =
+        previous?.documentId === doc.id && previous.key === key
+          ? previous.items
+          : [];
+      if (
+        currentItems.some(
+          (entry) => entry.field === item.field && entry.value === item.value,
+        ) ||
+        currentItems.length >= 3
+      )
+        return previous;
+      return { documentId: doc.id, key, items: [...currentItems, item] };
+    });
+  };
+  const removeBrief = (item: SavedBriefContext) =>
+    setBriefDraft((previous) =>
+      previous
+        ? {
+            ...previous,
+            items: previous.items.filter(
+              (entry) =>
+                !(entry.field === item.field && entry.value === item.value),
+            ),
+          }
+        : null,
+    );
   const contextualItems = contextualGuidance({
     doc,
     target,
@@ -2207,9 +2257,12 @@ export function useWorkspace() {
         : draft.answer;
     const guidanceForRequest =
       target && guidanceKey(target) === guidanceKey(t) ? selectedGuidance : [];
+    const briefForRequest =
+      target && guidanceKey(target) === guidanceKey(t) ? selectedBrief : [];
     const capture: RunCapture = {
       stage,
       guidance: guidanceForRequest,
+      briefContext: briefForRequest,
       ...(chosen === "words"
         ? {
             lens: {
@@ -2283,6 +2336,9 @@ export function useWorkspace() {
         editTarget: t,
         ...(capture.guidance?.length
           ? { explicitGuidance: capture.guidance }
+          : {}),
+        ...(capture.briefContext?.length
+          ? { explicitBriefContext: capture.briefContext }
           : {}),
         action: chosen,
         stage,
@@ -2364,6 +2420,7 @@ export function useWorkspace() {
         );
       }
       if (guidanceForRequest.length) setGuidanceDraft(null);
+      if (briefForRequest.length) setBriefDraft(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -3195,6 +3252,10 @@ export function useWorkspace() {
     importLibrary,
     markLibraryUsed,
     relevantItems,
+    briefItems,
+    selectedBrief,
+    attachBrief,
+    removeBrief,
     contextualItems,
     contextualVisibleItems,
     contextualHiddenItems,

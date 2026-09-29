@@ -191,6 +191,13 @@ describe("provider catalog, environment boundary and persistence", () => {
           text: "Keep the reveal unannounced.",
         },
       ],
+      briefContext: [
+        {
+          source: "writing_brief" as const,
+          field: "audience" as const,
+          value: "Readers already know the basics.",
+        },
+      ],
       response: {
         ...output,
         diagnosis: "Earlier result about larping.",
@@ -239,6 +246,9 @@ describe("provider catalog, environment boundary and persistence", () => {
     );
     expect(submitted.FOLLOW_UP.runId).toBe(run.id);
     expect(submitted.WRITER_SELECTED_GUIDANCE).toMatchObject(run.guidance);
+    expect(submitted.WRITER_SELECTED_BRIEF_CONTEXT).toMatchObject(
+      run.briefContext,
+    );
     expect(submitted.FOLLOW_UP.originalResult.diagnosis).toBe(
       "Earlier result about larping.",
     );
@@ -254,6 +264,7 @@ describe("provider catalog, environment boundary and persistence", () => {
       ...repository.getLibrary(),
       items: [{ ...guide, content: "A newer, different rule." }],
     });
+    doc.brief.audience = "A changed audience in the current Brief.";
     doc.sections[0].content = paragraphs("They were drifting as experts.");
     doc = repository.save(doc.id, doc);
     expect((await api("/api/ai/follow-up", "POST", body)).status).toBe(200);
@@ -264,6 +275,12 @@ describe("provider catalog, environment boundary and persistence", () => {
     expect(changedInput.FOLLOW_UP.targetStatus).toBe("changed");
     expect(changedInput.WRITER_SELECTED_GUIDANCE[0].text).toBe(
       "Keep the reveal unannounced.",
+    );
+    expect(changedInput.WRITER_SELECTED_BRIEF_CONTEXT[0].value).toBe(
+      "Readers already know the basics.",
+    );
+    expect(changedInput.READ_CONTEXT.document.brief.audience).toBe(
+      "A changed audience in the current Brief.",
     );
     expect(changedInput.READ_CONTEXT.personalLibrary.items[0].content).toBe(
       "A newer, different rule.",

@@ -136,6 +136,13 @@ describe("saved Lab follow-up thread", () => {
           text: "Keep my exact first line.",
         },
       ],
+      briefContext: [
+        {
+          source: "writing_brief",
+          field: "objective",
+          value: "Keep this claim narrow.",
+        },
+      ],
       response: {
         provider: "mock",
         diagnosis: "An older note.",
@@ -192,6 +199,12 @@ describe("saved Lab follow-up thread", () => {
     );
     expect(archived.sections[0].workbench.runs[0].guidance).toMatchObject(
       run.guidance,
+    );
+    expect(duplicate.sections[0].workbench.runs[0].briefContext).toMatchObject(
+      run.briefContext,
+    );
+    expect(archived.sections[0].workbench.runs[0].briefContext).toMatchObject(
+      run.briefContext,
     );
     expect(duplicate.sections[0].workbench.runs[0].id).not.toBe(run.id);
     expect(duplicate.sections[0].workbench.runs[0].conversation[0].id).not.toBe(
@@ -350,6 +363,7 @@ describe("saved Lab follow-up thread", () => {
     const older = documentSchema.parse(doc);
     expect(older.sections[0].workbench?.runs[0].conversation).toEqual([]);
     expect(older.sections[0].workbench?.runs[0].guidance).toEqual([]);
+    expect(older.sections[0].workbench?.runs[0].briefContext).toEqual([]);
     const turns = [
       {
         id: "w",

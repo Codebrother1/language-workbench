@@ -6,6 +6,7 @@ import {
   uid,
   type Document,
   type PieceMemory,
+  type SavedBriefContext,
   type WritingSection,
   type EditTarget,
   type SectionWorkbench,
@@ -202,6 +203,54 @@ export function currentTakeIds(section: WritingSection): string[] {
     .map((take) => take.id);
 }
 
+export function contextualBrief(
+  doc: Document,
+  target: EditTarget | null,
+  action: WritingAction,
+  delivery = false,
+): SavedBriefContext[] {
+  if (!target) return [];
+  const section = doc.sections.find((item) => item.id === target.sectionId);
+  if (target.scope !== "document" && !section) return [];
+  const brief = doc.brief;
+  const items: SavedBriefContext[] = [];
+  const add = (field: SavedBriefContext["field"], value: string) => {
+    if (
+      value.trim() &&
+      value.length <= 3000 &&
+      !items.some((item) => item.field === field && item.value === value)
+    )
+      items.push({ source: "writing_brief", field, value });
+  };
+  if (action === "critique" || target.scope === "document") {
+    add("audience", brief.audience);
+    brief.objectives.forEach((value) => add("objective", value));
+    if (brief.contentType !== "freeform")
+      add("content_type", brief.contentType);
+  } else if (delivery) {
+    add("destination", brief.destination);
+    if (brief.contentType !== "freeform")
+      add("content_type", brief.contentType);
+  } else if (["Hook", "Cold Open", "Punchline"].includes(section?.kind ?? "")) {
+    add("audience", brief.audience);
+    add("destination", brief.destination);
+  } else if (["Closer", "Conclusion"].includes(section?.kind ?? "")) {
+    brief.objectives.forEach((value) => add("objective", value));
+  } else if (["Evidence", "Context"].includes(section?.kind ?? "")) {
+    if (brief.sourceMaterialType !== "none")
+      add("source_material_type", brief.sourceMaterialType);
+    add("custom_notes", brief.customNotes);
+    if (action === "technical") add("audience", brief.audience);
+  }
+  if (action === "structure" && brief.frameworkPreference !== "none")
+    add("framework_preference", brief.frameworkPreference);
+  if (action === "structure" && brief.excludedFrameworks.length)
+    add("excluded_frameworks", brief.excludedFrameworks.join(", "));
+  if (["shorten", "lengthen"].includes(action))
+    add("desired_length", brief.desiredLength);
+  return items.slice(0, 3);
+}
+
 export function humanTargetLabel(target: EditTarget): string {
   if (target.scope === "document") return "Whole piece";
   if (target.scope === "section") return "Whole section";
@@ -368,6 +417,7 @@ export type RunCapture = {
   model: ModelRef | null;
   chainModel?: ModelRef;
   guidance?: WorkbenchRun["guidance"];
+  briefContext?: WorkbenchRun["briefContext"];
   question: string;
 };
 export function writerResultReason(reason: string): string {
@@ -417,6 +467,7 @@ export function makeRun(
     answer: capture.answer,
     conversation: [],
     guidance: capture.guidance ?? [],
+    briefContext: capture.briefContext ?? [],
     controls: { ...capture.controls },
     model: response.model ?? capture.model,
     ...(capture.chainModel ? { chainModel: capture.chainModel } : {}),

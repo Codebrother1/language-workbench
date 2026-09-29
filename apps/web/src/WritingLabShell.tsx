@@ -5,6 +5,7 @@ import {
   ContextLibrary,
   StyleContext,
   ContextualWriting,
+  ContextualBrief,
 } from "./LibraryTools";
 import { StructureTool } from "./StructureTool";
 import { ModelControls, modelLabel } from "./ModelControls";
@@ -166,6 +167,19 @@ function FollowUpThread({ w, run }: { w: Workspace; run: WorkbenchRun }) {
         <p className="small">
           <b>Original question:</b> {run.instruction}
         </p>
+      )}
+      {!!run.briefContext.length && (
+        <div className="follow-up-guidance" data-testid="run-brief-snapshot">
+          <b>Brief context used for this run</b>
+          {run.briefContext.map((item, index) => (
+            <p key={index}>
+              <small>
+                WRITING BRIEF · {item.field.replaceAll("_", " ").toUpperCase()}
+              </small>{" "}
+              · {item.value}
+            </p>
+          ))}
+        </div>
       )}
       {!!run.guidance.length && (
         <div className="follow-up-guidance" data-testid="run-guidance-snapshot">
@@ -835,6 +849,7 @@ export function WritingLabShell({
       </div>
       {isWholeAnalysis && (
         <section className="document-analysis-controls">
+          <ContextualBrief w={w} />
           <Field label="Whole-piece direction">
             <textarea
               rows={2}
@@ -920,6 +935,7 @@ export function WritingLabShell({
             w={w}
             navigation={navigation}
           />
+          <ContextualBrief w={w} />
           {w.isDeliveryTarget && (
             <div
               className="segmented lens-view"
