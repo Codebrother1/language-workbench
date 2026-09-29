@@ -296,6 +296,7 @@ function savedWorkLabel(section: WritingSection): string {
 }
 function Structure({
   w,
+  linkedWorkbenchReveal,
   onRemove,
   editorCard,
   onWriteCard,
@@ -304,6 +305,7 @@ function Structure({
   onOpenSavedWork,
 }: {
   w: Workspace;
+  linkedWorkbenchReveal: boolean;
   onRemove: (id: string) => void;
   editorCard: string | null;
   onWriteCard: (id: string, point?: { x: number; y: number }) => void;
@@ -355,7 +357,9 @@ function Structure({
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
   const visibleSections =
-    w.layout.primaryView === "workbench" ? w.doc.sections : draft;
+    w.layout.primaryView === "workbench" || linkedWorkbenchReveal
+      ? w.doc.sections
+      : draft;
   const finishDrag = () => {
     drag.current = null;
     setDraggingId(null);
@@ -1433,6 +1437,9 @@ export default function App() {
   const layoutMenu = useRef<HTMLDetailsElement>(null);
   const [dragWidths, setDragWidths] = useState<PaneWidths | null>(null);
   const [previewFocused, setPreviewFocused] = useState(false);
+  const [linkedWorkbenchReveal, setLinkedWorkbenchReveal] = useState<
+    string | null
+  >(null);
   const [hideNextMove, setHideNextMove] = useState(false);
   useEffect(() => setHideNextMove(false), [w.doc.id]);
   const [readingMode, setReadingMode] = useState(false);
@@ -1494,6 +1501,7 @@ export default function App() {
   useEffect(() => {
     setTakeReturn(null);
     setEditorCard(null);
+    setLinkedWorkbenchReveal(null);
   }, [w.doc.id]);
   const draft = draftSections(w.doc);
   const parked = parkedSections(w.doc);
@@ -1510,7 +1518,8 @@ export default function App() {
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
   const widths = dragWidths ?? w.layout.paneWidths;
-  const workbenchShown = w.layout.workbenchVisible && !previewFocused;
+  const workbenchShown =
+    (w.layout.workbenchVisible || !!linkedWorkbenchReveal) && !previewFocused;
   const inspectorShown = w.layout.inspectorVisible && !previewFocused;
   const previewShown =
     previewFocused ||
@@ -1837,6 +1846,7 @@ export default function App() {
     layoutMenu.current?.removeAttribute("open");
     setDragWidths(null);
     setDocumentPreviewOverride(null);
+    setLinkedWorkbenchReveal(null);
     setPreviewFocused(false);
     void w.applyLayoutPreset(name);
   };
@@ -1883,18 +1893,31 @@ export default function App() {
     }
     if (section.parkedGroupId)
       w.setParkedGroupCollapsed(section.parkedGroupId, false);
-    if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
-    if (w.layout.primaryView !== "workbench")
-      void w.setPrimaryView("workbench");
+    const revealParked =
+      !focusProse &&
+      w.layout.primaryView === "document" &&
+      section.placement === "parked";
+    setLinkedWorkbenchReveal(revealParked ? id : null);
+    if (focusProse || w.layout.primaryView === "workbench") {
+      if (!w.layout.workbenchVisible) void w.setWorkbenchVisible(true);
+      if (focusProse && w.layout.primaryView !== "workbench")
+        void w.setPrimaryView("workbench");
+    }
     setPreviewFocused(false);
     setParkedFocusId(null);
     setReadingMode(false);
     if (focusProse) w.focusSection(id);
     else {
       w.navigateToSection(id);
-      requestAnimationFrame(() => scrollPreviewToSection(id, false, true));
+      requestAnimationFrame(() => {
+        scrollPreviewToSection(id, false, true);
+        if (w.layout.primaryView === "document" && workbenchShown)
+          scrollWorkbenchToSection(id, true, true);
+      });
     }
-    setPendingJump(id);
+    if (focusProse || w.layout.primaryView === "workbench" || revealParked)
+      setPendingJump(id);
+    else setPendingJump(null);
   };
   const returnToTakeSection = () => {
     const origin = takeReturn;
@@ -2015,7 +2038,12 @@ export default function App() {
     });
   };
   useLayoutEffect(() => {
-    if (!pendingJump || !workbenchShown || w.layout.primaryView !== "workbench")
+    if (
+      !pendingJump ||
+      !workbenchShown ||
+      (w.layout.primaryView !== "workbench" &&
+        linkedWorkbenchReveal !== pendingJump)
+    )
       return;
     if (!scrollWorkbenchToSection(pendingJump, true)) return;
     setPendingJump(null);
@@ -2023,6 +2051,7 @@ export default function App() {
     pendingJump,
     workbenchShown,
     w.layout.primaryView,
+    linkedWorkbenchReveal,
     w.doc.parkedGroups,
     w.doc.sections,
   ]);
@@ -2563,6 +2592,7 @@ export default function App() {
             aria-pressed={w.layout.primaryView === "workbench"}
             onClick={() => {
               setDocumentPreviewOverride(null);
+              setLinkedWorkbenchReveal(null);
               setPreviewFocused(false);
               w.setPrimaryView("workbench");
             }}
@@ -2573,6 +2603,7 @@ export default function App() {
             aria-pressed={w.layout.primaryView === "document"}
             onClick={() => {
               setDocumentPreviewOverride(w.layout.previewVisible ? null : true);
+              setLinkedWorkbenchReveal(null);
               setPreviewFocused(false);
               w.setPrimaryView("document");
             }}
@@ -2604,14 +2635,19 @@ export default function App() {
           {!previewFocused && (
             <>
               <Button
-                onClick={() =>
-                  void w.setWorkbenchVisible(!w.layout.workbenchVisible)
-                }
+                onClick={() => {
+                  if (linkedWorkbenchReveal) {
+                    setLinkedWorkbenchReveal(null);
+                    setPendingJump(null);
+                  }
+                  if (w.layout.workbenchVisible)
+                    void w.setWorkbenchVisible(false);
+                  else if (!linkedWorkbenchReveal)
+                    void w.setWorkbenchVisible(true);
+                }}
                 disabled={workbenchShown && paneCount === 1}
               >
-                {w.layout.workbenchVisible
-                  ? "Hide Workbench"
-                  : "Show Workbench"}
+                {workbenchShown ? "Hide Workbench" : "Show Workbench"}
               </Button>
               <Button
                 onClick={() => {
@@ -2700,6 +2736,7 @@ export default function App() {
         >
           <Structure
             w={w}
+            linkedWorkbenchReveal={!!linkedWorkbenchReveal}
             onRemove={(id) => setConfirmation({ kind: "section", id })}
             editorCard={activeEditorCard}
             onWriteCard={writeInCard}

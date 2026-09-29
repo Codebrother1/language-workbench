@@ -1142,6 +1142,113 @@ test("linked Next move navigates deliberately without focusing prose or reviewin
   ).toHaveCount(0);
 });
 
+for (const initialView of ["document", "workbench"] as const)
+  test(`Go to section preserves ${initialView} as the saved primary view`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    doc.pieceMemory.nextMove = "Return to the closer.";
+    doc.pieceMemory.nextMoveSectionId = doc.sections[2].id;
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    const calls: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.url());
+    });
+    await open(page);
+    if (initialView === "document")
+      await page
+        .getByRole("button", { name: "Document View", exact: true })
+        .click();
+    const viewButton = page.getByRole("button", {
+      name: initialView === "document" ? "Document View" : "Workbench",
+      exact: true,
+    });
+    await expect(viewButton).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get("/api/settings")).json()).layout
+            ?.primaryView ?? "workbench",
+      )
+      .toBe(initialView);
+    const reviewed = (
+      await (await request.get(`/api/documents/${doc.id}`)).json()
+    ).pieceMemory.reviewedDraftRevision;
+    await page
+      .locator(".piece-next-move")
+      .getByRole("button", { name: "Go to section" })
+      .click();
+    await expect(viewButton).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.locator(`[data-section-id="${doc.sections[2].id}"]`),
+    ).toHaveClass(/active/);
+    const passage = page
+      .locator(
+        `[data-preview-section-id="${doc.sections[2].id}"], .dock-preview .writing-editor > section[id="${doc.sections[2].id}"]`,
+      )
+      .first();
+    await expect(passage).toBeInViewport();
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get("/api/settings")).json()).layout
+            ?.primaryView ?? "workbench",
+      )
+      .toBe(initialView);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(saved.pieceMemory.reviewedDraftRevision).toBe(reviewed);
+    expect(saved.pieceMemory.nextMoveSectionId).toBe(doc.sections[2].id);
+    expect(documentText(saved)).toBe(documentText(doc));
+    expect(calls).toHaveLength(0);
+    await page.reload();
+    await expect(viewButton).toHaveAttribute("aria-pressed", "true");
+    expect(
+      (await (await request.get("/api/settings")).json()).layout?.primaryView ??
+        "workbench",
+    ).toBe(initialView);
+  });
+
+test("Document View transiently reveals a linked parked section without saving pane or primary-view changes", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.sections[1].placement = "parked";
+  doc.pieceMemory.nextMove = "Revisit the parked connection.";
+  doc.pieceMemory.nextMoveSectionId = doc.sections[1].id;
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  await page
+    .getByRole("button", { name: "Document View", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Hide Workbench" }).click();
+  await expect(page.locator(".dock-workbench")).toBeHidden();
+  await page
+    .locator(".piece-next-move")
+    .getByRole("button", { name: "Go to section" })
+    .click();
+  const parked = page.locator(`[data-section-id="${doc.sections[1].id}"]`);
+  await expect(parked).toHaveClass(/active/);
+  await expect(parked).toBeInViewport();
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await expect(
+    page.getByRole("button", { name: "Document View", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(
+      async () => (await (await request.get("/api/settings")).json()).layout,
+    )
+    .toMatchObject({ primaryView: "document", workbenchVisible: false });
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Document View", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".dock-workbench")).toBeHidden();
+});
+
 test("duplicating a piece preserves Next move text and remaps its section link to the independent copy", async ({
   page,
   request,
