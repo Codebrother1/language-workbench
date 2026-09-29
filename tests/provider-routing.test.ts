@@ -181,10 +181,25 @@ describe("compatible OpenAI discovery", () => {
       "gpt-6-sol",
       "gpt-6-astra",
       "gpt-6.1-something",
+      "gpt-6.1-sol",
+      "gpt-5.4",
+      "gpt-6.1-lab0613",
+      "gpt-5-chat-tools",
+      "gpt-4.1",
       "gpt-4.1-mini",
+      "gpt-4o",
+      "gpt-4o-mini",
     ])
       expect(classifyOpenAIModel(id)).toBe(
-        id === "gpt-6.1-something" ? "other" : "known",
+        [
+          "gpt-6.1-something",
+          "gpt-6.1-sol",
+          "gpt-5.4",
+          "gpt-6.1-lab0613",
+          "gpt-5-chat-tools",
+        ].includes(id)
+          ? "other"
+          : "known",
       );
     for (const id of [
       "gpt-image-2.5-sunburst",
@@ -195,6 +210,11 @@ describe("compatible OpenAI discovery", () => {
       "omni-moderation-latest",
       "gpt-6-2026-09-01",
       "gpt-4o-2024-08-06",
+      "gpt-4-0613",
+      "gpt-5-chat-latest",
+      "gpt-5.1-chat-latest",
+      "gpt-5.2-chat-latest",
+      "gpt-5.3-chat-latest",
       "chatgpt-4o-latest",
       "ft:gpt-4.1:team:custom",
       "sora-2",
@@ -264,6 +284,13 @@ describe("compatible OpenAI discovery", () => {
       "gpt-6-sol",
       "gpt-6-astra",
       "gpt-6.1-something",
+      "gpt-6.1-sol",
+      "gpt-4.1",
+      "gpt-4-0613",
+      "gpt-5-chat-latest",
+      "gpt-5.1-chat-latest",
+      "gpt-5.2-chat-latest",
+      "gpt-5.3-chat-latest",
       "gpt-image-2.5-sunburst",
       "gpt-realtime-2.1",
       "text-embedding-3-large",
@@ -284,7 +311,14 @@ describe("compatible OpenAI discovery", () => {
         .map((m: any) => m.id)
         .sort(),
     ).toEqual(
-      ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-something"].sort(),
+      [
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6-astra",
+        "gpt-6.1-something",
+        "gpt-6.1-sol",
+        "gpt-4.1",
+      ].sort(),
     );
     expect(openai.models.find((m: any) => m.id === "gpt-6-luna")).toMatchObject(
       { displayName: "GPT-6 Luna", metadata: { group: "known" } },
@@ -300,6 +334,68 @@ describe("compatible OpenAI discovery", () => {
       calls.map((item) => item.url).filter((url) => url.endsWith("/models")),
     ).toHaveLength(1);
     expect(calls.some((item) => item.url.endsWith("/responses"))).toBe(false);
+  });
+  it("keeps a previously selected excluded snapshot ID and historical run unchanged but unavailable after refresh", async () => {
+    const snapshot = { providerId: "openai", modelId: "gpt-4-0613" };
+    let doc = repository.create("Old route", "The exact prose stays.");
+    doc.defaultModel = snapshot;
+    const target = targetFor(doc, doc.sections[0].id);
+    const run = {
+      id: "old-run",
+      createdAt: doc.createdAt,
+      target,
+      stage: "diagnose" as const,
+      action: "coach",
+      instruction: "Question?",
+      answer: "",
+      controls: {},
+      model: snapshot,
+      guidance: [],
+      briefContext: [],
+      conversation: [],
+      response: { ...output, model: snapshot },
+    };
+    doc.sections[0].workbench = {
+      ...emptyWorkbench(),
+      runs: [run],
+      activeRunId: run.id,
+    };
+    doc = repository.save(doc.id, doc);
+    repository.saveProviderState("openai", {
+      enabled: true,
+      lastRefreshedAt: "2026-01-01T00:00:00.000Z",
+      models: [
+        {
+          id: snapshot.modelId,
+          providerId: "openai",
+          displayName: snapshot.modelId,
+          capabilities: {},
+          availability: "available",
+          metadata: { source: "discovered" },
+        },
+      ],
+    });
+    discovered = ["gpt-4.1-mini", "gpt-4-0613", "gpt-5-chat-latest"];
+    const refreshed = await (
+      await api("/api/providers/openai/models/refresh", "POST", {})
+    ).json();
+    expect(
+      refreshed.provider.models.some(
+        (item: any) =>
+          item.id === snapshot.modelId && item.availability === "available",
+      ),
+    ).toBe(false);
+    const stored = repository.get(doc.id);
+    expect(stored.defaultModel).toEqual(snapshot);
+    expect(stored.sections[0].workbench?.runs[0]).toMatchObject({
+      id: "old-run",
+      model: snapshot,
+    });
+    const before = calls.length;
+    const input = fixture();
+    input.modelOverride = snapshot;
+    expect((await api("/api/ai", "POST", input)).status).toBe(400);
+    expect(calls).toHaveLength(before);
   });
   it("uses exact discovered ID with the existing Responses shape and respects a higher section route", async () => {
     discovered = ["gpt-4.1-mini", "gpt-6.1-something"];

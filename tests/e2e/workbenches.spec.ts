@@ -1592,6 +1592,9 @@ for (const width of [1440, 1024, 700])
     request,
   }) => {
     const doc = await seed(request);
+    const oldSnapshot = { providerId: "openai", modelId: "gpt-4-0613" };
+    doc.defaultModel = oldSnapshot;
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
     const baseline = await (await request.get("/api/providers")).json();
     const future = { providerId: "openai", modelId: "gpt-6.1-something" };
     let state: "initial" | "available" | "missing" | "failure" = "initial";
@@ -1690,6 +1693,14 @@ for (const width of [1440, 1024, 700])
     await expect(
       picker.locator('optgroup[label="Other compatible OpenAI models"]'),
     ).toHaveCount(1);
+    await expect(picker).toContainText(
+      "gpt-4-0613 · OpenAI Direct · Unavailable",
+    );
+    await expect(picker).not.toContainText("gpt-5.1-chat-latest");
+    expect(
+      (await (await request.get(`/api/documents/${doc.id}`)).json())
+        .defaultModel,
+    ).toEqual(oldSnapshot);
     await dialog.getByText("Application and task defaults").click();
     for (const label of [
       "Application default model",
@@ -1710,6 +1721,12 @@ for (const width of [1440, 1024, 700])
       .click();
     await expect(page.locator(".compare-choices")).toContainText(
       "gpt-6.1-something",
+    );
+    await expect(page.locator(".compare-choices")).not.toContainText(
+      "gpt-4-0613",
+    );
+    await expect(page.locator(".compare-choices")).not.toContainText(
+      "gpt-5.1-chat-latest",
     );
     await page.getByLabel("Your direction").fill("Does this work?");
     await page.getByRole("button", { name: /Diagnose this/ }).click();

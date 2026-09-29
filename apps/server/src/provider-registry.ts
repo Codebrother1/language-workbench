@@ -50,7 +50,11 @@ export function classifyOpenAIModel(
       id,
     ) ||
     /-\d{4}-(?:0[1-9]|1[0-2])-(?:[0-2]\d|3[01])$/.test(id) ||
-    /-20\d{6}$/.test(id)
+    /-20\d{6}$/.test(id) ||
+    /^gpt-(?:[4-9]|[1-9]\d)(?:\.\d+)?-(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$/.test(
+      id,
+    ) ||
+    /-chat-latest$/.test(id)
   )
     return "excluded";
   if (id in curatedOpenAI) return "known";
