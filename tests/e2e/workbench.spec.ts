@@ -1163,6 +1163,107 @@ for (const width of [1440, 1024, 700])
     expect(calls).toHaveLength(1);
   });
 
+for (const width of [1440, 1024, 700])
+  test(`Technical Writing uses bounded source excerpts and preserves saved evidence at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request, "This endpoint always returns 200.");
+    doc.brief.contentType = "api_reference";
+    doc.sources = [
+      {
+        id: "api-note",
+        title: "Endpoint response notes",
+        kind: "notes",
+        text:
+          "The endpoint may return 202 while creation is pending; it can return 200 when complete. " +
+          "x".repeat(900),
+        url: "",
+      },
+      {
+        id: "unrelated",
+        title: "Team calendar",
+        kind: "notes",
+        text: "Lunch is on Tuesday.",
+        url: "",
+      },
+    ];
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    const calls: any[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page
+      .getByLabel("Writing action", { exact: true })
+      .selectOption("technical_writing");
+    await page
+      .getByLabel("Your direction")
+      .fill("Does the source support 'always returns 200'?");
+    expect(calls).toHaveLength(0);
+    await page
+      .getByRole("button", {
+        name: "Run Technical Writing analysis",
+        exact: true,
+      })
+      .click();
+    await expect(page.locator(".diagnosis")).toContainText(
+      "Offline cannot evaluate",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0].readContext.document.sources).toEqual([]);
+    expect(calls[0].technicalSources).toHaveLength(1);
+    expect(calls[0].technicalSources[0].excerpt).toContain("202");
+    await expect(page.getByTestId("technical-source-context")).toContainText(
+      "Endpoint response notes",
+    );
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    let saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    const original = saved.sections[0].workbench.runs.at(-1);
+    expect(original.technicalSources[0].excerpt).toContain("202");
+    saved.sources[0].text =
+      "The endpoint now returns 204, according to the updated note.";
+    await request.put(`/api/documents/${doc.id}`, { data: saved });
+    await page.reload();
+    await page
+      .getByTestId("technical-source-context")
+      .locator("summary")
+      .click();
+    await expect(page.getByTestId("technical-source-context")).toContainText(
+      "202",
+    );
+    await expect(
+      page.getByTestId("technical-source-context"),
+    ).not.toContainText("204");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    expect(calls).toHaveLength(1);
+    await page
+      .getByRole("button", {
+        name: "Run Technical Writing analysis",
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => calls.length).toBe(2);
+    expect(calls[1].technicalSources[0].excerpt).toContain("204");
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get(`/api/documents/${doc.id}`)).json())
+            .sections[0].workbench.runs.length,
+      )
+      .toBe(2);
+    saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(
+      saved.sections[0].workbench.runs.find(
+        (run: any) => run.id === original.id,
+      ).technicalSources,
+    ).toEqual(original.technicalSources);
+    expect(documentText(saved)).toBe(documentText(doc));
+  });
+
 test("first whole-piece Technical Writing run keeps the visible question without inheriting an unchosen mechanism", async ({
   page,
   request,

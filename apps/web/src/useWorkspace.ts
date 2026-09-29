@@ -42,6 +42,7 @@ import {
   sectionText,
   structuralMechanisms,
   technicalRunControls,
+  selectTechnicalSources,
   targetFor,
   validateTarget,
   paragraphs,
@@ -2439,6 +2440,15 @@ export function useWorkspace() {
       briefContext: briefForRequest,
       ...(chosen === "technical_writing"
         ? {
+            technicalSources: selectTechnicalSources(
+              current.current,
+              t,
+              draft.instruction,
+            ),
+          }
+        : {}),
+      ...(chosen === "technical_writing"
+        ? {
             technicalContext: {
               contentType: current.current.brief.contentType,
               sectionKind: section?.kind ?? null,
@@ -2502,7 +2512,10 @@ export function useWorkspace() {
       validateTarget(current.current, t);
       const request: AIRequest = {
         readContext: {
-          document: current.current,
+          document:
+            chosen === "technical_writing"
+              ? { ...current.current, sources: [] }
+              : current.current,
           styleDNA: settingsRef.current.styleDNA,
           // Library records are loaded and scoped by the backend, not echoed wholesale.
           resolvedStyle: resolveWritingStyle({
@@ -2534,6 +2547,9 @@ export function useWorkspace() {
           : {}),
         ...(capture.technicalContext
           ? { technicalContext: capture.technicalContext }
+          : {}),
+        ...(capture.technicalSources
+          ? { technicalSources: capture.technicalSources }
           : {}),
         action: chosen,
         stage,

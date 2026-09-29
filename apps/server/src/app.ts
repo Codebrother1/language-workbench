@@ -325,6 +325,7 @@ export function createApp({
     const settings = repository.getSettings();
     const scopedDocument = {
       ...document,
+      ...(saved.action === "technical_writing" ? { sources: [] } : {}),
       workbench: undefined,
       sections: document.sections.map((item) => ({
         ...item,
@@ -358,6 +359,9 @@ export function createApp({
         : {}),
       ...(saved.technicalContext
         ? { technicalContext: saved.technicalContext }
+        : {}),
+      ...(saved.action === "technical_writing"
+        ? { technicalSources: saved.technicalSources ?? [] }
         : {}),
       action: saved.action,
       stage: options ? "propose" : "diagnose",

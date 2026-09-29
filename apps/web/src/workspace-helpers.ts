@@ -624,6 +624,7 @@ export type RunCapture = {
   guidance?: WorkbenchRun["guidance"];
   briefContext?: WorkbenchRun["briefContext"];
   technicalContext?: WorkbenchRun["technicalContext"];
+  technicalSources?: WorkbenchRun["technicalSources"];
   question: string;
 };
 export function writerResultReason(reason: string): string {
@@ -676,6 +677,9 @@ export function makeRun(
     briefContext: capture.briefContext ?? [],
     ...(capture.technicalContext
       ? { technicalContext: structuredClone(capture.technicalContext) }
+      : {}),
+    ...(capture.technicalSources
+      ? { technicalSources: structuredClone(capture.technicalSources) }
       : {}),
     controls: { ...capture.controls },
     ...(capture.selectedControlKeys?.length

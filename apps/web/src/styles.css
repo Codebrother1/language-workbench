@@ -482,6 +482,14 @@ hr {
 .delete-confirm p {
   margin: 0 0 10px;
 }
+.technical-source-context article {
+  min-width: 0;
+}
+.technical-source-context article p,
+.technical-source-context summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .local-revision-notes {
   margin: 10px 0;
   padding: 8px 10px;

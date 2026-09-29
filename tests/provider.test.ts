@@ -344,6 +344,122 @@ describe("technical-writing analysis contract", () => {
       context: /precision/i,
     },
   ] as const;
+  for (const sample of [
+    {
+      name: "direct support",
+      draft: "The endpoint returns 200 after completion.",
+      source: "The endpoint returns 200 after completion.",
+    },
+    {
+      name: "contradiction",
+      draft: "The endpoint always returns 200.",
+      source: "The endpoint may return 202 when pending.",
+    },
+    {
+      name: "stronger claim",
+      draft: "The endpoint always returns 200.",
+      source: "The endpoint can return 200 when already complete.",
+    },
+    {
+      name: "unsupported behavior",
+      draft: "The endpoint returns immediately after the job finishes.",
+      source: "The endpoint accepts a job and returns an identifier.",
+    },
+    {
+      name: "terminology difference",
+      draft: "The endpoint requires a token.",
+      source: "The endpoint requires a credential in the authorization header.",
+    },
+    {
+      name: "status-code discrepancy",
+      draft: "The endpoint always returns 200 for creation.",
+      source: "The endpoint returns 202 while creation is pending.",
+    },
+    {
+      name: "no source",
+      draft: "The endpoint returns immediately.",
+      source: "",
+    },
+  ])
+    it(`exposes only supplied excerpts for ${sample.name} without asserting the relation deterministically`, async () => {
+      const ai = request(sample.draft);
+      ai.action = "technical_writing";
+      ai.stage = "diagnose";
+      ai.instruction = "Does my source establish this wording?";
+      ai.readContext.document.brief.contentType = "api_reference";
+      if (sample.source)
+        ai.readContext.document.sources = [
+          {
+            id: "note",
+            title: "Endpoint API note",
+            kind: "notes",
+            text: sample.source,
+            url: "",
+          },
+        ];
+      const { provider, requests } = harness(wire(output()));
+      await provider.run(ai);
+      const data = JSON.parse(
+        requests[0].input.find((part: any) => part.role === "user").content,
+      );
+      expect(data.READ_CONTEXT.document.sources).toEqual([]);
+      expect(
+        data.TECHNICAL_SOURCE_CONTEXT.items.map((item: any) => item.excerpt),
+      ).toEqual(sample.source ? [sample.source] : []);
+      expect(data.WRITER_QUESTION).toBe(ai.instruction);
+    });
+  it("bounds relevant supplied source evidence and keeps absent evidence distinct from factual verification", async () => {
+    const ai = request("This endpoint always returns 200.");
+    ai.action = "technical_writing";
+    ai.stage = "diagnose";
+    ai.instruction = "Does the source support always returns 200?";
+    ai.readContext.document.brief.contentType = "api_reference";
+    ai.readContext.document.sources.push(
+      {
+        id: "api",
+        title: "Endpoint response notes",
+        kind: "notes",
+        text: "The endpoint may return 202 when creation happens asynchronously. The response may return 200 when already complete.",
+        url: "",
+      },
+      {
+        id: "distant",
+        title: "Meeting notes",
+        kind: "notes",
+        text: "Unrelated discussion about hiring.",
+        url: "",
+      },
+    );
+    const { provider, requests } = harness(wire(output()));
+    await provider.run(ai);
+    const body = requests[0];
+    const instructions = body.input
+      .filter((part: any) => part.role === "developer")
+      .map((part: any) => part.content)
+      .join("\n");
+    const data = JSON.parse(
+      body.input.find((part: any) => part.role === "user").content,
+    );
+    expect(data.READ_CONTEXT.document.sources).toEqual([]);
+    expect(data.TECHNICAL_SOURCE_CONTEXT.items).toHaveLength(1);
+    expect(data.TECHNICAL_SOURCE_CONTEXT.items[0]).toMatchObject({
+      title: "Endpoint response notes",
+      kind: "notes",
+    });
+    expect(data.TECHNICAL_SOURCE_CONTEXT.items[0].excerpt).toContain("202");
+    expect(instructions).toMatch(/source.*provenance|source.*supplied/i);
+    expect(instructions).toMatch(/fail to establish|stronger assertion/i);
+    expect(instructions).toMatch(/no.*source.*factual verification/i);
+    expect(instructions).toMatch(/untrusted/i);
+    ai.readContext.document.sources = [];
+    const absent = harness(wire(output()));
+    await absent.provider.run(ai);
+    const without = JSON.parse(
+      absent.requests[0].input.find((part: any) => part.role === "user")
+        .content,
+    );
+    expect(without.TECHNICAL_SOURCE_CONTEXT.items).toEqual([]);
+  });
   it("does not present an unchosen structural default as writer-stated on a quick-start question", async () => {
     const question =
       "Does this opening work for a quick start, or am I making the reader wait too long before doing anything?";
@@ -442,6 +558,21 @@ describe("technical-writing analysis contract", () => {
       customNotes: "",
     };
     ai.readContext.document.brief.contentType = "reference";
+    ai.readContext.document.sources.push({
+      id: "updated",
+      title: "New API note",
+      kind: "notes",
+      text: "The newer API note says 204; this was added after the saved run.",
+      url: "",
+    });
+    ai.technicalSources = [
+      {
+        title: "Original API note",
+        kind: "notes",
+        excerpt: "The response may return 202 while creation is pending.",
+        truncated: false,
+      },
+    ];
     ai.readContext.document.sections[0].kind = "Reference";
     ai.readContext.document.sections[0].workbench = emptyWorkbench();
     ai.readContext.document.sections[0].workbench!.runs.push({
@@ -458,6 +589,7 @@ describe("technical-writing analysis contract", () => {
       guidance: [],
       briefContext: [],
       technicalContext: ai.technicalContext,
+      technicalSources: ai.technicalSources,
       response: output(),
     });
     ai.followUp = {
@@ -484,6 +616,9 @@ describe("technical-writing analysis contract", () => {
     );
     expect(data.READ_CONTEXT.document.brief.contentType).toBe("reference");
     expect(data.READ_CONTEXT.document.sections[0].kind).toBe("Reference");
+    expect(data.READ_CONTEXT.document.sources).toEqual([]);
+    expect(data.TECHNICAL_SOURCE_CONTEXT.items).toEqual(ai.technicalSources);
+    expect(JSON.stringify(data)).not.toContain("The newer API note says 204");
   });
   it("rejects proposals in analysis, never silently falls back offline, and keeps nontechnical runs unchanged", async () => {
     const ai = request(
@@ -524,6 +659,96 @@ describe("technical-writing analysis contract", () => {
     );
     expect(body.TECHNICAL_WRITING_CONTEXT).toBeUndefined();
   });
+  for (const sample of [
+    {
+      type: "quick_start",
+      target:
+        "We explain the mental model before the first command because running it blindly is unsafe.",
+      question: "Is this necessary before first success?",
+      expected: [/hidden setup cost/i, /expected result/i, /unsafe/i],
+    },
+    {
+      type: "tutorial",
+      target: "Here is the finished system. Now let's take it apart.",
+      question: "Does this teach beyond the example?",
+      expected: [
+        /transfer/i,
+        /(?:whole|finished).system.first/i,
+        /checkpoint/i,
+      ],
+    },
+    {
+      type: "how_to",
+      target: "To rotate a key, first read the full architecture overview.",
+      question: "Am I helping them accomplish the thing?",
+      expected: [/stopping point/i, /detour/i, /goal/i],
+    },
+    {
+      type: "explanation",
+      target: "The queue is a line, except messages can be processed twice.",
+      question: "Does the analogy hold?",
+      expected: [/boundary/i, /analogy/i, /misconception/i],
+    },
+    {
+      type: "reference",
+      target: "A long story appears before the parameter conditions.",
+      question: "Can this be looked up?",
+      expected: [/lookup/i, /defaults/i, /narrative/i],
+    },
+    {
+      type: "api_reference",
+      target: "The endpoint always returns 200.",
+      question: "Does the source establish this?",
+      expected: [/response/i, /errors/i, /normative/i],
+    },
+    {
+      type: "troubleshooting",
+      target: "When you see this symptom, replace the database.",
+      question: "What evidence is missing?",
+      expected: [/competing causes/i, /diagnostic test/i, /verification/i],
+    },
+    {
+      type: "readme",
+      target: "Architecture background appears before install instructions.",
+      question: "Does this orient a first-time reader?",
+      expected: [/startup signal/i, /prerequisite/i, /orientation/i],
+    },
+    {
+      type: "technical_talk",
+      target: "Story, demo, failure, then callback.",
+      question: "Can a listener recover if they miss one point?",
+      expected: [/spoken memory/i, /demo payoff/i, /recover/i],
+    },
+    {
+      type: "architecture",
+      target:
+        "We chose this design, without mentioning the rejected alternatives.",
+      question: "What reasoning is missing?",
+      expected: [/system boundaries/i, /alternatives/i, /operational/i],
+    },
+    {
+      type: "engineering_decision",
+      target: "This is the best approach, but we never state the criterion.",
+      question: "What supports this recommendation?",
+      expected: [/criteria/i, /reversibility/i, /uncertainty/i],
+    },
+  ] as const)
+    it(`uses only the ${sample.type} reader-problem lens for the writer's question`, async () => {
+      const ai = request(sample.target);
+      ai.action = "technical_writing";
+      ai.stage = "diagnose";
+      ai.instruction = sample.question;
+      ai.readContext.document.brief.contentType = sample.type;
+      const { provider, requests } = harness(wire(output()));
+      await provider.run(ai);
+      const data = JSON.parse(
+        requests[0].input.find((part: any) => part.role === "user").content,
+      );
+      expect(data.WRITER_QUESTION).toBe(sample.question);
+      for (const phrase of sample.expected)
+        expect(data.TECHNICAL_WRITING_CONTEXT.considerations).toMatch(phrase);
+      expect(data.TECHNICAL_WRITING_CONTEXT).not.toHaveProperty("checklist");
+    });
   for (const sample of cases)
     it(`keeps ${sample.type} / ${sample.kind} advisory and writer-led`, async () => {
       const ai = request(sample.passage);

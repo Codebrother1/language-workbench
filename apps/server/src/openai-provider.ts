@@ -8,6 +8,7 @@ import {
   radarItemSchema,
   uid,
   technicalRunControls,
+  selectTechnicalSources,
   type AIRequest,
   type SectionWorkbench,
   type AIResponse,
@@ -74,6 +75,16 @@ export class OpenAIProvider implements LLMProvider {
     validateWritingRequest(request);
     // The server filters in addition to telling the model what is authoritative.
     const technical = request.action === "technical_writing";
+    const sourceItems = technical
+      ? (request.technicalSources ??
+        (request.followUp
+          ? []
+          : selectTechnicalSources(
+              request.readContext.document,
+              request.editTarget,
+              request.instruction,
+            )))
+      : [];
     const sanitizeWorkbench = (wb: SectionWorkbench | undefined) =>
       technical && wb
         ? {
@@ -81,6 +92,7 @@ export class OpenAIProvider implements LLMProvider {
             controls: technicalRunControls(wb.controls, wb.selectedControlKeys),
             runs: wb.runs.map((run) => ({
               ...run,
+              technicalSources: undefined,
               controls: technicalRunControls(
                 run.controls,
                 run.selectedControlKeys,
@@ -104,6 +116,7 @@ export class OpenAIProvider implements LLMProvider {
         ...request.readContext.document,
         revisionCheckpoint: undefined,
         revisionPlan: undefined,
+        ...(technical ? { sources: [] } : {}),
         ...(technical
           ? {
               workbench: sanitizeWorkbench(
@@ -170,6 +183,13 @@ export class OpenAIProvider implements LLMProvider {
               request.action === "technical_writing"
                 ? technicalWritingContext(request)
                 : undefined,
+            TECHNICAL_SOURCE_CONTEXT: technical
+              ? {
+                  items: sourceItems,
+                  selection:
+                    "Deterministic lexical overlap in the first 8000 characters per source; at most 3 excerpts of 1500 characters. Unselected or truncated material was not examined; no external verification.",
+                }
+              : undefined,
             FOLLOW_UP: request.followUp,
             READ_CONTEXT: context,
             LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,

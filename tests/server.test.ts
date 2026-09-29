@@ -421,6 +421,100 @@ describe("saved Lab follow-up thread", () => {
   });
 });
 
+describe("technical-writing source continuity", () => {
+  it("keeps a saved source excerpt on follow-up after Sources change without adding current source text", async () => {
+    const doc = newDocument("API note", "This endpoint always returns 200.");
+    doc.brief.contentType = "api_reference";
+    doc.sources = [
+      {
+        id: "api",
+        title: "API response note",
+        kind: "notes",
+        text: "The endpoint may return 202 while pending.",
+        url: "",
+      },
+    ];
+    const target = targetFor(doc, doc.sections[0].id);
+    const firstQuestion = "Does the source support always returns 200?";
+    const followQuestion = "Does the original source establish the claim?";
+    const technicalSources = [
+      {
+        title: "API response note",
+        kind: "notes" as const,
+        excerpt: doc.sources[0].text,
+        truncated: false,
+      },
+    ];
+    const run = {
+      id: "technical-run",
+      createdAt: doc.createdAt,
+      target,
+      stage: "diagnose" as const,
+      action: "technical_writing",
+      instruction: firstQuestion,
+      answer: "",
+      controls: {},
+      model: { providerId: "mock", modelId: "conservative" },
+      guidance: [],
+      briefContext: [],
+      technicalContext: {
+        contentType: "api_reference" as const,
+        sectionKind: doc.sections[0].kind,
+        audience: "",
+        objectives: [],
+        destination: "",
+        customNotes: "",
+      },
+      technicalSources,
+      conversation: [
+        {
+          id: "question",
+          role: "writer" as const,
+          text: followQuestion,
+          createdAt: doc.createdAt,
+        },
+      ],
+      response: {
+        provider: "mock" as const,
+        diagnosis: "Offline cannot evaluate technical tradeoffs.",
+        mechanism: "",
+        question: "",
+        missingIngredients: [],
+        proposals: [],
+        findings: [],
+        lexical: [],
+      },
+    };
+    doc.sections[0].workbench = {
+      ...emptyWorkbench(),
+      runs: [run],
+      activeRunId: run.id,
+    };
+    const imported = await (
+      await request("/api/import", "POST", { document: doc })
+    ).json();
+    const changed = await (
+      await request(`/api/documents/${imported.id}`)
+    ).json();
+    changed.sources[0].text = "The endpoint now returns 204 after the change.";
+    await request(`/api/documents/${imported.id}`, "PUT", changed);
+    const spy = vi.spyOn(provider, "run");
+    const answer = await request("/api/ai/follow-up", "POST", {
+      documentId: imported.id,
+      runId: imported.sections[0].workbench.runs[0].id,
+      question: followQuestion,
+    });
+    expect(answer.status).toBe(200);
+    const used = spy.mock.calls[0][0];
+    expect(used.technicalSources).toEqual(technicalSources);
+    expect(used.technicalContext?.contentType).toBe("api_reference");
+    expect(used.followUp?.originalInstruction).toBe(firstQuestion);
+    expect(used.readContext.document.sources).toEqual([]);
+    expect(JSON.stringify(used)).not.toContain("endpoint now returns 204");
+    expect((await answer.json()).proposals).toEqual([]);
+  });
+});
+
 describe("local API and SQLite persistence", () => {
   it("CRUD persists through a server/repository restart and rejects stale saves", async () => {
     expect(await (await request("/api/documents")).json()).toEqual([]);

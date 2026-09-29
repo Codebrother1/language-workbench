@@ -1226,6 +1226,29 @@ export function WritingLabShell({
                   : ""}
               </p>
             )}
+          {w.activeRun?.action === "technical_writing" &&
+            !!w.activeRun.technicalSources?.length && (
+              <details
+                className="control-details technical-source-context"
+                data-testid="technical-source-context"
+              >
+                <summary>
+                  Source context used ·{" "}
+                  {w.activeRun.technicalSources
+                    .map((item) => item.title)
+                    .join(" · ")}
+                </summary>
+                {w.activeRun.technicalSources.map((item, index) => (
+                  <article key={index}>
+                    <b>{item.title}</b>
+                    <p className="small">
+                      {item.excerpt}
+                      {item.truncated ? "… (excerpt only)" : ""}
+                    </p>
+                  </article>
+                ))}
+              </details>
+            )}
           {restoreLabRun?.runId === w.activeRun?.id && (
             <p className="small muted" data-testid="saved-run-context">
               Saved Lab result · {w.activeRun?.action} ·{" "}

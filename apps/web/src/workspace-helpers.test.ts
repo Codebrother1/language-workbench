@@ -5,6 +5,7 @@ import {
   targetFor,
   documentTarget,
   documentSchema,
+  selectTechnicalSources,
   sectionText,
   paragraphs,
   saveSectionTake,
@@ -152,6 +153,61 @@ describe("contextual Brief retrieval", () => {
     doc.brief.audience = "Already familiar readers";
     doc.brief.destination = "Newsletter";
     expect(contextualBrief(doc, target(), "critique")).toHaveLength(3);
+  });
+});
+
+describe("bounded deterministic technical source context", () => {
+  it("selects relevant supplied excerpts, never unrelated sources or unbounded bodies", () => {
+    const doc = newDocument(
+      "API reference",
+      "This endpoint always returns 200.",
+    );
+    doc.sources = [
+      {
+        id: "a",
+        title: "Endpoint response",
+        kind: "notes",
+        text:
+          "Context ".repeat(1200) +
+          "The endpoint may return 202 when creation is pending.",
+        url: "",
+      },
+      {
+        id: "b",
+        title: "Planning memo",
+        kind: "notes",
+        text: "Team lunch plans and hiring details.",
+        url: "",
+      },
+      {
+        id: "c",
+        title: "Response conditions",
+        kind: "notes",
+        text: "A response can be 200 after the operation finishes.",
+        url: "",
+      },
+    ];
+    const target = targetFor(doc, doc.sections[0].id);
+    const selected = selectTechnicalSources(
+      doc,
+      target,
+      "Does this endpoint always return 200?",
+    );
+    expect(selected.map((source) => source.title)).toEqual([
+      "Endpoint response",
+      "Response conditions",
+    ]);
+    expect(selected[0].excerpt.length).toBeLessThanOrEqual(1500);
+    expect(selected[0].truncated).toBe(true);
+    expect(selected[1].excerpt).toContain("200");
+    expect(
+      selectTechnicalSources(
+        { ...doc, sources: [] },
+        target,
+        "Does this endpoint return 200?",
+      ),
+    ).toEqual([]);
+    expect(doc.sources[0].text.length).toBeGreaterThan(8000);
   });
 });
 

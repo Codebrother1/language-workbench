@@ -16,6 +16,16 @@ import { aiResponseSchema, type AIResponse } from "./ai-output";
 export * from "./routing";
 export * from "./ai-output";
 
+export const sourceKinds = [
+  "text",
+  "comment",
+  "quote",
+  "transcript",
+  "article",
+  "repo",
+  "notes",
+  "other",
+] as const;
 export const technicalContentTypes = [
   "tutorial",
   "how_to",
@@ -195,6 +205,13 @@ export const technicalContextSchema = z.object({
   customNotes: z.string(),
 });
 export type TechnicalContext = z.infer<typeof technicalContextSchema>;
+export const technicalSourceSchema = z.object({
+  title: z.string().max(240),
+  kind: z.enum(sourceKinds),
+  excerpt: z.string().max(1500),
+  truncated: z.boolean(),
+});
+export type TechnicalSource = z.infer<typeof technicalSourceSchema>;
 export const labConversationTurnSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["writer", "assistant"]),
@@ -223,6 +240,7 @@ export const workbenchRunSchema = z.object({
   guidance: z.array(savedGuidanceSchema).max(3).default([]),
   briefContext: z.array(savedBriefContextSchema).max(3).default([]),
   technicalContext: technicalContextSchema.optional(),
+  technicalSources: z.array(technicalSourceSchema).max(3).optional(),
   response: aiResponseSchema.extend({
     model: modelRefSchema.optional(),
     routeSource: z.string().optional(),
@@ -323,16 +341,7 @@ export type ParkedGroup = z.infer<typeof parkedGroupSchema>;
 export const sourceMaterialSchema = z.object({
   id: z.string(),
   title: z.string(),
-  kind: z.enum([
-    "text",
-    "comment",
-    "quote",
-    "transcript",
-    "article",
-    "repo",
-    "notes",
-    "other",
-  ]),
+  kind: z.enum(sourceKinds),
   text: z.string(),
   url: z.string().default(""),
 });
@@ -446,6 +455,58 @@ export const documentSchema = z
     { message: "Section and parked-group references must be valid." },
   );
 export type Document = z.infer<typeof documentSchema>;
+export function selectTechnicalSources(
+  doc: Document,
+  target: EditTarget,
+  question: string,
+): TechnicalSource[] {
+  const words = (value: string) => [
+    ...new Set(
+      (value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
+        (token) =>
+          token.length > 2 &&
+          !/^(?:the|and|for|with|from|that|this|are|was|you|your|does|what|when|where|which|should|would|could|have|about|source|sources|notes|note|material|reference|draft|writing)$/.test(
+            token,
+          ),
+      ),
+    ),
+  ];
+  const query = new Set(words(`${question} ${target.text.slice(0, 5000)}`));
+  if (!query.size) return [];
+  return doc.sources
+    .flatMap((source, index) => {
+      const body = source.text.slice(0, 8000);
+      const titleMatches = words(source.title).filter((token) =>
+        query.has(token),
+      );
+      const bodyMatches = words(body).filter((token) => query.has(token));
+      const score = titleMatches.length * 4 + bodyMatches.length;
+      if (!score || !source.text.trim()) return [];
+      const offsets = [...titleMatches, ...bodyMatches]
+        .map((token) => body.toLowerCase().indexOf(token))
+        .filter((offset) => offset >= 0);
+      const start = Math.max(
+        0,
+        (offsets.length ? Math.min(...offsets) : 0) - 200,
+      );
+      const excerpt = source.text.slice(start, start + 1500);
+      return [
+        {
+          index,
+          score,
+          source: {
+            title: source.title.slice(0, 240),
+            kind: source.kind,
+            excerpt,
+            truncated: start > 0 || start + excerpt.length < source.text.length,
+          },
+        },
+      ];
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 3)
+    .map((item) => item.source);
+}
 export function authoredDraftState(doc: Document): string {
   return JSON.stringify(
     doc.sections.map((section) => ({
@@ -629,6 +690,7 @@ export const aiRequestSchema = z.object({
   explicitGuidance: z.array(savedGuidanceSchema).max(3).optional(),
   explicitBriefContext: z.array(savedBriefContextSchema).max(3).optional(),
   technicalContext: technicalContextSchema.optional(),
+  technicalSources: z.array(technicalSourceSchema).max(3).optional(),
   followUp: z
     .object({
       runId: z.string().min(1),
