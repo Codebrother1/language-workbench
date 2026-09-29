@@ -245,10 +245,18 @@ describe("provider catalog, environment boundary and persistence", () => {
       requestBody.input.find((entry: any) => entry.role === "user").content,
     );
     expect(submitted.FOLLOW_UP.runId).toBe(run.id);
+    expect(submitted.WRITER_QUESTION).toBe(body.question);
+    expect(submitted.instruction).toBe(run.instruction);
     expect(submitted.WRITER_SELECTED_GUIDANCE).toMatchObject(run.guidance);
     expect(submitted.WRITER_SELECTED_BRIEF_CONTEXT).toMatchObject(
       run.briefContext,
     );
+    expect(
+      requestBody.input
+        .filter((entry: any) => entry.role === "developer")
+        .map((entry: any) => entry.content)
+        .join(" "),
+    ).toMatch(/consider each writer-selected item/i);
     expect(submitted.FOLLOW_UP.originalResult.diagnosis).toBe(
       "Earlier result about larping.",
     );

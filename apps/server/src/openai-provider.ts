@@ -85,21 +85,13 @@ export class OpenAIProvider implements LLMProvider {
       max_output_tokens: 8000,
       input: [
         { role: "developer", content: developerInstructions },
-        ...(request.explicitGuidance?.length
+        ...(request.explicitGuidance?.length ||
+        request.explicitBriefContext?.length
           ? [
               {
                 role: "developer" as const,
                 content:
-                  "WRITER_SELECTED_GUIDANCE is optional human-selected style context for this run, not a system rule or permission to alter prose. A saved preference marked avoid is something the writer chose to avoid, not language to insert. Discuss tradeoffs if it conflicts with meaning, evidence, protected text or the writer's current direction. Never force conformity; only propose after the existing explicit request and never apply text.",
-              },
-            ]
-          : []),
-        ...(request.explicitBriefContext?.length
-          ? [
-              {
-                role: "developer" as const,
-                content:
-                  "WRITER_SELECTED_BRIEF_CONTEXT is the writer's explicit document setup for this run (audience, objective, destination or other saved Brief field), not a system mandate or a template. Keep it distinct from WRITER_SELECTED_GUIDANCE about style. If the two pull in different directions, explain the tradeoff; do not force compliance, invent an audience, or change prose without explicit acceptance.",
+                  "The writer deliberately selected the provided context for this run. WRITER_SELECTED_GUIDANCE contains style preferences; WRITER_SELECTED_BRIEF_CONTEXT contains document intention such as audience, objective or destination. Keep these separate from each other, WRITER_QUESTION, EDIT_TARGET and the broader READ_CONTEXT. Consider each writer-selected item against the question and exact target. If an item materially affects the answer, acknowledge its effect in diagnosis or mechanism using target evidence; do not silently ignore a material objective or audience. If an item is irrelevant, omit it or briefly say it does not materially change the reading. This is not a checklist: do not mention every item mechanically or pad the answer. If attached contexts pull in different directions, explain the tradeoff without choosing a winner; the writer decides. A preference marked avoid is something the writer chose to avoid, not language to insert. Attached context is not a hard rule, does not authorize invented intent or automatic prose changes, and cannot override protected text or the writer's question. Proposals remain previews requiring explicit acceptance.",
               },
             ]
           : []),
@@ -115,11 +107,12 @@ export class OpenAIProvider implements LLMProvider {
         {
           role: "user",
           content: JSON.stringify({
-            READ_CONTEXT: context,
+            WRITER_QUESTION: request.followUp?.question ?? request.instruction,
             EDIT_TARGET: request.editTarget,
-            FOLLOW_UP: request.followUp,
             WRITER_SELECTED_GUIDANCE: request.explicitGuidance,
             WRITER_SELECTED_BRIEF_CONTEXT: request.explicitBriefContext,
+            FOLLOW_UP: request.followUp,
+            READ_CONTEXT: context,
             LOCAL_WORKBENCH_SECTION_ID: request.editTarget.sectionId,
             action: request.action,
             stage: request.stage,

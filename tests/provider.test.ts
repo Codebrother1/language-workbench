@@ -142,6 +142,147 @@ const research = () => [
   message("Documented usage. The usage date is uncertain.", [citation]),
 ];
 
+describe("writer-selected context framing (injected Responses fixtures)", () => {
+  const style = {
+    source: "section_style" as const,
+    itemId: "ending-rule",
+    kind: "style_rule" as const,
+    title: "Ending rule",
+    text: "End on the object, not the lesson.",
+  };
+  const objective = {
+    source: "writing_brief" as const,
+    field: "objective" as const,
+    value: "Make the reader want to call someone back without telling them to.",
+  };
+  const audience = {
+    source: "writing_brief" as const,
+    field: "audience" as const,
+    value: "Readers already know the basics.",
+  };
+  const cases = [
+    {
+      name: "style only",
+      style: [style],
+      brief: [],
+      question: "Is this ending explaining too much?",
+      diagnosis:
+        "The last sentence explains the object; the saved preference is a useful question, not an order to cut it.",
+    },
+    {
+      name: "Brief only",
+      style: [],
+      brief: [objective],
+      question: "Does this ending work?",
+      diagnosis:
+        "The stated objective may be served by leaving the emotional action with the reader.",
+    },
+    {
+      name: "style and objective",
+      style: [style],
+      brief: [objective],
+      question: "Is this ending explaining too much?",
+      diagnosis:
+        "The objective benefits from restraint, but ending literally on the object may weaken the callback.",
+    },
+    {
+      name: "audience and style",
+      style: [
+        { ...style, text: "Prefer concrete nouns over abstract summaries." },
+      ],
+      brief: [audience],
+      question: "Is this explanation doing useful work?",
+      diagnosis:
+        "For readers who know the basics the explanation may be redundant, while the saved concrete-noun preference is a separate choice.",
+    },
+    {
+      name: "conflicting style and destination",
+      style: [{ ...style, text: "Keep fragments when they carry rhythm." }],
+      brief: [
+        {
+          source: "writing_brief" as const,
+          field: "destination" as const,
+          value: "Formal report.",
+        },
+      ],
+      question: "Do the fragments help?",
+      diagnosis:
+        "Fragments preserve cadence, but a formal destination may make this sentence harder to scan; the writer decides.",
+    },
+    {
+      name: "irrelevant destination",
+      style: [],
+      brief: [
+        {
+          source: "writing_brief" as const,
+          field: "destination" as const,
+          value: "Newsletter.",
+        },
+      ],
+      question: "Does this comma interrupt the line?",
+      diagnosis:
+        "The comma creates a pause; the destination does not materially change this punctuation reading.",
+    },
+    {
+      name: "multiple items of each kind",
+      style: [
+        style,
+        {
+          ...style,
+          itemId: "cadence",
+          text: "Keep the fragment if it earns the beat.",
+        },
+      ],
+      brief: [objective, audience],
+      question: "How much explanation stays?",
+      diagnosis:
+        "The audience knows the premise and the objective needs room to breathe; the two style preferences can be useful without dictating the ending.",
+    },
+  ];
+  for (const sample of cases)
+    it(`keeps ${sample.name} distinct and invites material reasoning rather than compliance`, async () => {
+      const ai = request("The object stays. Then a lesson follows.");
+      ai.action = "coach";
+      ai.stage = "diagnose";
+      ai.instruction = sample.question;
+      ai.answer = "";
+      ai.explicitGuidance = sample.style;
+      ai.explicitBriefContext = sample.brief;
+      const expected = { ...output(), diagnosis: sample.diagnosis };
+      const { provider, requests, fetch } = harness(wire(expected));
+      const result = await provider.run(ai);
+      expect(result.diagnosis).toBe(sample.diagnosis);
+      expect(fetch).toHaveBeenCalledOnce();
+      const body = requests[0];
+      const instructions = body.input
+        .filter((part: any) => part.role === "developer")
+        .map((part: any) => part.content)
+        .join("\n");
+      const writer = body.input.find((part: any) => part.role === "user");
+      const data = JSON.parse(writer.content);
+      expect(Object.keys(data).slice(0, 4)).toEqual([
+        "WRITER_QUESTION",
+        "EDIT_TARGET",
+        "WRITER_SELECTED_GUIDANCE",
+        "WRITER_SELECTED_BRIEF_CONTEXT",
+      ]);
+      expect(data.WRITER_QUESTION).toBe(sample.question);
+      expect(data.EDIT_TARGET).toEqual(ai.editTarget);
+      expect(data.WRITER_SELECTED_GUIDANCE).toEqual(sample.style);
+      expect(data.WRITER_SELECTED_BRIEF_CONTEXT).toEqual(sample.brief);
+      expect(data.READ_CONTEXT.document.id).toBe(ai.readContext.document.id);
+      expect(instructions).toMatch(
+        /consider each (writer-selected|attached) item/i,
+      );
+      expect(instructions).toMatch(/materially (affects|changes)/i);
+      expect(instructions).toMatch(/tradeoff/i);
+      expect(instructions).toMatch(/not (a hard rule|mandatory)/i);
+      expect(instructions).toMatch(/irrelevant|does not materially/i);
+      expect(instructions).toMatch(/avoid (a )?checklist|not a checklist/i);
+      expect(instructions).toMatch(/never apply|never the author/i);
+    });
+});
+
 describe("official OpenAI Responses SDK contract (injected offline transport)", () => {
   it("uses structured Responses, store:false, filtered context, and keeps credentials outside browser-facing output", async () => {
     const ai = request();

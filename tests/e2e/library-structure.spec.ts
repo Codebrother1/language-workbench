@@ -261,6 +261,130 @@ test("Brief and style context stay distinct across later Brief edits and a new e
   expect(documentText(saved)).toBe(documentText(doc));
 });
 
+test("failed explicit Lab request keeps both chosen contexts and question for retry without applying prose", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.brief.audience = "People familiar with the basics.";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const current = await library(request);
+  const move = {
+    ...createLibraryItem({
+      kind: "move",
+      content: "Name the object, then stop.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  await request.put("/api/library", { data: { ...current, items: [move] } });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await focus(page, "Hook");
+  await page
+    .getByTestId("your-writing")
+    .getByRole("button", { name: "Use as guidance" })
+    .click();
+  await page
+    .getByTestId("brief-context")
+    .getByRole("button", { name: "Use as context" })
+    .click();
+  await page
+    .getByLabel("Your direction")
+    .fill("Is this explanation doing useful work?");
+  expect(calls).toHaveLength(0);
+  await page.route("**/api/ai", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Provider temporarily unavailable" }),
+    }),
+  );
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-guidance")).toContainText(move.content);
+  await expect(page.getByTestId("run-brief-context")).toContainText(
+    doc.brief.audience,
+  );
+  await expect(page.getByLabel("Your direction")).toHaveValue(
+    "Is this explanation doing useful work?",
+  );
+  await expect(page.getByTestId("lab-follow-up")).toHaveCount(0);
+  expect(calls).toHaveLength(1);
+  await page.unroute("**/api/ai");
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-brief-snapshot")).toContainText(
+    doc.brief.audience,
+  );
+  await expect(page.getByTestId("run-guidance-snapshot")).toContainText(
+    move.content,
+  );
+  await expect.poll(() => calls.length).toBe(2);
+  await save(page);
+  expect(documentText(await stored(request, doc.id))).toBe(documentText(doc));
+});
+
+test("current-passage handoff never inherits historical attached context without a new choice", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.brief.audience = "Readers familiar with the basics.";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const initial = await library(request);
+  const move = {
+    ...createLibraryItem({
+      kind: "move",
+      content: "Name the object, then stop.",
+    }),
+    sectionKinds: ["Hook"],
+  };
+  await request.put("/api/library", { data: { ...initial, items: [move] } });
+  const calls: any[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+  });
+  await open(page);
+  await select(page, "I really liked the tool.");
+  await page
+    .getByTestId("your-writing")
+    .getByRole("button", { name: "Use as guidance" })
+    .click();
+  await page
+    .getByTestId("brief-context")
+    .getByRole("button", { name: "Use as context" })
+    .click();
+  await page.getByRole("button", { name: /Diagnose this/ }).click();
+  await expect(page.getByTestId("run-brief-snapshot")).toContainText(
+    doc.brief.audience,
+  );
+  await expect.poll(() => calls.length).toBe(1);
+  await select(page, "I really liked the tool.");
+  await page.keyboard.insertText("The tool helped, but the price bit.");
+  await page
+    .getByTestId("lab-follow-up")
+    .getByRole("button", { name: "Ask about current passage" })
+    .click();
+  await expect(page.getByTestId("current-passage-stage")).toBeVisible();
+  await expect(page.getByTestId("run-guidance")).toHaveCount(0);
+  await expect(page.getByTestId("run-brief-context")).toHaveCount(0);
+  expect(calls).toHaveLength(1);
+  await page
+    .getByLabel("Question for current passage")
+    .fill("Does this revised version work?");
+  await page.getByRole("button", { name: "Run question" }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  expect(calls[1].explicitGuidance).toBeUndefined();
+  expect(calls[1].explicitBriefContext).toBeUndefined();
+  await save(page);
+  const saved = await stored(request, doc.id);
+  expect(saved.sections[0].workbench.runs[0].guidance).toHaveLength(1);
+  expect(saved.sections[0].workbench.runs[0].briefContext).toHaveLength(1);
+  expect(saved.sections[0].workbench.runs[1].guidance).toEqual([]);
+  expect(saved.sections[0].workbench.runs[1].briefContext).toEqual([]);
+});
+
 test("Your writing retrieves saved Hook guidance locally and attaches only an explicit run snapshot", async ({
   page,
   request,
