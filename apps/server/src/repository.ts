@@ -285,6 +285,14 @@ export class Repository {
         const sectionId = sectionIds.get(dismissal.sectionId);
         return sectionId ? [{ ...dismissal, sectionId }] : [];
       }),
+      revisionCheckpoint: doc.revisionCheckpoint && {
+        ...doc.revisionCheckpoint,
+        id: uid(),
+        sections: doc.revisionCheckpoint.sections.map((section) => ({
+          ...section,
+          id: sectionIds.get(section.id) ?? uid(),
+        })),
+      },
       pieceMemory: {
         ...doc.pieceMemory,
         nextMoveSectionId: doc.pieceMemory.nextMoveSectionId

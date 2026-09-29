@@ -14,6 +14,7 @@ import {
   documentTarget,
   documentText,
   documentSchema,
+  sectionText,
   newDocument,
   targetFor,
   emptyWorkbench,
@@ -556,6 +557,83 @@ describe("local API and SQLite persistence", () => {
       (await (await request(`/api/documents/${copied.id}`)).json()).pieceMemory
         .nextMove,
     ).toBe(memory.nextMove);
+  });
+  it("preserves explicit revision checkpoint snapshots through restart, archive and remapped import", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Checkpoint",
+        text: "Original human line.",
+      })
+    ).json();
+    const checkpoint = {
+      id: "checkpoint",
+      createdAt: doc.createdAt,
+      draftRevision: doc.draftRevision,
+      label: "Before editing",
+      sections: doc.sections.map((section: any, order: number) => ({
+        id: section.id,
+        order,
+        kind: section.kind,
+        label: section.label,
+        placement: section.placement,
+        text: sectionText(section),
+        content: structuredClone(section.content),
+      })),
+    };
+    doc.revisionCheckpoint = checkpoint;
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    expect(doc.draftRevision).toBe(0);
+    expect(doc.revisionCheckpoint).toMatchObject(checkpoint);
+    await request("/api/documents/archive", "POST", { ids: [doc.id] });
+    await stop();
+    await start();
+    const archived = await (await request(`/api/documents/${doc.id}`)).json();
+    expect(archived.revisionCheckpoint).toEqual(doc.revisionCheckpoint);
+    await request("/api/documents/restore", "POST", { ids: [doc.id] });
+    const duplicate = await (
+      await request("/api/import", "POST", { document: archived })
+    ).json();
+    expect(duplicate.revisionCheckpoint.sections[0].id).toBe(
+      duplicate.sections[0].id,
+    );
+    expect(duplicate.revisionCheckpoint.sections[0].id).not.toBe(
+      doc.sections[0].id,
+    );
+    expect(duplicate.revisionCheckpoint.sections[0].text).toBe(
+      "Original human line.",
+    );
+    const historical = structuredClone(archived);
+    historical.revisionCheckpoint.sections.push({
+      ...checkpoint.sections[0],
+      id: "removed-aside",
+      order: 1,
+      text: "An older aside.",
+      content: paragraphs("An older aside."),
+    });
+    const importedHistorical = await (
+      await request("/api/import", "POST", { document: historical })
+    ).json();
+    expect(importedHistorical.revisionCheckpoint.sections[1].id).not.toBe(
+      "removed-aside",
+    );
+    expect(
+      importedHistorical.sections.some(
+        (section: any) =>
+          section.id === importedHistorical.revisionCheckpoint.sections[1].id,
+      ),
+    ).toBe(false);
+    const malformed = structuredClone(archived);
+    malformed.revisionCheckpoint = { id: "broken", sections: [{ id: "bad" }] };
+    const safelyImported = await (
+      await request("/api/import", "POST", { document: malformed })
+    ).json();
+    expect(safelyImported.revisionCheckpoint).toBeUndefined();
+    const old = structuredClone(archived);
+    delete old.revisionCheckpoint;
+    expect(
+      (await (await request("/api/import", "POST", { document: old })).json())
+        .revisionCheckpoint,
+    ).toBeUndefined();
   });
   it("persists contextual dismissals with the document and remaps them on import", async () => {
     let doc = await (

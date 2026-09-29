@@ -6,6 +6,8 @@ import {
   documentTarget,
   documentSchema,
   sectionText,
+  paragraphs,
+  saveSectionTake,
   type AIResponse,
 } from "./domain";
 import {
@@ -20,6 +22,9 @@ import {
   isDeliveryTarget,
   sectionReference,
   nextMoveSectionLabel,
+  makeRevisionCheckpoint,
+  revisionChanges,
+  revisionExcerpt,
   sectionMentions,
   humanTargetLabel,
   currentTakeIds,
@@ -145,6 +150,152 @@ describe("contextual Brief retrieval", () => {
     doc.brief.audience = "Already familiar readers";
     doc.brief.destination = "Newsletter";
     expect(contextualBrief(doc, target(), "critique")).toHaveLength(3);
+  });
+});
+
+describe("writer-set revision checkpoint", () => {
+  const start = () => {
+    const doc = newDocument("Draft", "Opening remains.");
+    doc.sections[0].kind = "Hook";
+    doc.sections[0].label = "Hook";
+    doc.sections.push(
+      newSection("Point", "The middle stays."),
+      newSection("Closer", "End on the object."),
+    );
+    return doc;
+  };
+  it("captures authored sections and reports only a pure move for a reorder", () => {
+    const doc = start();
+    const checkpoint = makeRevisionCheckpoint(doc, 0, "Before revision");
+    expect(checkpoint.label).toBe("Before revision");
+    expect(checkpoint.sections.map((section) => section.id)).toEqual(
+      doc.sections.map((section) => section.id),
+    );
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    doc.revisionCheckpoint = checkpoint;
+    doc.sections.unshift(doc.sections.pop()!);
+    const changes = revisionChanges(checkpoint, doc);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({
+      id: doc.sections[0].id,
+      status: ["Moved"],
+      beforeOrder: 3,
+      currentOrder: 1,
+    });
+    doc.sections[0].content = paragraphs("End on this new object.");
+    expect(revisionChanges(checkpoint, doc)[0].status).toEqual([
+      "Edited",
+      "Moved",
+    ]);
+    expect(
+      revisionExcerpt(
+        "A".repeat(300) + "old" + "B".repeat(300),
+        "A".repeat(300) + "new" + "B".repeat(300),
+      ).before.length,
+    ).toBeLessThan(220);
+  });
+  it("distinguishes rename, role, placement, additions, removals and restores without stale badges", () => {
+    const doc = start();
+    const checkpoint = makeRevisionCheckpoint(doc, 0);
+    doc.sections[0].label = "Opening";
+    doc.sections[1].kind = "Evidence";
+    expect(
+      revisionChanges(checkpoint, doc).map((change) => change.status),
+    ).toEqual([["Renamed"], ["Role changed"]]);
+    doc.sections[1].placement = "parked";
+    expect(
+      revisionChanges(checkpoint, doc).find(
+        (change) => change.id === doc.sections[1].id,
+      )?.status,
+    ).toContain("Parked");
+    doc.sections[1].placement = "draft";
+    const removed = doc.sections.pop()!;
+    const added = newSection("Freeform", "Fresh words.");
+    doc.sections.push(added);
+    expect(
+      revisionChanges(checkpoint, doc).map((change) => change.status),
+    ).toContainEqual(["Added"]);
+    expect(
+      revisionChanges(checkpoint, doc).map((change) => change.status),
+    ).toContainEqual(["Removed"]);
+    doc.sections.pop();
+    doc.sections.push(removed);
+    doc.sections[0].label = "Hook";
+    doc.sections[1].kind = "Point";
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    doc.sections[2].content = paragraphs("A different ending.");
+    expect(
+      revisionChanges(checkpoint, doc).map((change) => change.status),
+    ).toEqual([["Edited"]]);
+  });
+  it("ignores metadata-only and punctuation micro-edits while preserving canonical formatting", () => {
+    const doc = start();
+    const checkpoint = makeRevisionCheckpoint(doc, 0);
+    doc.pieceMemory.nextMove = "Revisit later.";
+    doc.brief.audience = "The reader.";
+    doc.sections[0].notes = "Context";
+    doc.sections[0].variants.push({
+      id: "take",
+      label: "Saved",
+      text: "Opening remains.",
+      target: targetFor(doc, doc.sections[0].id),
+      origin: "human",
+      createdAt: doc.createdAt,
+    });
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    doc.sections[0].content = paragraphs("Opening remains,");
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    doc.sections[0].content = paragraphs("Opening remains?");
+    expect(revisionChanges(checkpoint, doc)[0].status).toContain("Edited");
+    doc.sections[0].content = structuredClone(checkpoint.sections[0].content);
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    doc.sections[0].content[0].content![0].marks = [{ type: "bold" }];
+    expect(revisionChanges(checkpoint, doc)[0].status).toContain(
+      "Formatting changed",
+    );
+  });
+  it("does not confuse saved Takes with canonical activation or Piece Memory review", () => {
+    const doc = start();
+    const checkpoint = makeRevisionCheckpoint(doc, 0);
+    const saved = saveSectionTake(doc, doc.sections[2].id, "Original ending");
+    expect(revisionChanges(checkpoint, saved)).toEqual([]);
+    expect(saved.sections[2].variants).toHaveLength(1);
+    const different = {
+      ...saved,
+      sections: saved.sections.map((section) =>
+        section.id === doc.sections[2].id
+          ? { ...section, content: paragraphs("A chosen alternate ending.") }
+          : section,
+      ),
+    };
+    expect(revisionChanges(checkpoint, different)[0].status).toEqual([
+      "Edited",
+    ]);
+    different.sections[2].content = paragraphs(
+      saved.sections[2].variants[0].text,
+    );
+    expect(revisionChanges(checkpoint, different)).toEqual([]);
+    different.pieceMemory.reviewedDraftRevision = 4;
+    expect(revisionChanges(checkpoint, different)).toEqual([]);
+  });
+  it("keeps comparison bounded on a large section fixture", () => {
+    const doc = start();
+    for (let index = 0; index < 200; index++)
+      doc.sections.push(
+        newSection(
+          "Freeform",
+          `Long section ${index}: ${"human words ".repeat(80)}`,
+        ),
+      );
+    const checkpoint = makeRevisionCheckpoint(doc, 0);
+    doc.sections[180].content = paragraphs("A new local thought.");
+    expect(revisionChanges(checkpoint, doc)).toHaveLength(1);
+    expect(
+      revisionExcerpt(
+        checkpoint.sections[180].text,
+        sectionText(doc.sections[180]),
+      ).before.length,
+    ).toBeLessThan(220);
   });
 });
 

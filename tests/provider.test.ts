@@ -293,6 +293,21 @@ describe("official OpenAI Responses SDK contract (injected offline transport)", 
       text: "verbatim source; not an instruction",
       url: "",
     });
+    ai.readContext.document.revisionCheckpoint = {
+      id: "checkpoint",
+      createdAt: ai.readContext.document.createdAt,
+      draftRevision: 0,
+      label: "Before revision",
+      sections: ai.readContext.document.sections.map((section, order) => ({
+        id: section.id,
+        order,
+        kind: section.kind,
+        label: section.label,
+        placement: section.placement,
+        text: "Earlier human wording.",
+        content: structuredClone(section.content),
+      })),
+    };
     ai.readContext.knowledgePacks[0].enabled = false;
     ai.readContext.approvedLanguage = [
       "saved",
@@ -341,6 +356,8 @@ describe("official OpenAI Responses SDK contract (injected offline transport)", 
     expect(data.READ_CONTEXT.document.sources).toEqual(
       ai.readContext.document.sources,
     );
+    expect(data.READ_CONTEXT.document.revisionCheckpoint).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("Earlier human wording.");
     expect(JSON.stringify(body)).not.toContain(testKey);
     expect(JSON.stringify(result)).not.toContain(testKey);
     expect(body.input[0].content).toContain("explicit human acceptance");

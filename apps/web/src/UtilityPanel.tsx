@@ -8,6 +8,7 @@ import {
   contentTypes,
   uid,
   documentText,
+  sectionText,
   type Document,
   type Settings,
   type WritingBrief,
@@ -30,6 +31,8 @@ import {
   duplicateDocumentCue,
   hasPieceMemoryContent,
   nextMoveSectionLabel,
+  revisionChanges,
+  revisionExcerpt,
 } from "./workspace-helpers";
 const words = (value: string) =>
   value
@@ -141,6 +144,166 @@ function Brief({ w }: { w: Workspace }) {
     </>
   );
 }
+function RevisionPanel({
+  w,
+  onGoToSection,
+}: {
+  w: Workspace;
+  onGoToSection: (id: string) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const checkpoint = w.doc.revisionCheckpoint;
+  const changes =
+    reviewOpen && checkpoint ? revisionChanges(checkpoint, w.doc) : [];
+  const changed = checkpoint && w.draftRevision !== checkpoint.draftRevision;
+  const setCheckpoint = () => {
+    w.setRevisionCheckpoint(label);
+    setReviewOpen(false);
+    setConfirmReplace(false);
+    setLabel("");
+  };
+  return (
+    <div className="revision-panel" data-testid="revision-panel">
+      <p className="panel-intro">
+        One writer-set baseline for the current draft. It does not save a Take
+        or change your prose.
+      </p>
+      {!checkpoint ? (
+        <>
+          <Field label="Checkpoint note (optional)">
+            <input
+              maxLength={120}
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+            />
+          </Field>
+          <Button onClick={setCheckpoint}>Set revision checkpoint</Button>
+        </>
+      ) : (
+        <>
+          <p className="small muted">
+            Checkpoint set{" "}
+            <time dateTime={checkpoint.createdAt}>
+              {new Date(checkpoint.createdAt).toLocaleString()}
+            </time>
+            {checkpoint.label && ` · ${checkpoint.label}`}
+          </p>
+          <p className="small">
+            {changed
+              ? "Changes since checkpoint"
+              : "No changes since checkpoint"}
+          </p>
+          <div className="row wrap">
+            <Button onClick={() => setReviewOpen((open) => !open)}>
+              {reviewOpen ? "Hide changes" : "Review changes"}
+            </Button>
+            <Button onClick={() => setConfirmReplace(true)}>
+              Set current draft as new checkpoint
+            </Button>
+          </div>
+          {reviewOpen && (
+            <section
+              className="revision-changes"
+              aria-label="Changes since checkpoint"
+            >
+              {changes.length ? (
+                <p className="small muted">
+                  {changes.length} changed{" "}
+                  {changes.length === 1 ? "section" : "sections"}
+                </p>
+              ) : (
+                <p className="small muted">
+                  {changed
+                    ? "No section-level changes passed the low-noise comparison."
+                    : "No section-level changes since this checkpoint."}
+                </p>
+              )}
+              {changes.map((change) => {
+                const reference = change.current
+                  ? nextMoveSectionLabel(w.doc, change.id)
+                  : [
+                      String(change.beforeOrder).padStart(2, "0"),
+                      change.before?.label !== change.before?.kind
+                        ? change.before?.label
+                        : null,
+                      change.before?.kind,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                const excerpt = revisionExcerpt(
+                  change.before?.text ?? "",
+                  change.current ? sectionText(change.current) : "",
+                );
+                return (
+                  <article
+                    key={change.id}
+                    data-testid="revision-change"
+                    aria-label={`${reference} · ${change.status.join(" · ")}`}
+                  >
+                    <b>{reference}</b>
+                    <p className="small muted">
+                      {change.status.join(" · ")}
+                      {change.status.includes("Moved") &&
+                      change.beforeOrder &&
+                      change.currentOrder
+                        ? ` ${change.beforeOrder} → ${change.currentOrder}`
+                        : ""}
+                    </p>
+                    {(change.status.includes("Edited") ||
+                      change.status.includes("Formatting changed") ||
+                      change.status.includes("Removed")) && (
+                      <p>
+                        <strong>Before:</strong> {excerpt.before}
+                      </p>
+                    )}
+                    {(change.status.includes("Edited") ||
+                      change.status.includes("Formatting changed") ||
+                      change.status.includes("Added")) && (
+                      <p>
+                        <strong>Now:</strong> {excerpt.current}
+                      </p>
+                    )}
+                    {change.current && (
+                      <Button onClick={() => onGoToSection(change.id)}>
+                        Go to section
+                      </Button>
+                    )}
+                  </article>
+                );
+              })}
+            </section>
+          )}
+          {confirmReplace && (
+            <div
+              className="inline-confirm"
+              role="alertdialog"
+              aria-label="Replace revision checkpoint"
+            >
+              <p>
+                Replace the current revision checkpoint with the draft as it is
+                now?
+              </p>
+              <Field label="Checkpoint note (optional)">
+                <input
+                  maxLength={120}
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                />
+              </Field>
+              <div className="row wrap">
+                <Button onClick={() => setConfirmReplace(false)}>Cancel</Button>
+                <Button onClick={setCheckpoint}>Replace checkpoint</Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function PieceMemory({
   w,
   onGoToSection,
@@ -1436,6 +1599,7 @@ export function UtilityPanel({
   const title = {
     brief: "Writing brief",
     memory: "Piece memory",
+    revision: "Revision",
     sources: "Source material",
     style: "Style DNA & knowledge",
     radar: "Language radar",
@@ -1469,6 +1633,8 @@ export function UtilityPanel({
         <Brief w={w} />
       ) : w.panel === "memory" ? (
         <PieceMemory w={w} onGoToSection={onGoToSection} />
+      ) : w.panel === "revision" ? (
+        <RevisionPanel w={w} onGoToSection={onGoToSection} />
       ) : w.panel === "sources" ? (
         <Sources w={w} />
       ) : w.panel === "style" ? (

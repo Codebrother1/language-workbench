@@ -310,6 +310,29 @@ export const guidanceDismissalSchema = z.object({
   context: z.string().min(1),
 });
 export type GuidanceDismissal = z.infer<typeof guidanceDismissalSchema>;
+export const revisionSectionSnapshotSchema = z.object({
+  id: z.string().min(1),
+  order: z.number().int().min(0),
+  kind: z.enum(sectionKinds),
+  label: z.string(),
+  placement: z.enum(["draft", "parked"]),
+  text: z.string(),
+  content: z.array(richNodeSchema),
+});
+export const revisionCheckpointSchema = z
+  .object({
+    id: z.string().min(1),
+    createdAt: z.string().min(1),
+    draftRevision: z.number().int().min(0),
+    label: z.string().max(120).default(""),
+    sections: z.array(revisionSectionSnapshotSchema).max(5000),
+  })
+  .refine(
+    (checkpoint) =>
+      new Set(checkpoint.sections.map((section) => section.id)).size ===
+      checkpoint.sections.length,
+  );
+export type RevisionCheckpoint = z.infer<typeof revisionCheckpointSchema>;
 export const documentSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -320,6 +343,9 @@ export const documentSchema = z
     revision: z.number().int().min(0),
     brief: writingBriefSchema,
     draftRevision: z.number().int().min(0).default(0),
+    revisionCheckpoint: revisionCheckpointSchema
+      .or(z.unknown().transform(() => undefined))
+      .optional(),
     pieceMemory: pieceMemorySchema.default({}),
     guidanceDismissals: z.array(guidanceDismissalSchema).max(500).default([]),
     sections: z.array(writingSectionSchema).min(1),

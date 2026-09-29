@@ -71,6 +71,10 @@ export class OpenAIProvider implements LLMProvider {
     // The server filters in addition to telling the model what is authoritative.
     const context = {
       ...request.readContext,
+      document: {
+        ...request.readContext.document,
+        revisionCheckpoint: undefined,
+      },
       RELATIONAL_CONTEXT: relationalContext(request),
       knowledgePacks: request.readContext.knowledgePacks.filter(
         (p) => p.enabled,

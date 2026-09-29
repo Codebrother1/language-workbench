@@ -2332,6 +2332,32 @@ export default function App() {
             )}
           </Button>
           <Button
+            className="revision-entry"
+            aria-label={
+              w.doc.revisionCheckpoint
+                ? `Revision · ${w.draftRevision === w.doc.revisionCheckpoint.draftRevision ? "No changes since checkpoint" : "Changes since checkpoint"}`
+                : "Revision"
+            }
+            title={
+              w.doc.revisionCheckpoint
+                ? `Checkpoint set ${new Date(w.doc.revisionCheckpoint.createdAt).toLocaleString()}`
+                : "Set a revision checkpoint"
+            }
+            disabled={!w.ready}
+            onClick={() => w.setPanel("revision")}
+          >
+            Revision
+            {w.doc.revisionCheckpoint && (
+              <span className="revision-entry-status">
+                {" "}
+                ·{" "}
+                {w.draftRevision === w.doc.revisionCheckpoint.draftRevision
+                  ? "No changes since checkpoint"
+                  : "Changes since checkpoint"}
+              </span>
+            )}
+          </Button>
+          <Button
             className="top-action command-trigger"
             aria-label="Find a tool"
             title="Find a tool (Cmd/Ctrl+K)"

@@ -268,6 +268,25 @@ hr {
   font-size: 12px;
   white-space: nowrap;
 }
+.button.revision-entry {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 5px 7px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.button.revision-entry:hover {
+  color: var(--text);
+  background: var(--accent-light);
+}
+@media (max-width: 1180px) {
+  .revision-entry-status {
+    display: none;
+  }
+}
 .button.piece-memory-entry:hover,
 .button.piece-memory-entry[aria-expanded="true"] {
   color: var(--text);
@@ -462,6 +481,33 @@ hr {
 }
 .delete-confirm p {
   margin: 0 0 10px;
+}
+.revision-panel {
+  display: grid;
+  gap: 12px;
+}
+.revision-panel > p {
+  margin: 0;
+}
+.revision-changes {
+  display: grid;
+  gap: 10px;
+}
+.revision-changes article {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 0;
+}
+.revision-changes article p {
+  margin: 7px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.revision-changes article .button {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
 }
 .piece-next-move {
   display: flex;

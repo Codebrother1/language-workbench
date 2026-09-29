@@ -5,6 +5,7 @@ import {
   type Page,
   type APIRequestContext,
 } from "@playwright/test";
+import { makeRevisionCheckpoint } from "../../apps/web/src/workspace-helpers";
 import {
   newDocument,
   newSection,
@@ -1080,6 +1081,147 @@ test("Piece memory entry follows per-document freshness through switch, duplicat
   await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
 });
 
+test("a writer-set revision checkpoint reviews changed sections and replaces only with confirmation", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.nextMove = "Return to the ending.";
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Revision", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Revision" });
+  await expect(review.getByText("No changes since checkpoint")).toHaveCount(0);
+  await review
+    .getByLabel("Checkpoint note (optional)")
+    .fill("Before tightening ending");
+  await review.getByRole("button", { name: "Set revision checkpoint" }).click();
+  await expect(review).toContainText("No changes since checkpoint");
+  await expect(review).toContainText("Before tightening ending");
+  await review.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  let saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.revisionCheckpoint.sections[2].text).toBe(
+    "Leave this ending alone.",
+  );
+  expect(saved.pieceMemory.reviewedDraftRevision).toBe(
+    doc.pieceMemory.reviewedDraftRevision,
+  );
+  expect(documentText(saved)).toBe(documentText(doc));
+  await page
+    .getByRole("button", { name: "Document View", exact: true })
+    .click();
+  await select(page, "Leave this ending alone.");
+  await page.keyboard.insertText("Leave this ending open.");
+  await expect(
+    page.getByRole("button", { name: /Revision · Changes since checkpoint/ }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /Revision · Changes since checkpoint/ })
+    .click();
+  await review.getByRole("button", { name: "Review changes" }).click();
+  await expect(review.getByTestId("revision-change")).toHaveCount(1);
+  await expect(review.getByTestId("revision-change")).toContainText("Edited");
+  await expect(review.getByTestId("revision-change")).toContainText("Before:");
+  await expect(review.getByTestId("revision-change")).toContainText("Now:");
+  await review.getByRole("button", { name: "Go to section" }).click();
+  await expect(
+    page.getByRole("button", { name: "Document View", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.locator(`[data-section-id="${doc.sections[2].id}"]`),
+  ).toHaveClass(/active/);
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await page
+    .getByRole("button", { name: /Revision · Changes since checkpoint/ })
+    .click();
+  await review
+    .getByRole("button", { name: "Set current draft as new checkpoint" })
+    .click();
+  await expect(review).toContainText("Replace the current revision checkpoint");
+  await review.getByRole("button", { name: "Cancel" }).click();
+  await expect(review).toContainText("Changes since checkpoint");
+  await review
+    .getByRole("button", { name: "Set current draft as new checkpoint" })
+    .click();
+  await review.getByRole("button", { name: "Replace checkpoint" }).click();
+  await expect(review).toContainText("No changes since checkpoint");
+  await review.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.revisionCheckpoint.sections[2].text).toBe(
+    "Leave this ending open.",
+  );
+  expect(saved.pieceMemory.reviewedDraftRevision).toBe(
+    doc.pieceMemory.reviewedDraftRevision,
+  );
+  expect(calls).toHaveLength(0);
+});
+
+for (const width of [1440, 1024, 700])
+  test(`checkpoint review distinguishes structural changes and removed history at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    doc.revisionCheckpoint = makeRevisionCheckpoint(
+      doc,
+      doc.draftRevision,
+      "Before moving ending",
+    );
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    const current = await (
+      await request.get(`/api/documents/${doc.id}`)
+    ).json();
+    const [opening, middle, closer] = current.sections;
+    closer.content = paragraphs("An ending with a different object.");
+    opening.label = "Beginning";
+    opening.kind = "Evidence";
+    const added = newSection("Freeform", "Newly added thought.");
+    current.sections = [closer, opening, added];
+    await request.put(`/api/documents/${doc.id}`, { data: current });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page
+      .getByRole("button", { name: /Revision · Changes since checkpoint/ })
+      .click();
+    const review = page.getByRole("dialog", { name: "Revision" });
+    await review.getByRole("button", { name: "Review changes" }).click();
+    const changes = review.getByTestId("revision-change");
+    await expect(changes).toHaveCount(4);
+    await expect(
+      changes.filter({ hasText: "An ending with a different object." }),
+    ).toContainText("Edited · Moved");
+    await expect(
+      changes.filter({ hasText: "Beginning · Evidence" }),
+    ).toContainText("Role changed · Renamed");
+    await expect(
+      changes.filter({ hasText: "Newly added thought." }),
+    ).toContainText("Added");
+    const removed = changes.filter({
+      hasText: "The connection is a consequence",
+    });
+    await expect(removed).toContainText("Removed");
+    await expect(
+      removed.getByRole("button", { name: "Go to section" }),
+    ).toHaveCount(0);
+    await expect(
+      changes.getByRole("button", { name: "Go to section" }),
+    ).toHaveCount(3);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    const after = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(after.revisionCheckpoint.id).toBe(doc.revisionCheckpoint.id);
+    expect(
+      after.sections.some((section: any) => section.id === middle.id),
+    ).toBe(false);
+  });
+
 test("linked Next move navigates deliberately without focusing prose or reviewing memory", async ({
   page,
   request,
@@ -1769,6 +1911,11 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   const first = await seed(request);
   first.pieceMemory.nextMove = "Reread the bridge.";
   first.pieceMemory.nextMoveSectionId = first.sections[1].id;
+  first.revisionCheckpoint = makeRevisionCheckpoint(
+    first,
+    first.draftRevision,
+    "Before export",
+  );
   first.pieceMemory.decisions.push({
     id: "choice",
     text: "Keep the closer.",
@@ -1792,6 +1939,8 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   );
   expect(single.pieceMemory.nextMove).toBe("Reread the bridge.");
   expect(single.pieceMemory.nextMoveSectionId).toBe(first.sections[1].id);
+  expect(single.revisionCheckpoint.sections[1].id).toBe(first.sections[1].id);
+  expect(single.revisionCheckpoint.label).toBe("Before export");
   expect(single.pieceMemory.reviewedDraftRevision).toBe(single.draftRevision);
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("button", { name: "Manage documents" }).click();
@@ -1809,6 +1958,9 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
     "Keep the closer.",
   );
   expect(selected.documents[0].pieceMemory.nextMoveSectionId).toBe(
+    first.sections[1].id,
+  );
+  expect(selected.documents[0].revisionCheckpoint.sections[1].id).toBe(
     first.sections[1].id,
   );
   expect(selected.documents[0].pieceMemory.reviewedDraftRevision).toBe(
@@ -1843,6 +1995,12 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   expect(duplicate.pieceMemory.nextMoveSectionId).toBe(
     duplicate.sections[1].id,
   );
+  expect(duplicate.revisionCheckpoint.sections[1].id).toBe(
+    duplicate.sections[1].id,
+  );
+  expect(duplicate.revisionCheckpoint.sections[1].id).not.toBe(
+    first.sections[1].id,
+  );
   expect(duplicate.pieceMemory.reviewedDraftRevision).toBe(
     duplicate.draftRevision,
   );
@@ -1868,10 +2026,11 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   await manage.getByRole("button", { name: "Close dialog" }).click();
   await switcher.selectOption(first.id);
   await expect(page.getByText("Next move: Reread the bridge.")).toBeVisible();
-  expect(
-    (await (await request.get(`/api/documents/${first.id}`)).json()).pieceMemory
-      .nextMoveSectionId,
-  ).toBe(first.sections[1].id);
+  const restored = await (
+    await request.get(`/api/documents/${first.id}`)
+  ).json();
+  expect(restored.pieceMemory.nextMoveSectionId).toBe(first.sections[1].id);
+  expect(restored.revisionCheckpoint).toEqual(single.revisionCheckpoint);
 });
 
 test("archiving an active document preserves its work and restores it without changing the current draft", async ({

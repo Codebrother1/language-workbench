@@ -7,6 +7,7 @@ import {
   uid,
   type Document,
   type PieceMemory,
+  type RevisionCheckpoint,
   type SavedBriefContext,
   type WritingSection,
   type EditTarget,
@@ -80,6 +81,153 @@ export function hasPieceMemoryContent(memory: PieceMemory): boolean {
     memory.unresolved.some((item) => item.trim()) ||
     memory.decisions.some((item) => item.text.trim()),
   );
+}
+
+export function makeRevisionCheckpoint(
+  doc: Document,
+  draftRevision: number,
+  label = "",
+): RevisionCheckpoint {
+  return {
+    id: uid(),
+    createdAt: new Date().toISOString(),
+    draftRevision,
+    label: label.trim().slice(0, 120),
+    sections: doc.sections.map((section, order) => ({
+      id: section.id,
+      order,
+      kind: section.kind,
+      label: section.label,
+      placement: section.placement,
+      text: sectionText(section),
+      content: structuredClone(section.content),
+    })),
+  };
+}
+export type RevisionChange = {
+  id: string;
+  before?: RevisionCheckpoint["sections"][number];
+  current?: WritingSection;
+  beforeOrder?: number;
+  currentOrder?: number;
+  status: (
+    | "Edited"
+    | "Formatting changed"
+    | "Added"
+    | "Removed"
+    | "Moved"
+    | "Renamed"
+    | "Role changed"
+    | "Parked"
+    | "Returned to draft"
+  )[];
+};
+export function revisionExcerpt(
+  before: string,
+  current: string,
+): { before: string; current: string } {
+  const offset = textDifference(before, current).prefix.length;
+  const excerpt = (text: string) => {
+    const start = Math.max(0, offset - 70);
+    const end = Math.min(text.length, offset + 110);
+    return (
+      (start ? "…" : "") +
+      text.slice(start, end) +
+      (end < text.length ? "…" : "")
+    );
+  };
+  return { before: excerpt(before), current: excerpt(current) };
+}
+export function revisionChanges(
+  checkpoint: RevisionCheckpoint,
+  doc: Document,
+): RevisionChange[] {
+  const previous = new Map(
+    checkpoint.sections.map((section) => [section.id, section]),
+  );
+  const current = new Map(doc.sections.map((section) => [section.id, section]));
+  const shared = doc.sections.filter(
+    (section) => previous.get(section.id)?.placement === section.placement,
+  );
+  const positions = shared.map((section) => previous.get(section.id)!.order);
+  const tails: number[] = [],
+    preceding = new Array<number>(positions.length).fill(-1);
+  for (let index = 0; index < positions.length; index++) {
+    let low = 0,
+      high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (positions[tails[middle]] < positions[index]) low = middle + 1;
+      else high = middle;
+    }
+    if (low) preceding[index] = tails[low - 1];
+    tails[low] = index;
+  }
+  const inOrder = new Set<string>();
+  for (
+    let index = tails.length ? tails[tails.length - 1] : -1;
+    index >= 0;
+    index = preceding[index]
+  )
+    inOrder.add(shared[index].id);
+  const changes: RevisionChange[] = [];
+  for (let order = 0; order < doc.sections.length; order++) {
+    const section = doc.sections[order],
+      before = previous.get(section.id);
+    if (!before) {
+      changes.push({
+        id: section.id,
+        current: section,
+        currentOrder: order + 1,
+        status: ["Added"],
+      });
+      continue;
+    }
+    const status: RevisionChange["status"] = [];
+    const text = sectionText(section);
+    if (text !== before.text) {
+      const normalize = (value: string) =>
+        value
+          .replace(/[^\p{L}\p{N}\s]/gu, "")
+          .replace(/\s+/gu, " ")
+          .trim();
+      const terminal = (value: string) =>
+        value.trim().match(/[?!]$/u)?.[0] ?? "";
+      if (
+        normalize(text) !== normalize(before.text) ||
+        terminal(text) !== terminal(before.text)
+      )
+        status.push("Edited");
+    } else if (
+      JSON.stringify(section.content) !== JSON.stringify(before.content)
+    )
+      status.push("Formatting changed");
+    if (before.kind !== section.kind) status.push("Role changed");
+    if (before.label !== section.label) status.push("Renamed");
+    if (before.placement !== section.placement)
+      status.push(
+        section.placement === "parked" ? "Parked" : "Returned to draft",
+      );
+    else if (!inOrder.has(section.id)) status.push("Moved");
+    if (status.length)
+      changes.push({
+        id: section.id,
+        before,
+        current: section,
+        beforeOrder: before.order + 1,
+        currentOrder: order + 1,
+        status,
+      });
+  }
+  for (const before of checkpoint.sections)
+    if (!current.has(before.id))
+      changes.push({
+        id: before.id,
+        before,
+        beforeOrder: before.order + 1,
+        status: ["Removed"],
+      });
+  return changes;
 }
 
 export function documentBackup(

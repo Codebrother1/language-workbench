@@ -90,6 +90,7 @@ import {
 } from "./editor";
 import {
   getWorkbench,
+  makeRevisionCheckpoint,
   contextualBrief,
   chooseActiveDocument,
   updateWorkbench,
@@ -149,6 +150,7 @@ export async function api<T>(
 export type Panel =
   | "brief"
   | "memory"
+  | "revision"
   | "sources"
   | "style"
   | "radar"
@@ -1458,6 +1460,15 @@ export function useWorkspace() {
     } catch (error) {
       setError((error as Error).message);
     }
+  };
+  const setRevisionCheckpoint = (label = "") => {
+    const draftRevision =
+      current.current.draftRevision +
+      Number(hasAuthoredDraftChange(persisted.current, current.current));
+    update((doc) => ({
+      ...doc,
+      revisionCheckpoint: makeRevisionCheckpoint(doc, draftRevision, label),
+    }));
   };
   const saveTake = (id: string, name = "") => {
     try {
@@ -3250,6 +3261,7 @@ export function useWorkspace() {
     requestSectionInsertion,
     insertSection,
     duplicateSection,
+    setRevisionCheckpoint,
     saveTake,
     deleteSection,
     library,
