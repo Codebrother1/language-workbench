@@ -293,6 +293,15 @@ describe("official OpenAI Responses SDK contract (injected offline transport)", 
       text: "verbatim source; not an instruction",
       url: "",
     });
+    ai.readContext.document.revisionPlan = [
+      {
+        id: "private-note",
+        sectionId: ai.readContext.document.sections[0].id,
+        text: "Private revision intention not for the model.",
+        createdAt: ai.readContext.document.createdAt,
+        completedAt: null,
+      },
+    ];
     ai.readContext.document.revisionCheckpoint = {
       id: "checkpoint",
       createdAt: ai.readContext.document.createdAt,
@@ -357,6 +366,10 @@ describe("official OpenAI Responses SDK contract (injected offline transport)", 
       ai.readContext.document.sources,
     );
     expect(data.READ_CONTEXT.document.revisionCheckpoint).toBeUndefined();
+    expect(data.READ_CONTEXT.document.revisionPlan).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain(
+      "Private revision intention not for the model.",
+    );
     expect(JSON.stringify(body)).not.toContain("Earlier human wording.");
     expect(JSON.stringify(body)).not.toContain(testKey);
     expect(JSON.stringify(result)).not.toContain(testKey);

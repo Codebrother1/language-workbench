@@ -10,6 +10,7 @@ import {
   documentText,
   sectionText,
   type Document,
+  type RevisionIntent,
   type Settings,
   type WritingBrief,
   type PieceMemory as PieceMemoryData,
@@ -33,6 +34,7 @@ import {
   nextMoveSectionLabel,
   revisionChanges,
   revisionExcerpt,
+  sortedRevisionPlan,
 } from "./workspace-helpers";
 const words = (value: string) =>
   value
@@ -300,6 +302,183 @@ function RevisionPanel({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function RevisionIntentRow({
+  w,
+  note,
+  onGoToSection,
+}: {
+  w: Workspace;
+  note: RevisionIntent;
+  onGoToSection: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(note.text);
+  const [sectionId, setSectionId] = useState(note.sectionId);
+  const location = nextMoveSectionLabel(w.doc, note.sectionId);
+  return (
+    <article
+      data-testid="revision-intention"
+      aria-label={`${location ?? "Linked section no longer exists"} · ${note.completedAt ? "Completed" : "Active"} revision note`}
+    >
+      <b>{location ?? "Linked section no longer exists"}</b>
+      {editing ? (
+        <div className="revision-plan-editor">
+          <Field label="Edit note section">
+            <Select
+              value={
+                w.doc.sections.some((section) => section.id === sectionId)
+                  ? sectionId
+                  : ""
+              }
+              onChange={(event) => setSectionId(event.target.value)}
+            >
+              <option value="">Choose section</option>
+              {w.doc.sections.map((section) => (
+                <option value={section.id} key={section.id}>
+                  {nextMoveSectionLabel(w.doc, section.id)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Edit revision note">
+            <textarea
+              rows={2}
+              maxLength={1200}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+            />
+          </Field>
+          <div className="row wrap">
+            <Button
+              disabled={
+                !text.trim() ||
+                !w.doc.sections.some((section) => section.id === sectionId)
+              }
+              onClick={() => {
+                if (w.editRevisionIntent(note.id, sectionId, text))
+                  setEditing(false);
+              }}
+            >
+              Save note
+            </Button>
+            <Button
+              onClick={() => {
+                setText(note.text);
+                setSectionId(note.sectionId);
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p>{note.text}</p>
+      )}
+      {!editing && (
+        <div className="row wrap">
+          {location && (
+            <Button onClick={() => onGoToSection(note.sectionId)}>
+              Go to section
+            </Button>
+          )}
+          <Button
+            onClick={() => w.completeRevisionIntent(note.id, !note.completedAt)}
+          >
+            {note.completedAt ? "Reopen" : "Done"}
+          </Button>
+          <Button className="text-button" onClick={() => setEditing(true)}>
+            Edit note
+          </Button>
+          <Button
+            className="text-button"
+            onClick={() => w.removeRevisionIntent(note.id)}
+          >
+            Remove note
+          </Button>
+        </div>
+      )}
+    </article>
+  );
+}
+function RevisionPlanPanel({
+  w,
+  onGoToSection,
+}: {
+  w: Workspace;
+  onGoToSection: (id: string) => void;
+}) {
+  const [sectionId, setSectionId] = useState("");
+  const [text, setText] = useState("");
+  const active = sortedRevisionPlan(w.doc, false);
+  const completed = sortedRevisionPlan(w.doc, true);
+  return (
+    <div className="revision-plan" data-testid="revision-plan">
+      <p className="panel-intro">
+        Short writer-authored notes about sections to revisit. Separate from
+        prose, Piece Memory and the Revision checkpoint.
+      </p>
+      <h3>Revision plan · {active.length} active</h3>
+      {active.map((note) => (
+        <RevisionIntentRow
+          key={note.id}
+          w={w}
+          note={note}
+          onGoToSection={onGoToSection}
+        />
+      ))}
+      {!!completed.length && (
+        <details className="revision-plan-completed">
+          <summary>Show completed · {completed.length}</summary>
+          {completed.map((note) => (
+            <RevisionIntentRow
+              key={note.id}
+              w={w}
+              note={note}
+              onGoToSection={onGoToSection}
+            />
+          ))}
+        </details>
+      )}
+      <section className="revision-plan-create" aria-label="Add revision note">
+        <Field label="Section for revision note">
+          <Select
+            value={sectionId}
+            onChange={(event) => setSectionId(event.target.value)}
+          >
+            <option value="">Choose section</option>
+            {w.doc.sections.map((section) => (
+              <option value={section.id} key={section.id}>
+                {nextMoveSectionLabel(w.doc, section.id)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Revision note">
+          <textarea
+            rows={2}
+            maxLength={1200}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="What do you want to reconsider here?"
+          />
+        </Field>
+        <Button
+          disabled={!sectionId || !text.trim()}
+          onClick={() => {
+            if (w.createRevisionIntent(sectionId, text)) {
+              setText("");
+              setSectionId("");
+            }
+          }}
+        >
+          Add revision note
+        </Button>
+      </section>
     </div>
   );
 }
@@ -1600,6 +1779,7 @@ export function UtilityPanel({
     brief: "Writing brief",
     memory: "Piece memory",
     revision: "Revision",
+    revisionPlan: "Revision plan",
     sources: "Source material",
     style: "Style DNA & knowledge",
     radar: "Language radar",
@@ -1635,6 +1815,8 @@ export function UtilityPanel({
         <PieceMemory w={w} onGoToSection={onGoToSection} />
       ) : w.panel === "revision" ? (
         <RevisionPanel w={w} onGoToSection={onGoToSection} />
+      ) : w.panel === "revisionPlan" ? (
+        <RevisionPlanPanel w={w} onGoToSection={onGoToSection} />
       ) : w.panel === "sources" ? (
         <Sources w={w} />
       ) : w.panel === "style" ? (

@@ -74,6 +74,7 @@ export class OpenAIProvider implements LLMProvider {
       document: {
         ...request.readContext.document,
         revisionCheckpoint: undefined,
+        revisionPlan: undefined,
       },
       RELATIONAL_CONTEXT: relationalContext(request),
       knowledgePacks: request.readContext.knowledgePacks.filter(

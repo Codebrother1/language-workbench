@@ -24,6 +24,7 @@ import {
   nextMoveSectionLabel,
   makeRevisionCheckpoint,
   checkpointMatchesDraft,
+  sortedRevisionPlan,
   revisionChanges,
   revisionExcerpt,
   sectionMentions,
@@ -151,6 +152,90 @@ describe("contextual Brief retrieval", () => {
     doc.brief.audience = "Already familiar readers";
     doc.brief.destination = "Newsletter";
     expect(contextualBrief(doc, target(), "critique")).toHaveLength(3);
+  });
+});
+
+describe("writer-authored revision plan", () => {
+  it("stays separate from Piece Memory, checkpoint review and saved Takes", () => {
+    const doc = newDocument("Plan", "The human wrote this.");
+    doc.revisionPlan = [
+      {
+        id: "note",
+        sectionId: doc.sections[0].id,
+        text: "Listen to the opening again.",
+        createdAt: doc.createdAt,
+        completedAt: null,
+      },
+    ];
+    const baseline = structuredClone(doc.revisionPlan);
+    const checkpoint = makeRevisionCheckpoint(doc, doc.draftRevision);
+    doc.revisionCheckpoint = checkpoint;
+    doc.pieceMemory.nextMove = "A different document intention.";
+    expect(revisionChanges(checkpoint, doc)).toEqual([]);
+    expect(doc.revisionPlan).toEqual(baseline);
+    const withTake = saveSectionTake(doc, doc.sections[0].id);
+    expect(withTake.revisionPlan).toEqual(baseline);
+    withTake.sections[0].content = paragraphs("A different chosen take.");
+    expect(withTake.revisionPlan).toEqual(baseline);
+    expect(withTake.revisionPlan[0].completedAt).toBeNull();
+  });
+  it("sorts active notes by current section order then creation time, without changing identity", () => {
+    const doc = newDocument("Revision pass", "Opening text.");
+    const ending = newSection("Closer", "Ending text.");
+    doc.sections.push(ending);
+    doc.revisionPlan = [
+      {
+        id: "ending-new",
+        sectionId: ending.id,
+        text: "Read aloud.",
+        createdAt: "2026-02-02",
+        completedAt: null,
+      },
+      {
+        id: "opening",
+        sectionId: doc.sections[0].id,
+        text: "Check the hook.",
+        createdAt: "2026-02-01",
+        completedAt: null,
+      },
+      {
+        id: "ending-old",
+        sectionId: ending.id,
+        text: "Keep the object.",
+        createdAt: "2026-02-01",
+        completedAt: null,
+      },
+      {
+        id: "historical",
+        sectionId: "removed-section",
+        text: "Earlier aside.",
+        createdAt: "2026-02-01",
+        completedAt: null,
+      },
+      {
+        id: "done",
+        sectionId: ending.id,
+        text: "Already considered.",
+        createdAt: "2026-02-01",
+        completedAt: "2026-02-03",
+      },
+    ];
+    expect(sortedRevisionPlan(doc, false).map((note) => note.id)).toEqual([
+      "opening",
+      "ending-old",
+      "ending-new",
+      "historical",
+    ]);
+    expect(sortedRevisionPlan(doc, true).map((note) => note.id)).toEqual([
+      "done",
+    ]);
+    doc.sections.reverse();
+    expect(sortedRevisionPlan(doc, false).map((note) => note.id)).toEqual([
+      "ending-old",
+      "ending-new",
+      "opening",
+      "historical",
+    ]);
   });
 });
 

@@ -482,6 +482,53 @@ hr {
 .delete-confirm p {
   margin: 0 0 10px;
 }
+.revision-plan {
+  display: grid;
+  gap: 12px;
+}
+.revision-plan h3,
+.revision-plan p {
+  margin: 0;
+}
+.revision-plan article {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.revision-plan article p {
+  margin: 6px 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.revision-plan article b {
+  overflow-wrap: anywhere;
+}
+.revision-plan .button {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.revision-plan-create {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.revision-plan-create .button {
+  justify-self: start;
+}
+.revision-plan-completed > summary {
+  min-height: 40px;
+  padding: 8px 0;
+  cursor: pointer;
+  color: var(--muted);
+}
+.revision-plan-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
 .revision-panel {
   display: grid;
   gap: 12px;
@@ -1881,7 +1928,8 @@ hr {
   .document-title input {
     width: 190px;
   }
-  .save-state {
+  .save-state,
+  .button.revision-plan-entry {
     display: none;
   }
   .page {

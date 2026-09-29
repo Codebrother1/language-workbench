@@ -333,6 +333,24 @@ export const revisionCheckpointSchema = z
       checkpoint.sections.length,
   );
 export type RevisionCheckpoint = z.infer<typeof revisionCheckpointSchema>;
+export const revisionIntentSchema = z.object({
+  id: z.string().min(1),
+  sectionId: z.string().min(1),
+  text: z.string().trim().min(1).max(1200),
+  createdAt: z.string().min(1),
+  completedAt: z.string().nullable().default(null),
+});
+export type RevisionIntent = z.infer<typeof revisionIntentSchema>;
+export const revisionPlanSchema = z.preprocess((value) => {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  return value.flatMap((entry) => {
+    const parsed = revisionIntentSchema.safeParse(entry);
+    if (!parsed.success || ids.has(parsed.data.id)) return [];
+    ids.add(parsed.data.id);
+    return [parsed.data];
+  });
+}, z.array(revisionIntentSchema));
 export const documentSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -346,6 +364,7 @@ export const documentSchema = z
     revisionCheckpoint: revisionCheckpointSchema
       .or(z.unknown().transform(() => undefined))
       .optional(),
+    revisionPlan: revisionPlanSchema.default([]),
     pieceMemory: pieceMemorySchema.default({}),
     guidanceDismissals: z.array(guidanceDismissalSchema).max(500).default([]),
     sections: z.array(writingSectionSchema).min(1),
@@ -677,6 +696,7 @@ export function newDocument(title = "Untitled", text = ""): Document {
     brief: writingBriefSchema.parse({}),
     pieceMemory: pieceMemorySchema.parse({}),
     guidanceDismissals: [],
+    revisionPlan: [],
     sections: [newSection("Freeform", text)],
     parkedGroups: [],
     sources: [],

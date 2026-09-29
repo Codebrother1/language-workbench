@@ -183,6 +183,13 @@ export class Repository {
     const now = new Date().toISOString();
     const id = uid();
     const sectionIds = new Map(doc.sections.map((s) => [s.id, uid()]));
+    const missingPlanSectionIds = new Map<string, string>();
+    const remapPlanSection = (sectionId: string) => {
+      if (sectionIds.has(sectionId)) return sectionIds.get(sectionId)!;
+      if (!missingPlanSectionIds.has(sectionId))
+        missingPlanSectionIds.set(sectionId, uid());
+      return missingPlanSectionIds.get(sectionId)!;
+    };
     const remapTarget = (target: Document["history"][number]["target"]) => ({
       ...target,
       documentId: id,
@@ -293,6 +300,11 @@ export class Repository {
           id: sectionIds.get(section.id) ?? uid(),
         })),
       },
+      revisionPlan: doc.revisionPlan.map((note) => ({
+        ...note,
+        id: uid(),
+        sectionId: remapPlanSection(note.sectionId),
+      })),
       pieceMemory: {
         ...doc.pieceMemory,
         nextMoveSectionId: doc.pieceMemory.nextMoveSectionId

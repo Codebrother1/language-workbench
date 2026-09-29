@@ -153,6 +153,7 @@ export type Panel =
   | "brief"
   | "memory"
   | "revision"
+  | "revisionPlan"
   | "sources"
   | "style"
   | "radar"
@@ -1472,6 +1473,60 @@ export function useWorkspace() {
       revisionCheckpoint: makeRevisionCheckpoint(doc, draftRevision, label),
     }));
   };
+  const createRevisionIntent = (sectionId: string, text: string) => {
+    if (
+      !current.current.sections.some((section) => section.id === sectionId) ||
+      !text.trim() ||
+      text.trim().length > 1200
+    )
+      return false;
+    update((doc) => ({
+      ...doc,
+      revisionPlan: [
+        ...doc.revisionPlan,
+        {
+          id: uid(),
+          sectionId,
+          text: text.trim(),
+          createdAt: new Date().toISOString(),
+          completedAt: null,
+        },
+      ],
+    }));
+    return true;
+  };
+  const editRevisionIntent = (id: string, sectionId: string, text: string) => {
+    if (
+      !current.current.sections.some((section) => section.id === sectionId) ||
+      !text.trim() ||
+      text.trim().length > 1200
+    )
+      return false;
+    update((doc) => ({
+      ...doc,
+      revisionPlan: doc.revisionPlan.map((note) =>
+        note.id === id ? { ...note, sectionId, text: text.trim() } : note,
+      ),
+    }));
+    return true;
+  };
+  const completeRevisionIntent = (id: string, completed: boolean) =>
+    update((doc) => ({
+      ...doc,
+      revisionPlan: doc.revisionPlan.map((note) =>
+        note.id === id
+          ? {
+              ...note,
+              completedAt: completed ? new Date().toISOString() : null,
+            }
+          : note,
+      ),
+    }));
+  const removeRevisionIntent = (id: string) =>
+    update((doc) => ({
+      ...doc,
+      revisionPlan: doc.revisionPlan.filter((note) => note.id !== id),
+    }));
   const saveTake = (id: string, name = "") => {
     try {
       update((doc) => saveSectionTake(doc, id, name));
@@ -3272,6 +3327,10 @@ export function useWorkspace() {
     insertSection,
     duplicateSection,
     setRevisionCheckpoint,
+    createRevisionIntent,
+    editRevisionIntent,
+    completeRevisionIntent,
+    removeRevisionIntent,
     saveTake,
     deleteSection,
     library,

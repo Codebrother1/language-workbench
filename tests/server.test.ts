@@ -558,6 +558,74 @@ describe("local API and SQLite persistence", () => {
         .nextMove,
     ).toBe(memory.nextMove);
   });
+  it("keeps writer revision intentions across restart, archive and import without guessing missing links", async () => {
+    let doc = await (
+      await request("/api/documents", "POST", {
+        title: "Revision pass",
+        text: "My opening.",
+      })
+    ).json();
+    expect(doc.revisionPlan).toEqual([]);
+    doc.revisionPlan = [
+      {
+        id: "active",
+        sectionId: doc.sections[0].id,
+        text: "Does this opening arrive too early?",
+        createdAt: doc.createdAt,
+        completedAt: null,
+      },
+      {
+        id: "done",
+        sectionId: "removed-section",
+        text: "Old aside was optional.",
+        createdAt: doc.createdAt,
+        completedAt: doc.createdAt,
+      },
+    ];
+    doc = await (await request(`/api/documents/${doc.id}`, "PUT", doc)).json();
+    expect(doc.draftRevision).toBe(0);
+    await request("/api/documents/archive", "POST", { ids: [doc.id] });
+    await stop();
+    await start();
+    const archived = await (await request(`/api/documents/${doc.id}`)).json();
+    expect(archived.revisionPlan).toEqual(doc.revisionPlan);
+    await request("/api/documents/restore", "POST", { ids: [doc.id] });
+    const copy = await (
+      await request("/api/import", "POST", { document: archived })
+    ).json();
+    expect(copy.revisionPlan.map((note: any) => note.text)).toEqual(
+      doc.revisionPlan.map((note: any) => note.text),
+    );
+    expect(copy.revisionPlan[0].sectionId).toBe(copy.sections[0].id);
+    expect(copy.revisionPlan[0].sectionId).not.toBe(doc.sections[0].id);
+    expect(copy.revisionPlan[1].sectionId).not.toBe("removed-section");
+    expect(
+      copy.sections.some(
+        (section: any) => section.id === copy.revisionPlan[1].sectionId,
+      ),
+    ).toBe(false);
+    expect(copy.revisionPlan[1].completedAt).toBe(
+      doc.revisionPlan[1].completedAt,
+    );
+    const malformed = structuredClone(archived);
+    malformed.revisionPlan = [
+      malformed.revisionPlan[0],
+      { id: "broken", sectionId: 7, text: "Missing ID" },
+    ];
+    const imported = await (
+      await request("/api/import", "POST", { document: malformed })
+    ).json();
+    expect(imported.revisionPlan).toHaveLength(1);
+    const legacy = structuredClone(archived);
+    delete legacy.revisionPlan;
+    expect(
+      (
+        await (
+          await request("/api/import", "POST", { document: legacy })
+        ).json()
+      ).revisionPlan,
+    ).toEqual([]);
+  });
   it("preserves explicit revision checkpoint snapshots through restart, archive and remapped import", async () => {
     let doc = await (
       await request("/api/documents", "POST", {

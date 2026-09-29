@@ -1515,6 +1515,9 @@ export default function App() {
   const linkedNextMoveLabel = w.doc.pieceMemory.nextMove.trim()
     ? nextMoveSectionLabel(w.doc, w.doc.pieceMemory.nextMoveSectionId)
     : null;
+  const activeRevisionCount = w.doc.revisionPlan.filter(
+    (note) => !note.completedAt,
+  ).length;
   const filename =
     w.doc.title.replace(/[^a-z0-9 _-]/gi, "").trim() || "writing";
   const widths = dragWidths ?? w.layout.paneWidths;
@@ -2358,6 +2361,20 @@ export default function App() {
             )}
           </Button>
           <Button
+            className="revision-entry revision-plan-entry"
+            aria-label={`Revision plan${activeRevisionCount ? ` · ${activeRevisionCount} active` : ""}`}
+            disabled={!w.ready}
+            onClick={() => w.setPanel("revisionPlan")}
+          >
+            Revision plan
+            {activeRevisionCount > 0 && (
+              <span className="revision-entry-status">
+                {" "}
+                · {activeRevisionCount} active
+              </span>
+            )}
+          </Button>
+          <Button
             className="top-action command-trigger"
             aria-label="Find a tool"
             title="Find a tool (Cmd/Ctrl+K)"
@@ -2502,6 +2519,15 @@ export default function App() {
                   }}
                 >
                   Piece memory
+                </Button>
+                <Button
+                  disabled={!w.ready}
+                  onClick={() => {
+                    w.setPanel("revisionPlan");
+                    setMenu(false);
+                  }}
+                >
+                  Revision plan
                 </Button>
                 <hr />
                 <Button

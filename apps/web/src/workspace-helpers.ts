@@ -83,6 +83,24 @@ export function hasPieceMemoryContent(memory: PieceMemory): boolean {
   );
 }
 
+export function sortedRevisionPlan(
+  doc: Document,
+  completed: boolean,
+): Document["revisionPlan"] {
+  const positions = new Map(
+    doc.sections.map((section, index) => [section.id, index]),
+  );
+  return doc.revisionPlan
+    .filter((item) => Boolean(item.completedAt) === completed)
+    .sort(
+      (a, b) =>
+        (positions.get(a.sectionId) ?? Infinity) -
+          (positions.get(b.sectionId) ?? Infinity) ||
+        a.createdAt.localeCompare(b.createdAt) ||
+        a.id.localeCompare(b.id),
+    );
+}
+
 export function makeRevisionCheckpoint(
   doc: Document,
   draftRevision: number,

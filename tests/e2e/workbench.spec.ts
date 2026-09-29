@@ -1081,6 +1081,181 @@ test("Piece memory entry follows per-document freshness through switch, duplicat
   await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
 });
 
+test("writer-created revision notes remain section-local, recoverable and prose-safe", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  doc.pieceMemory.nextMove = "Return to the piece later.";
+  doc.revisionCheckpoint = makeRevisionCheckpoint(doc, doc.draftRevision);
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  await page
+    .getByRole("button", { name: "Revision plan", exact: true })
+    .click();
+  const plan = page.getByRole("dialog", { name: "Revision plan" });
+  await expect(plan).toContainText("0 active");
+  await plan
+    .getByLabel("Section for revision note")
+    .selectOption(doc.sections[2].id);
+  await plan
+    .getByRole("textbox", { name: "Revision note", exact: true })
+    .fill("Decide whether the ending explains itself.");
+  await plan.getByRole("button", { name: "Add revision note" }).click();
+  const item = plan.getByTestId("revision-intention");
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText("03 · Closer");
+  await expect(item).toContainText(
+    "Decide whether the ending explains itself.",
+  );
+  await item.getByRole("button", { name: "Edit note" }).click();
+  await item
+    .getByLabel("Edit revision note")
+    .fill("Read the final line aloud.");
+  await expect(item.getByLabel("Edit note section")).toHaveValue(
+    doc.sections[2].id,
+  );
+  await item.getByRole("button", { name: "Save note" }).click();
+  await expect(item).toContainText("03 · Closer");
+  await expect(item).toContainText("Read the final line aloud.");
+  await item.getByRole("button", { name: "Edit note" }).click();
+  await expect(item.getByLabel("Edit revision note")).toHaveValue(
+    "Read the final line aloud.",
+  );
+  await item.getByLabel("Edit note section").selectOption(doc.sections[1].id);
+  await item.getByRole("button", { name: "Save note" }).click();
+  await expect(item).toContainText("02 · Segue");
+  await expect(item).toContainText("Read the final line aloud.");
+  await item.getByRole("button", { name: "Done" }).click();
+  await expect(plan).toContainText("0 active");
+  await plan.getByRole("button", { name: "Close dialog" }).click();
+  await save(page);
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Revision plan", exact: true })
+    .click();
+  await expect(plan).toContainText("0 active");
+  await plan.getByText("Show completed").click();
+  await expect(item).toContainText("Read the final line aloud.");
+  await item.getByRole("button", { name: "Reopen" }).click();
+  await expect(plan).toContainText("1 active");
+  await plan.getByRole("button", { name: "Close dialog" }).click();
+  await page
+    .getByRole("button", { name: "Document View", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Revision plan/ }).click();
+  await item.getByRole("button", { name: "Go to section" }).click();
+  await expect(
+    page.locator(`[data-section-id="${doc.sections[1].id}"]`),
+  ).toHaveClass(/active/);
+  await expect(
+    page.getByRole("button", { name: "Document View", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(saved.revisionPlan).toMatchObject([
+    {
+      sectionId: doc.sections[1].id,
+      text: "Read the final line aloud.",
+      completedAt: null,
+    },
+  ]);
+  expect(saved.pieceMemory).toEqual(doc.pieceMemory);
+  expect(saved.revisionCheckpoint).toEqual(doc.revisionCheckpoint);
+  expect(documentText(saved)).toBe(documentText(doc));
+  expect(calls).toHaveLength(0);
+  await page.getByRole("button", { name: /Revision plan/ }).click();
+  await plan
+    .getByTestId("revision-intention")
+    .getByRole("button", { name: "Remove note" })
+    .click();
+  await expect(plan.getByTestId("revision-intention")).toHaveCount(0);
+});
+
+for (const width of [1440, 1024, 700])
+  test(`revision intentions follow section identity across metadata edits and deletion at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    doc.revisionPlan = [
+      {
+        id: "note",
+        sectionId: doc.sections[2].id,
+        text: "Ask whether this ending explains itself.",
+        createdAt: doc.createdAt,
+        completedAt: null,
+      },
+    ];
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const plan = page.getByRole("dialog", { name: "Revision plan" });
+    const openPlan = async () => {
+      if (width <= 900) {
+        await page.getByRole("button", { name: "Document actions" }).click();
+        await page
+          .getByRole("group", { name: "Document commands" })
+          .getByRole("button", { name: "Revision plan" })
+          .click();
+      } else await page.getByRole("button", { name: /Revision plan/ }).click();
+    };
+    await openPlan();
+    await expect(plan.getByTestId("revision-intention")).toContainText(
+      "03 · Closer",
+    );
+    await plan.getByRole("button", { name: "Close dialog" }).click();
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    let current = await (await request.get(`/api/documents/${doc.id}`)).json();
+    const linked = current.sections.pop();
+    linked.kind = "Point";
+    linked.label = "Ending";
+    current.sections.unshift(linked);
+    await request.put(`/api/documents/${doc.id}`, { data: current });
+    await page.reload();
+    await openPlan();
+    await expect(plan.getByTestId("revision-intention")).toContainText(
+      "01 · Ending · Point",
+    );
+    await plan.getByRole("button", { name: "Close dialog" }).click();
+    current = await (await request.get(`/api/documents/${doc.id}`)).json();
+    current.sections = current.sections.filter(
+      (section: any) => section.id !== linked.id,
+    );
+    await request.put(`/api/documents/${doc.id}`, { data: current });
+    await page.reload();
+    await openPlan();
+    const item = plan.getByTestId("revision-intention");
+    await expect(item).toContainText("Linked section no longer exists");
+    await expect(item).toContainText(
+      "Ask whether this ending explains itself.",
+    );
+    await expect(
+      item.getByRole("button", { name: "Go to section" }),
+    ).toHaveCount(0);
+    await plan.getByRole("button", { name: "Close dialog" }).click();
+    current = await (await request.get(`/api/documents/${doc.id}`)).json();
+    current.sections.unshift(linked);
+    await request.put(`/api/documents/${doc.id}`, { data: current });
+    await page.reload();
+    await openPlan();
+    await expect(item).toContainText("01 · Ending · Point");
+    await expect(
+      item.getByRole("button", { name: "Go to section" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(saved.revisionPlan[0].sectionId).toBe(linked.id);
+    expect(saved.revisionPlan[0].completedAt).toBeNull();
+  });
+
 test("a writer-set revision checkpoint reviews changed sections and replaces only with confirmation", async ({
   page,
   request,
@@ -1271,6 +1446,7 @@ for (const width of [1440, 1024, 700])
     ).toBeLessThanOrEqual(width + 1);
     const after = await (await request.get(`/api/documents/${doc.id}`)).json();
     expect(after.revisionCheckpoint.id).toBe(doc.revisionCheckpoint.id);
+    expect(after.revisionPlan).toEqual([]);
     expect(
       after.sections.some((section: any) => section.id === middle.id),
     ).toBe(false);
@@ -1970,6 +2146,15 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
     first.draftRevision,
     "Before export",
   );
+  first.revisionPlan = [
+    {
+      id: "pass-note",
+      sectionId: first.sections[1].id,
+      text: "Revisit the bridge.",
+      createdAt: first.createdAt,
+      completedAt: first.createdAt,
+    },
+  ];
   first.pieceMemory.decisions.push({
     id: "choice",
     text: "Keep the closer.",
@@ -1995,6 +2180,11 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   expect(single.pieceMemory.nextMoveSectionId).toBe(first.sections[1].id);
   expect(single.revisionCheckpoint.sections[1].id).toBe(first.sections[1].id);
   expect(single.revisionCheckpoint.label).toBe("Before export");
+  expect(single.revisionPlan[0]).toMatchObject({
+    sectionId: first.sections[1].id,
+    text: "Revisit the bridge.",
+    completedAt: first.createdAt,
+  });
   expect(single.pieceMemory.reviewedDraftRevision).toBe(single.draftRevision);
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("button", { name: "Manage documents" }).click();
@@ -2015,6 +2205,9 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
     first.sections[1].id,
   );
   expect(selected.documents[0].revisionCheckpoint.sections[1].id).toBe(
+    first.sections[1].id,
+  );
+  expect(selected.documents[0].revisionPlan[0].sectionId).toBe(
     first.sections[1].id,
   );
   expect(selected.documents[0].pieceMemory.reviewedDraftRevision).toBe(
@@ -2055,6 +2248,8 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   expect(duplicate.revisionCheckpoint.sections[1].id).not.toBe(
     first.sections[1].id,
   );
+  expect(duplicate.revisionPlan[0].sectionId).toBe(duplicate.sections[1].id);
+  expect(duplicate.revisionPlan[0].completedAt).toBe(first.createdAt);
   expect(duplicate.pieceMemory.reviewedDraftRevision).toBe(
     duplicate.draftRevision,
   );
@@ -2085,6 +2280,7 @@ test("Piece memory stays document-local and survives single/bulk export, duplica
   ).json();
   expect(restored.pieceMemory.nextMoveSectionId).toBe(first.sections[1].id);
   expect(restored.revisionCheckpoint).toEqual(single.revisionCheckpoint);
+  expect(restored.revisionPlan).toEqual(single.revisionPlan);
 });
 
 test("archiving an active document preserves its work and restores it without changing the current draft", async ({
