@@ -72,13 +72,14 @@ import {
   download,
 } from "./ui";
 import { WritingLabShell } from "./WritingLabShell";
-import { UtilityPanel } from "./UtilityPanel";
+import { UtilityPanel, RevisionIntentRow } from "./UtilityPanel";
 import { SectionConceptSelect } from "./SectionConceptHelp";
 import {
   customSectionLabel,
   sectionReference,
   sectionMentions,
   duplicateDocumentCue,
+  sortedRevisionPlan,
   hasPieceMemoryContent,
   nextMoveSectionLabel,
 } from "./workspace-helpers";
@@ -360,6 +361,12 @@ function Structure({
     w.layout.primaryView === "workbench" || linkedWorkbenchReveal
       ? w.doc.sections
       : draft;
+  const activeRevisionNotes =
+    w.layout.primaryView === "workbench"
+      ? sortedRevisionPlan(w.doc, false).filter(
+          (note) => note.sectionId === w.selectedSectionId,
+        )
+      : [];
   const finishDrag = () => {
     drag.current = null;
     setDraggingId(null);
@@ -716,6 +723,33 @@ function Structure({
                       Parked · excluded from draft
                     </span>
                   )}
+                  {w.target?.sectionId === s.id &&
+                    activeRevisionNotes.length > 0 && (
+                      <details
+                        className="local-revision-notes"
+                        role="region"
+                        aria-label="Revision notes for active section"
+                        open={
+                          activeRevisionNotes.length === 1 &&
+                          activeRevisionNotes[0].text.length <= 140
+                        }
+                      >
+                        <summary>
+                          {activeRevisionNotes.length === 1
+                            ? "Revision note"
+                            : "Revision notes"}{" "}
+                          · {activeRevisionNotes.length}
+                        </summary>
+                        {activeRevisionNotes.map((note) => (
+                          <RevisionIntentRow
+                            key={note.id}
+                            w={w}
+                            note={note}
+                            local
+                          />
+                        ))}
+                      </details>
+                    )}
                   {(s.variants.length > 0 ||
                     Boolean(
                       s.workbench?.structure?.thoughtA ||

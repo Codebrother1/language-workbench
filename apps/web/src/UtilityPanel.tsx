@@ -306,46 +306,59 @@ function RevisionPanel({
   );
 }
 
-function RevisionIntentRow({
+export function RevisionIntentRow({
   w,
   note,
   onGoToSection,
+  local = false,
 }: {
   w: Workspace;
   note: RevisionIntent;
-  onGoToSection: (id: string) => void;
+  onGoToSection?: (id: string) => void;
+  local?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(note.text);
   const [sectionId, setSectionId] = useState(note.sectionId);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (editing) editRef.current?.focus({ preventScroll: true });
+  }, [editing]);
   const location = nextMoveSectionLabel(w.doc, note.sectionId);
   return (
     <article
-      data-testid="revision-intention"
-      aria-label={`${location ?? "Linked section no longer exists"} · ${note.completedAt ? "Completed" : "Active"} revision note`}
+      data-testid={local ? "local-revision-intention" : "revision-intention"}
+      aria-label={
+        local
+          ? "Active revision note"
+          : `${location ?? "Linked section no longer exists"} · ${note.completedAt ? "Completed" : "Active"} revision note`
+      }
     >
-      <b>{location ?? "Linked section no longer exists"}</b>
+      {!local && <b>{location ?? "Linked section no longer exists"}</b>}
       {editing ? (
         <div className="revision-plan-editor">
-          <Field label="Edit note section">
-            <Select
-              value={
-                w.doc.sections.some((section) => section.id === sectionId)
-                  ? sectionId
-                  : ""
-              }
-              onChange={(event) => setSectionId(event.target.value)}
-            >
-              <option value="">Choose section</option>
-              {w.doc.sections.map((section) => (
-                <option value={section.id} key={section.id}>
-                  {nextMoveSectionLabel(w.doc, section.id)}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {!local && (
+            <Field label="Edit note section">
+              <Select
+                value={
+                  w.doc.sections.some((section) => section.id === sectionId)
+                    ? sectionId
+                    : ""
+                }
+                onChange={(event) => setSectionId(event.target.value)}
+              >
+                <option value="">Choose section</option>
+                {w.doc.sections.map((section) => (
+                  <option value={section.id} key={section.id}>
+                    {nextMoveSectionLabel(w.doc, section.id)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Edit revision note">
             <textarea
+              ref={editRef}
               rows={2}
               maxLength={1200}
               value={text}
@@ -381,7 +394,7 @@ function RevisionIntentRow({
       )}
       {!editing && (
         <div className="row wrap">
-          {location && (
+          {!local && location && onGoToSection && (
             <Button onClick={() => onGoToSection(note.sectionId)}>
               Go to section
             </Button>
@@ -391,15 +404,24 @@ function RevisionIntentRow({
           >
             {note.completedAt ? "Reopen" : "Done"}
           </Button>
-          <Button className="text-button" onClick={() => setEditing(true)}>
-            Edit note
-          </Button>
           <Button
             className="text-button"
-            onClick={() => w.removeRevisionIntent(note.id)}
+            onClick={() => {
+              setText(note.text);
+              setSectionId(note.sectionId);
+              setEditing(true);
+            }}
           >
-            Remove note
+            Edit note
           </Button>
+          {!local && (
+            <Button
+              className="text-button"
+              onClick={() => w.removeRevisionIntent(note.id)}
+            >
+              Remove note
+            </Button>
+          )}
         </div>
       )}
     </article>

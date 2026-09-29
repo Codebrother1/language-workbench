@@ -1081,6 +1081,252 @@ test("Piece memory entry follows per-document freshness through switch, duplicat
   await expect(entry).toHaveAccessibleName("Piece memory, draft changed");
 });
 
+test("a revision-plan jump leaves only that section's active notes at the Workbench work site", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const closer = doc.sections[2].id;
+  doc.revisionPlan = [
+    {
+      id: "closer-first",
+      sectionId: closer,
+      text: "Does the reveal arrive too early?",
+      createdAt: doc.createdAt,
+      completedAt: null,
+    },
+    {
+      id: "hook",
+      sectionId: doc.sections[0].id,
+      text: "Keep the first sentence restrained.",
+      createdAt: doc.createdAt,
+      completedAt: null,
+    },
+    {
+      id: "closer-second",
+      sectionId: closer,
+      text: "Read the final line aloud.",
+      createdAt: new Date(Date.parse(doc.createdAt) + 1000).toISOString(),
+      completedAt: null,
+    },
+    {
+      id: "closer-done",
+      sectionId: closer,
+      text: "Already considered this rhythm.",
+      createdAt: doc.createdAt,
+      completedAt: doc.createdAt,
+    },
+  ];
+  doc.pieceMemory.nextMove = "Review the closer.";
+  doc.pieceMemory.nextMoveSectionId = closer;
+  doc.revisionCheckpoint = makeRevisionCheckpoint(doc, doc.draftRevision);
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  const calls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().endsWith("/api/ai")) calls.push(event.url());
+  });
+  await open(page);
+  const local = page.getByRole("region", {
+    name: "Revision notes for active section",
+  });
+  await expect(local).toContainText("Keep the first sentence restrained.");
+  await expect(local).not.toContainText("Does the reveal arrive too early?");
+  await page.getByRole("button", { name: /Revision plan/ }).click();
+  const global = page.getByRole("dialog", { name: "Revision plan" });
+  await global
+    .getByTestId("revision-intention")
+    .filter({ hasText: "Does the reveal arrive too early?" })
+    .getByRole("button", { name: "Edit note" })
+    .click();
+  await expect(
+    global
+      .getByTestId("revision-intention")
+      .filter({ hasText: "03 · Closer" })
+      .first()
+      .getByLabel("Edit revision note"),
+  ).toBeFocused();
+  await global.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: /Revision plan/ }).click();
+  await global
+    .getByTestId("revision-intention")
+    .filter({ hasText: "Does the reveal arrive too early?" })
+    .getByRole("button", { name: "Go to section" })
+    .click();
+  await expect(page.locator(`[data-section-id="${closer}"]`)).toHaveClass(
+    /active/,
+  );
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await expect(local).toContainText("Revision notes · 2");
+  await local.locator("summary").click();
+  const notes = local.getByTestId("local-revision-intention");
+  await expect(notes).toHaveCount(2);
+  await expect(notes.nth(0)).toContainText("Does the reveal arrive too early?");
+  await expect(notes.nth(1)).toContainText("Read the final line aloud.");
+  await expect(local).not.toContainText("Already considered this rhythm.");
+  await expect(local).not.toContainText("Keep the first sentence restrained.");
+  await notes.nth(0).getByRole("button", { name: "Edit note" }).click();
+  await expect(notes.nth(0).getByLabel("Edit revision note")).toBeFocused();
+  await notes
+    .nth(0)
+    .getByLabel("Edit revision note")
+    .fill("Does this reveal still land too early?");
+  await notes.nth(0).getByRole("button", { name: "Save note" }).click();
+  await expect(notes.nth(0)).toContainText(
+    "Does this reveal still land too early?",
+  );
+  await notes.nth(1).getByRole("button", { name: "Done" }).click();
+  await expect(notes).toHaveCount(1);
+  await expect(local).not.toContainText("Read the final line aloud.");
+  await page.getByRole("button", { name: /Revision plan/ }).click();
+  await expect(global).toContainText("2 active");
+  await global.getByText("Show completed").click();
+  await global
+    .getByTestId("revision-intention")
+    .filter({ hasText: "Read the final line aloud." })
+    .getByRole("button", { name: "Reopen" })
+    .click();
+  await global.getByRole("button", { name: "Close dialog" }).click();
+  await expect(local).toContainText("Revision notes · 2");
+  await page
+    .locator(".piece-next-move")
+    .getByRole("button", { name: "Go to section" })
+    .click();
+  await expect(local).toContainText("Does this reveal still land too early?");
+  await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+  await save(page);
+  const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+  expect(
+    saved.revisionPlan.find((note: any) => note.id === "closer-first"),
+  ).toMatchObject({
+    text: "Does this reveal still land too early?",
+    sectionId: closer,
+  });
+  expect(saved.pieceMemory).toEqual(doc.pieceMemory);
+  expect(saved.revisionCheckpoint).toEqual(doc.revisionCheckpoint);
+  expect(documentText(saved)).toBe(documentText(doc));
+  expect(calls).toHaveLength(0);
+});
+
+for (const width of [1440, 1024, 700])
+  test(`active Workbench revision note follows ordinary and resume navigation at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    doc.revisionPlan = [
+      {
+        id: "closer-note",
+        sectionId: doc.sections[2].id,
+        text: "Read this ending aloud before cutting it.",
+        createdAt: doc.createdAt,
+        completedAt: null,
+      },
+    ];
+    doc.pieceMemory.nextMove = "Revisit the closer.";
+    doc.pieceMemory.nextMoveSectionId = doc.sections[2].id;
+    doc.revisionCheckpoint = makeRevisionCheckpoint(doc, doc.draftRevision);
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    const calls: string[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.url());
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const local = page.getByRole("region", {
+      name: "Revision notes for active section",
+    });
+    await expect(local).toHaveCount(0);
+    await page.getByRole("button", { name: /^03 Closer$/ }).click();
+    await expect(local).toContainText("Revision note · 1");
+    await expect(local).toContainText(
+      "Read this ending aloud before cutting it.",
+    );
+    await page.getByRole("button", { name: /^01 Opening$/ }).click();
+    await expect(local).toHaveCount(0);
+    await page
+      .locator(".piece-next-move")
+      .getByRole("button", { name: "Go to section" })
+      .click();
+    await expect(local).toContainText(
+      "Read this ending aloud before cutting it.",
+    );
+    await expect(page.getByTestId("writing-editor")).not.toBeFocused();
+    await page
+      .getByRole("button", { name: "Document View", exact: true })
+      .click();
+    await expect(local).toHaveCount(0);
+    await page.getByRole("button", { name: "Workbench", exact: true }).click();
+    await expect(local).toContainText(
+      "Read this ending aloud before cutting it.",
+    );
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(saved.revisionPlan).toEqual(doc.revisionPlan);
+    expect(saved.pieceMemory).toEqual(doc.pieceMemory);
+    expect(saved.revisionCheckpoint).toEqual(doc.revisionCheckpoint);
+    expect(documentText(saved)).toBe(documentText(doc));
+    expect(calls).toHaveLength(0);
+  });
+
+test("local revision note survives reorder and rename, disappears on deletion, and returns with the same section ID", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request);
+  const linkedId = doc.sections[2].id;
+  doc.revisionPlan = [
+    {
+      id: "note",
+      sectionId: linkedId,
+      text: "Read this ending aloud.",
+      createdAt: doc.createdAt,
+      completedAt: null,
+    },
+  ];
+  await request.put(`/api/documents/${doc.id}`, { data: doc });
+  await open(page);
+  await page.getByRole("button", { name: /^03 Closer$/ }).click();
+  const local = page.getByRole("region", {
+    name: "Revision notes for active section",
+  });
+  await expect(local).toContainText("Read this ending aloud.");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved");
+  let current = await (await request.get(`/api/documents/${doc.id}`)).json();
+  const returning = current.sections.pop();
+  returning.label = "Ending";
+  returning.kind = "Point";
+  current.sections.unshift(returning);
+  await request.put(`/api/documents/${doc.id}`, { data: current });
+  await page.reload();
+  await page.getByRole("button", { name: /^01 Ending$/ }).click();
+  await expect(local).toContainText("Read this ending aloud.");
+  current = await (await request.get(`/api/documents/${doc.id}`)).json();
+  current.sections = current.sections.filter(
+    (section: any) => section.id !== linkedId,
+  );
+  await request.put(`/api/documents/${doc.id}`, { data: current });
+  await page.reload();
+  await expect(local).toHaveCount(0);
+  await page.getByRole("button", { name: /Revision plan/ }).click();
+  const global = page.getByRole("dialog", { name: "Revision plan" });
+  await expect(global).toContainText("Linked section no longer exists");
+  await expect(global).toContainText("Read this ending aloud.");
+  await global.getByRole("button", { name: "Close dialog" }).click();
+  current = await (await request.get(`/api/documents/${doc.id}`)).json();
+  current.sections.unshift(returning);
+  await request.put(`/api/documents/${doc.id}`, { data: current });
+  await page.reload();
+  await page.getByRole("button", { name: /^01 Ending$/ }).click();
+  await expect(local).toContainText("Read this ending aloud.");
+  expect(
+    (await (await request.get(`/api/documents/${doc.id}`)).json())
+      .revisionPlan[0].sectionId,
+  ).toBe(linkedId);
+});
+
 test("writer-created revision notes remain section-local, recoverable and prose-safe", async ({
   page,
   request,
