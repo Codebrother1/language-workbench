@@ -541,12 +541,24 @@ test("scoped card Select All replaces only one section while a true cross-sectio
   await page.getByTestId("writing-editor").click();
   await page.evaluate(
     ([firstId, secondId]) => {
-      const firstText = document
+      const firstParagraph = document
         .getElementById(firstId)!
-        .querySelector("p")!.firstChild!;
-      const secondText = document
+        .querySelector("p")!;
+      const secondParagraph = document
         .getElementById(secondId)!
-        .querySelector("p")!.firstChild!;
+        .querySelector("p")!;
+      const firstText = document
+        .createTreeWalker(firstParagraph, NodeFilter.SHOW_TEXT)
+        .nextNode()!;
+      const walker = document.createTreeWalker(
+        secondParagraph,
+        NodeFilter.SHOW_TEXT,
+      );
+      let secondText: Node | null;
+      do secondText = walker.nextNode();
+      while (secondText && (secondText.textContent?.length ?? 0) < 6);
+      if (!secondText)
+        throw new Error("Expected six characters in the next section");
       const range = document.createRange();
       range.setStart(firstText, 0);
       range.setEnd(secondText, 6);

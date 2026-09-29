@@ -15,10 +15,16 @@ export function modelLabel(
 ) {
   if (!ref) return "Inherit";
   const p = catalog?.providers.find((p) => p.id === ref.providerId);
+  const model = p?.models.find((m) => m.id === ref.modelId);
   return (
-    (p?.models.find((m) => m.id === ref.modelId)?.displayName ?? ref.modelId) +
+    (model?.displayName ?? ref.modelId) +
     " · " +
-    (p?.displayName ?? ref.providerId)
+    (p?.displayName ?? ref.providerId) +
+    (p?.id === "openai" &&
+    p.lastRefreshedAt &&
+    (!model || model.availability !== "available")
+      ? " · Unavailable"
+      : "")
   );
 }
 /** Shared searchable picker; no routing policy or credentials live in this component. */
@@ -40,14 +46,29 @@ export function ModelPicker({
     p.models.map((m) => ({
       ref: { providerId: p.id, modelId: m.id },
       name: m.displayName + " · " + p.displayName,
-      ready: p.configured && p.enabled && p.implemented,
+      ready:
+        p.configured &&
+        p.enabled &&
+        p.implemented &&
+        m.availability !== "unavailable",
+      group:
+        p.id !== "openai"
+          ? p.displayName
+          : m.availability === "unavailable"
+            ? "Unavailable selections"
+            : m.metadata?.group === "known"
+              ? "OpenAI Direct · known"
+              : m.availability === "unverified"
+                ? "OpenAI Direct · unverified IDs"
+                : "Other compatible OpenAI models",
     })),
   );
   const choices = models.filter(
     (m) =>
-      m.name.toLowerCase().includes(query.toLowerCase()) ||
+      (m.ready && m.name.toLowerCase().includes(query.toLowerCase())) ||
       (value && modelKey(value) === modelKey(m.ref)),
   );
+  const groups = [...new Set(choices.map((m) => m.group))];
   return (
     <div className="model-picker">
       <Field label={"Search " + label.toLowerCase()}>
@@ -67,18 +88,28 @@ export function ModelPicker({
           {value &&
             !models.some((m) => modelKey(m.ref) === modelKey(value)) && (
               <option value={modelKey(value)}>
-                {modelLabel(catalog, value)} (unavailable)
+                {modelLabel(catalog, value)}
+                {catalog?.providers.find((p) => p.id === value.providerId)
+                  ?.lastRefreshedAt
+                  ? ""
+                  : " (not listed)"}
               </option>
             )}
-          {choices.map((m) => (
-            <option
-              disabled={!m.ready}
-              key={modelKey(m.ref)}
-              value={modelKey(m.ref)}
-            >
-              {m.name}
-              {m.ready ? "" : " (not available)"}
-            </option>
+          {groups.map((group) => (
+            <optgroup label={group} key={group}>
+              {choices
+                .filter((m) => m.group === group)
+                .map((m) => (
+                  <option
+                    disabled={!m.ready}
+                    key={modelKey(m.ref)}
+                    value={modelKey(m.ref)}
+                  >
+                    {m.name}
+                    {m.ready ? "" : " (Unavailable)"}
+                  </option>
+                ))}
+            </optgroup>
           ))}
         </Select>
       </Field>
@@ -93,7 +124,11 @@ export function ModelControls({ w }: { w: Workspace }) {
     .join(" + ");
   const available = (w.catalog?.providers ?? [])
     .filter((p) => p.implemented && p.configured && p.enabled)
-    .flatMap((p) => p.models.map((m) => ({ providerId: p.id, modelId: m.id })));
+    .flatMap((p) =>
+      p.models
+        .filter((m) => m.availability !== "unavailable")
+        .map((m) => ({ providerId: p.id, modelId: m.id })),
+    );
   return (
     <details className="model-controls">
       <summary aria-label="Model controls">

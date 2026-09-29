@@ -9,7 +9,10 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../apps/server/src/app";
 import { Repository } from "../apps/server/src/repository";
-import { ProviderRegistry } from "../apps/server/src/provider-registry";
+import {
+  ProviderRegistry,
+  classifyOpenAIModel,
+} from "../apps/server/src/provider-registry";
 import { MockProvider } from "../apps/server/src/mock-provider";
 import {
   aiRequestSchema,
@@ -49,6 +52,8 @@ let directory: string,
   server: Server,
   base: string;
 let calls: { url: string; body: any }[], fail: boolean;
+let discovered: string[], discoveryBody: "valid" | "malformed" | "empty";
+let catalogFailure: "none" | "server" | "timeout";
 function fixture() {
   const document = newDocument("draft", "They were larping as experts.");
   const settings = defaultSettings();
@@ -79,6 +84,13 @@ async function start(
     fetch: async (url: unknown, init: RequestInit) => {
       const body = init.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ url: String(url), body });
+      if (String(url).endsWith("/models") && catalogFailure === "timeout")
+        throw new Error("Synthetic network timeout");
+      if (String(url).endsWith("/models") && catalogFailure === "server")
+        return new Response(JSON.stringify({ error: { message: key } }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
       if (fail || body?.model === "failing-model")
         return new Response(
           JSON.stringify({
@@ -87,23 +99,17 @@ async function start(
           { status: 401, headers: { "content-type": "application/json" } },
         );
       const data = String(url).endsWith("/models")
-        ? {
-            object: "list",
-            data: [
-              {
-                id: "gpt-4.1-mini",
+        ? discoveryBody === "malformed"
+          ? { object: "list", data: { wrong: true } }
+          : {
+              object: "list",
+              data: (discoveryBody === "empty" ? [] : discovered).map((id) => ({
+                id,
                 object: "model",
                 created: 1,
                 owned_by: "openai",
-              },
-              {
-                id: "unknown-capabilities",
-                object: "model",
-                created: 1,
-                owned_by: "openai",
-              },
-            ],
-          }
+              })),
+            }
         : {
             id: "resp_test",
             object: "response",
@@ -157,12 +163,235 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), "routing-"));
   calls = [];
   fail = false;
+  discovered = ["gpt-4.1-mini", "unknown-capabilities"];
+  discoveryBody = "valid";
+  catalogFailure = "none";
   await start();
 });
 afterEach(async () => {
   await stop();
   rmSync(directory, { recursive: true, force: true });
   vi.restoreAllMocks();
+});
+
+describe("compatible OpenAI discovery", () => {
+  it("admits known text models and neutral future general models but excludes unrelated workflows and snapshots", () => {
+    for (const id of [
+      "gpt-6-luna",
+      "gpt-6-sol",
+      "gpt-6-astra",
+      "gpt-6.1-something",
+      "gpt-4.1-mini",
+    ])
+      expect(classifyOpenAIModel(id)).toBe(
+        id === "gpt-6.1-something" ? "other" : "known",
+      );
+    for (const id of [
+      "gpt-image-2.5-sunburst",
+      "gpt-realtime-2.1",
+      "gpt-audio-1",
+      "gpt-4o-realtime-preview",
+      "text-embedding-3-large",
+      "omni-moderation-latest",
+      "gpt-6-2026-09-01",
+      "gpt-4o-2024-08-06",
+      "chatgpt-4o-latest",
+      "ft:gpt-4.1:team:custom",
+      "sora-2",
+      "unknown-capabilities",
+      "gpt-6.1-image",
+      "gpt-6.1-transcribe",
+    ])
+      expect(classifyOpenAIModel(id)).toBe("excluded");
+  });
+  it("keeps curated known choices before first refresh even when an older manual cache exists", () => {
+    repository.saveProviderState("openai", {
+      enabled: true,
+      lastRefreshedAt: null,
+      models: [
+        {
+          id: "manual-old",
+          providerId: "openai",
+          displayName: "manual-old",
+          capabilities: {},
+          metadata: { source: "manual" },
+        },
+      ],
+    });
+    const models = registry.get("openai").models;
+    expect(models.some((item) => item.id === "manual-old")).toBe(true);
+    expect(
+      models.some(
+        (item) =>
+          item.id === "gpt-6-luna" && item.availability === "unverified",
+      ),
+    ).toBe(true);
+  });
+  it("loads a prior successful cache without silently revoking compatible IDs on upgrade", async () => {
+    repository.saveProviderState("openai", {
+      enabled: true,
+      lastRefreshedAt: "2026-01-01T00:00:00.000Z",
+      models: [
+        {
+          id: "gpt-4.1-mini",
+          providerId: "openai",
+          displayName: "gpt-4.1-mini",
+          capabilities: { text: true, structuredOutput: true },
+          metadata: { source: "discovered" },
+        },
+        {
+          id: "gpt-image-2.5-sunburst",
+          providerId: "openai",
+          displayName: "gpt-image-2.5-sunburst",
+          capabilities: {},
+          metadata: { source: "discovered" },
+        },
+      ],
+    });
+    const catalog = registry.get("openai");
+    expect(
+      catalog.models.find((m) => m.id === "gpt-4.1-mini")?.availability,
+    ).toBe("available");
+    expect(
+      catalog.models.find((m) => m.id === "gpt-image-2.5-sunburst")
+        ?.availability,
+    ).toBe("unavailable");
+    expect((await api("/api/ai", "POST", fixture())).status).toBe(200);
+  });
+  it("publishes curated known and neutral future IDs, not every raw Models API row", async () => {
+    discovered = [
+      "gpt-6-luna",
+      "gpt-6-sol",
+      "gpt-6-astra",
+      "gpt-6.1-something",
+      "gpt-image-2.5-sunburst",
+      "gpt-realtime-2.1",
+      "text-embedding-3-large",
+      "chatgpt-4o-latest",
+      "ft:gpt-4.1:team:custom",
+      "gpt-6-2026-09-01",
+    ];
+    const response = await api(
+      "/api/providers/openai/models/refresh",
+      "POST",
+      {},
+    );
+    expect(response.status).toBe(200);
+    const openai = (await response.json()).provider;
+    expect(
+      openai.models
+        .filter((m: any) => m.availability === "available")
+        .map((m: any) => m.id)
+        .sort(),
+    ).toEqual(
+      ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-something"].sort(),
+    );
+    expect(openai.models.find((m: any) => m.id === "gpt-6-luna")).toMatchObject(
+      { displayName: "GPT-6 Luna", metadata: { group: "known" } },
+    );
+    expect(
+      openai.models.find((m: any) => m.id === "gpt-6.1-something"),
+    ).toMatchObject({
+      displayName: "gpt-6.1-something",
+      metadata: { group: "other" },
+      capabilities: {},
+    });
+    expect(
+      calls.map((item) => item.url).filter((url) => url.endsWith("/models")),
+    ).toHaveLength(1);
+    expect(calls.some((item) => item.url.endsWith("/responses"))).toBe(false);
+  });
+  it("uses exact discovered ID with the existing Responses shape and respects a higher section route", async () => {
+    discovered = ["gpt-4.1-mini", "gpt-6.1-something"];
+    await api("/api/providers/openai/models/refresh", "POST", {});
+    const input = fixture();
+    const future = { providerId: "openai", modelId: "gpt-6.1-something" };
+    input.readContext.document.defaultModel = future;
+    let response = await (await api("/api/ai", "POST", input)).json();
+    expect(response.model).toEqual(future);
+    expect(response.routeSource).toBe("document");
+    expect(calls.at(-1)?.body).toMatchObject({
+      model: future.modelId,
+      store: false,
+    });
+    expect(calls.at(-1)?.body).not.toHaveProperty("reasoning_effort");
+    expect(calls.at(-1)?.body).not.toHaveProperty("reasoning");
+    input.readContext.document.sections[0].modelOverride = openai;
+    response = await (await api("/api/ai", "POST", input)).json();
+    expect(response.model).toEqual(openai);
+    expect(response.routeSource).toBe("section");
+    input.modelOverride = future;
+    response = await (await api("/api/ai", "POST", input)).json();
+    expect(response.model).toEqual(future);
+    expect(response.routeSource).toBe("action");
+  });
+  it("does not silently use a fallback when a previously discovered future ID disappears", async () => {
+    discovered = ["gpt-4.1-mini", "gpt-6.1-something"];
+    await api("/api/providers/openai/models/refresh", "POST", {});
+    discovered = ["gpt-4.1-mini"];
+    await api("/api/providers/openai/models/refresh", "POST", {});
+    const input = fixture();
+    input.modelOverride = {
+      providerId: "openai",
+      modelId: "gpt-6.1-something",
+    };
+    const before = calls.length;
+    const response = await api("/api/ai", "POST", input);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toMatch(/not currently available/i);
+    expect(calls).toHaveLength(before);
+  });
+  it("keeps last-good cache on bad credentials, malformed response, empty list and preserves missing selection until it reappears", async () => {
+    discovered = ["gpt-4.1-mini", "gpt-6-luna"];
+    await api("/api/providers/openai/models/refresh", "POST", {});
+    const input = fixture();
+    input.modelOverride = { providerId: "openai", modelId: "gpt-6-luna" };
+    discovered = ["gpt-4.1-mini"];
+    await api("/api/providers/openai/models/refresh", "POST", {});
+    expect(
+      registry.get("openai").models.find((m) => m.id === "gpt-6-luna")
+        ?.availability,
+    ).toBe("unavailable");
+    const callsBeforeRun = calls.length;
+    const blocked = await api("/api/ai", "POST", input);
+    expect(blocked.status).toBe(400);
+    expect(await blocked.text()).toMatch(/not currently available/i);
+    expect(calls).toHaveLength(callsBeforeRun);
+    const cached = registry.get("openai");
+    for (const mode of ["malformed", "empty"] as const) {
+      discoveryBody = mode;
+      expect(
+        (await api("/api/providers/openai/models/refresh", "POST", {})).status,
+      ).toBe(502);
+      expect(registry.get("openai")).toEqual(cached);
+    }
+    discoveryBody = "valid";
+    fail = true;
+    expect(
+      (await api("/api/providers/openai/models/refresh", "POST", {})).status,
+    ).toBe(502);
+    fail = false;
+    expect(registry.get("openai")).toEqual(cached);
+    for (const mode of ["server", "timeout"] as const) {
+      catalogFailure = mode;
+      const response = await api(
+        "/api/providers/openai/models/refresh",
+        "POST",
+        {},
+      );
+      expect(response.status).toBe(502);
+      expect(await response.text()).not.toContain(key);
+      expect(registry.get("openai")).toEqual(cached);
+    }
+    catalogFailure = "none";
+    discovered = ["gpt-4.1-mini", "gpt-6-luna"];
+    await api("/api/providers/openai/models/refresh", "POST", {});
+    expect(
+      registry.get("openai").models.find((m) => m.id === "gpt-6-luna")
+        ?.availability,
+    ).toBe("available");
+    expect((await api("/api/ai", "POST", input)).status).toBe(200);
+  });
 });
 
 describe("provider catalog, environment boundary and persistence", () => {
@@ -310,6 +539,14 @@ describe("provider catalog, environment boundary and persistence", () => {
     expect(result.applicationDefault).toEqual(openai);
     expect(JSON.stringify(result)).not.toContain(key);
     expect(
+      result.providers
+        .find((p: any) => p.id === "openai")
+        .models.some(
+          (m: any) =>
+            m.id === "gpt-4.1-mini" && m.availability === "unverified",
+        ),
+    ).toBe(true);
+    expect(
       result.providers.find((p: any) => p.id === "openai").credentialSuffix,
     ).toBe("9842");
     expect(
@@ -357,10 +594,10 @@ describe("provider catalog, environment boundary and persistence", () => {
     ).json();
     expect(refreshed.provider.lastRefreshedAt).toBeTruthy();
     expect(
-      refreshed.provider.models.find(
+      refreshed.provider.models.some(
         (m: any) => m.id === "unknown-capabilities",
-      ).capabilities,
-    ).toEqual({});
+      ),
+    ).toBe(false);
     await api("/api/providers/openai/models", "POST", {
       id: "ft:team/custom-v1",
       displayName: "Personal model",

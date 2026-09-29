@@ -23,16 +23,17 @@ function ProviderCard({
     setPending(true);
     setStatus("");
     try {
-      const result = await api<{ message?: string }>(
-        `/providers/${p.id}${path}`,
-        method,
-        body,
-      );
+      const result = await api<{
+        message?: string;
+        provider?: ProviderDescriptor;
+      }>(`/providers/${p.id}${path}`, method, body);
       await w.refreshCatalog();
       setStatus(
         method === "PATCH" && path === ""
           ? `${p.displayName} ${p.enabled ? "disabled" : "enabled"}`
-          : (result.message ?? "Updated"),
+          : path === "/models/refresh" && result.provider
+            ? `Models refreshed · ${result.provider.models.filter((model) => model.availability === "available").length} compatible`
+            : (result.message ?? "Updated"),
       );
     } catch (e) {
       setStatus((e as Error).message);
@@ -100,7 +101,12 @@ function ProviderCard({
             </Button>
           </div>
           <p className="small muted">
-            {p.models.length} models ·{" "}
+            {p.id === "mock"
+              ? `${p.models.length} models`
+              : p.lastRefreshedAt
+                ? `${p.models.filter((model) => model.availability === "available").length} available models`
+                : `${p.models.length} locally known models`}{" "}
+            ·{" "}
             {p.lastRefreshedAt
               ? "Last refreshed " + new Date(p.lastRefreshedAt).toLocaleString()
               : "Catalog not refreshed yet"}

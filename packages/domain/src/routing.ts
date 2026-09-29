@@ -18,6 +18,7 @@ export const modelDescriptorSchema = z.object({
   providerId: z.string(),
   displayName: z.string(),
   capabilities: modelCapabilitiesSchema.default({}),
+  availability: z.enum(["available", "unavailable", "unverified"]).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 export type ModelDescriptor = z.infer<typeof modelDescriptorSchema>;

@@ -2421,6 +2421,14 @@ export function useWorkspace() {
       return setError(
         "The chosen provider/model is unavailable for this step. Change the model explicitly before continuing; no fallback was used.",
       );
+    if (
+      route.model.providerId === "openai" &&
+      chosenProvider.lastRefreshedAt &&
+      chosenDescriptor.availability !== "available"
+    )
+      return setError(
+        "This model is not currently available to this OpenAI project. Choose another model or refresh the catalog; no fallback was used.",
+      );
     if (chosenDescriptor.capabilities.structuredOutput === false)
       return setError(
         "The chosen model cannot return structured writing results. Change the provider/model explicitly; no fallback was used.",

@@ -1586,6 +1586,185 @@ test("provider settings are honest, searchable, and manual model IDs need no reb
   });
 });
 
+for (const width of [1440, 1024, 700])
+  test(`manual model refresh preserves unavailable routes and history at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request);
+    const baseline = await (await request.get("/api/providers")).json();
+    const future = { providerId: "openai", modelId: "gpt-6.1-something" };
+    let state: "initial" | "available" | "missing" | "failure" = "initial";
+    const provider = () => ({
+      ...baseline.providers.find((entry: any) => entry.id === "openai"),
+      configured: true,
+      enabled: true,
+      status: "Ready",
+      lastRefreshedAt: state === "initial" ? null : "2026-09-29T12:00:00.000Z",
+      models: [
+        {
+          id: "gpt-4.1-mini",
+          providerId: "openai",
+          displayName: "GPT-4.1 mini",
+          capabilities: { text: true, structuredOutput: true },
+          availability: state === "initial" ? "unverified" : "available",
+          metadata: { group: "known" },
+        },
+        ...(state === "initial"
+          ? []
+          : [
+              {
+                id: future.modelId,
+                providerId: "openai",
+                displayName: future.modelId,
+                capabilities: {},
+                availability:
+                  state === "available" ? "available" : "unavailable",
+                metadata: { group: "other" },
+              },
+            ]),
+      ],
+    });
+    let refreshes = 0;
+    const aiCalls: any[] = [];
+    await page.route("**/api/providers", (route) =>
+      route.fulfill({
+        json: {
+          ...baseline,
+          providers: baseline.providers.map((entry: any) =>
+            entry.id === "openai" ? provider() : entry,
+          ),
+        },
+      }),
+    );
+    await page.route("**/api/providers/openai/models/refresh", (route) => {
+      refreshes++;
+      if (state === "failure")
+        return route.fulfill({
+          status: 502,
+          json: {
+            error: "Model discovery failed. Cached models were retained.",
+          },
+        });
+      state = state === "initial" ? "available" : "missing";
+      return route.fulfill({ json: { provider: provider() } });
+    });
+    await page.route("**/api/ai", (route) => {
+      aiCalls.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: {
+          provider: "openai",
+          diagnosis: "Fixture diagnosis",
+          mechanism: "",
+          question: "",
+          missingIngredients: [],
+          proposals: [],
+          findings: [],
+          lexical: [],
+          model: future,
+          routeSource: "document",
+        },
+      });
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    expect(refreshes).toBe(0);
+    await page.getByRole("button", { name: "Document actions" }).click();
+    await page
+      .getByRole("button", { name: "AI providers", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(
+      dialog.getByLabel("Document default model", { exact: true }),
+    ).toContainText("GPT-4.1 mini");
+    const card = dialog.locator(".provider-card").filter({
+      has: page.getByRole("heading", { name: "OpenAI Direct", exact: true }),
+    });
+    await card
+      .getByRole("button", { name: "Refresh models · OpenAI Direct" })
+      .click();
+    await expect(card.getByRole("status")).toContainText("2 compatible");
+    expect(refreshes).toBe(1);
+    expect(aiCalls).toHaveLength(0);
+    const picker = dialog.getByLabel("Document default model", { exact: true });
+    await expect(
+      picker.locator('optgroup[label="Other compatible OpenAI models"]'),
+    ).toHaveCount(1);
+    await dialog.getByText("Application and task defaults").click();
+    for (const label of [
+      "Application default model",
+      "Task model",
+      "Section type model",
+    ])
+      await expect(
+        dialog
+          .getByLabel(label, { exact: true })
+          .locator(`option[value='${modelKey(future)}']`),
+      ).toHaveCount(1);
+    await picker.selectOption(modelKey(future));
+    await dialog.getByRole("button", { name: "Close dialog" }).click();
+    await page.locator(".model-controls > summary").click();
+    await page
+      .locator(".model-controls-body details > summary")
+      .filter({ hasText: "Compare models" })
+      .click();
+    await expect(page.locator(".compare-choices")).toContainText(
+      "gpt-6.1-something",
+    );
+    await page.getByLabel("Your direction").fill("Does this work?");
+    await page.getByRole("button", { name: /Diagnose this/ }).click();
+    await expect(page.locator(".diagnosis")).toContainText("Fixture diagnosis");
+    expect(aiCalls).toHaveLength(1);
+    expect(aiCalls[0].readContext.document.defaultModel).toEqual(future);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const stored = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(stored.defaultModel).toEqual(future);
+    expect(stored.sections[0].workbench.runs.at(-1).model).toEqual(future);
+    expect(documentText(stored)).toBe(documentText(doc));
+    await page.getByRole("button", { name: "Document actions" }).click();
+    await page
+      .getByRole("button", { name: "AI providers", exact: true })
+      .click();
+    await card
+      .getByRole("button", { name: "Refresh models · OpenAI Direct" })
+      .click();
+    await expect(picker).toContainText(
+      "gpt-6.1-something · OpenAI Direct (Unavailable)",
+    );
+    await expect(
+      picker.locator("option:enabled").filter({ hasText: "gpt-6.1-something" }),
+    ).toHaveCount(0);
+    expect(refreshes).toBe(2);
+    state = "failure";
+    await card
+      .getByRole("button", { name: "Refresh models · OpenAI Direct" })
+      .click();
+    await expect(card.getByRole("status")).toContainText(
+      "Cached models were retained",
+    );
+    await expect(picker).toContainText("gpt-6.1-something");
+    await dialog.getByRole("button", { name: "Close dialog" }).click();
+    await expect(page.locator(".compare-choices")).not.toContainText(
+      "gpt-6.1-something",
+    );
+    await page.getByRole("button", { name: /Diagnose this/ }).click();
+    await expect(page.getByRole("alert")).toContainText(
+      /unavailable|not currently available/i,
+    );
+    expect(aiCalls).toHaveLength(1);
+    await page.locator(".local-history > summary").click();
+    await expect(page.locator(".local-history .run-entry")).toContainText(
+      "gpt-6.1-something",
+    );
+    expect(
+      (await (await request.get(`/api/documents/${doc.id}`)).json())
+        .defaultModel,
+    ).toEqual(future);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+  });
+
 test("imported workbench candidates retain linked history and safe local acceptance", async ({
   page,
   request,
