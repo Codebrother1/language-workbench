@@ -182,9 +182,15 @@ export function ConfirmDelete({
     </div>
   );
 }
-export function download(filename: string, text: string, type = "text/plain") {
+export function download(
+  filename: string,
+  text: string | Blob,
+  type = "text/plain",
+) {
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([text], { type }));
+  link.href = URL.createObjectURL(
+    typeof text === "string" ? new Blob([text], { type }) : text,
+  );
   link.download = filename;
   try {
     link.click();

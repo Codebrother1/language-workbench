@@ -130,7 +130,7 @@ test("capture, write, park, edit, export and reinclude a project thought at an e
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("button", { name: "Copy document" }).click();
   await expect(page.getByRole("status")).toContainText(
-    "Copied document with formatting",
+    "Copied whole piece with formatting",
   );
   const clipboard = await page.evaluate(async () => {
     const item = (await navigator.clipboard.read())[0];

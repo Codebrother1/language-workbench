@@ -900,6 +900,65 @@ hr {
   justify-content: flex-start;
   gap: 7px;
 }
+.delivery-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.delivery-toolbar > .button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.delivery-download {
+  position: relative;
+}
+.delivery-download summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 8px;
+}
+.delivery-download-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 12;
+  min-width: 205px;
+  display: grid;
+  gap: 3px;
+  padding: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 20px #0002;
+}
+.delivery-download-menu .button {
+  justify-content: flex-start;
+}
+.delivery-ship-menu {
+  width: min(310px, calc(100vw - 36px));
+  left: 0;
+}
+.delivery-ship-menu p {
+  margin: 4px 6px;
+  line-height: 1.4;
+}
+.delivery-destination {
+  margin-left: auto;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .delivery-destination {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
 .offline-capability {
   margin: 8px 0;
   padding: 9px 11px;

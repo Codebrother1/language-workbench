@@ -907,7 +907,16 @@ export function parkedSections(
 ): WritingSection[] {
   return doc.sections.filter((section) => section.placement === "parked");
 }
-export function documentText(doc: Document): string {
+export type AssembledPiece = { title: string; sections: RichNode[][] };
+export function assemblePiece(doc: Document): AssembledPiece {
+  return {
+    title: doc.title.trim() || "Untitled",
+    sections: draftSections(doc)
+      .filter((section) => sectionText(section).trim())
+      .map((section) => section.content),
+  };
+}
+export function renderPieceText(piece: AssembledPiece, title = false): string {
   const readable = (node: RichNode): string => {
     if (node.type === "bulletList" || node.type === "orderedList")
       return (node.content ?? [])
@@ -924,9 +933,13 @@ export function documentText(doc: Document): string {
         .join("\n");
     return inlineText(node);
   };
-  return draftSections(doc)
-    .map((section) => section.content.map(readable).join("\n"))
+  const body = piece.sections
+    .map((section) => section.map(readable).join("\n"))
     .join("\n\n");
+  return title ? `${piece.title}${body ? `\n\n${body}` : ""}` : body;
+}
+export function documentText(doc: Document): string {
+  return renderPieceText(assemblePiece(doc));
 }
 export function newSection(
   kind: WritingSection["kind"] = "Freeform",
@@ -1167,18 +1180,51 @@ export function validateAIRequest(req: AIRequest): void {
     );
 }
 /** Copyable Markdown; headings and emphasis retained. */
-export function toMarkdown(doc: Document): string {
+export function renderPieceMarkdown(
+  piece: AssembledPiece,
+  title = true,
+): string {
   const render = (n: RichNode): string => {
     if (n.text !== undefined) {
-      let t = n.text;
+      let t = n.text.replace(/([\\`*_{}\[\]<>])/g, "\\$1");
       for (const m of n.marks ?? []) {
         if (m.type === "bold") t = `**${t}**`;
         if (m.type === "italic") t = `*${t}*`;
-        if (m.type === "code") t = "`" + t + "`";
+        if (m.type === "code") {
+          const longest = Math.max(
+            0,
+            ...(n.text.match(/`+/g) ?? []).map((ticks) => ticks.length),
+          );
+          const fence = "`".repeat(longest + 1);
+          t = `${fence}${n.text}${fence}`;
+        }
+        if (
+          m.type === "link" &&
+          typeof m.attrs?.href === "string" &&
+          URL.canParse(m.attrs.href)
+        ) {
+          const url = new URL(m.attrs.href);
+          if (["http:", "https:"].includes(url.protocol))
+            t = `[${t}](${url.href.replace(/[()]/g, (c) => encodeURIComponent(c))})`;
+        }
       }
       return t;
     }
     if (n.type === "hardBreak") return "  \n";
+    if (n.type === "codeBlock") {
+      const content = (n.content ?? []).map(inlineText).join("\n");
+      const longest = Math.max(
+        0,
+        ...(content.match(/`+/g) ?? []).map((ticks) => ticks.length),
+      );
+      const fence = "`".repeat(Math.max(3, longest + 1));
+      const language =
+        typeof n.attrs?.language === "string" &&
+        /^[\w+.-]{1,32}$/.test(n.attrs.language)
+          ? n.attrs.language
+          : "";
+      return `${fence}${language}\n${content}\n${fence}`;
+    }
     if (n.type === "bulletList" || n.type === "orderedList")
       return (n.content ?? [])
         .map((item, index) => {
@@ -1190,15 +1236,31 @@ export function toMarkdown(doc: Document): string {
           return marker + text.replace(/\n/g, "\n  ");
         })
         .join("\n");
+    if (n.type === "blockquote")
+      return (n.content ?? [])
+        .map(render)
+        .join("\n\n")
+        .split("\n")
+        .map((line) => (line ? `> ${line}` : ">"))
+        .join("\n");
     const t = (n.content ?? []).map(render).join("");
     if (n.type === "heading")
-      return "#".repeat(Number(n.attrs?.level ?? 2)) + " " + t;
-    if (n.type === "blockquote") return "> " + t;
+      return (
+        "#".repeat(Math.min(6, Math.max(1, Number(n.attrs?.level ?? 2)))) +
+        " " +
+        t
+      );
     return t;
   };
-  return draftSections(doc)
-    .map((s) => s.content.map(render).join("\n\n"))
+  const body = piece.sections
+    .map((section) => section.map(render).join("\n\n"))
     .join("\n\n");
+  return title
+    ? `# ${piece.title.replace(/([\\`*_{}\[\]<>#|])/g, "\\$1")}\n\n${body}`.trimEnd()
+    : body;
+}
+export function toMarkdown(doc: Document): string {
+  return renderPieceMarkdown(assemblePiece(doc), false);
 }
 export type ControlConfig = {
   key: string;

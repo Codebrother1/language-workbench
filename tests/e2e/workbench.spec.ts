@@ -84,6 +84,229 @@ async function diagnose(page: Page, action = "shorten") {
   await page.getByRole("button", { name: /Diagnose this/ }).click();
   await expect(page.locator(".diagnosis")).toContainText("OFFLINE");
 }
+for (const width of [1440, 1024, 700])
+  test(`Document View ships canonical prose without metadata at ${width}px`, async ({
+    page,
+    request,
+  }) => {
+    const doc = await seed(request, "First draft prose.");
+    doc.title = "Nothing Important";
+    doc.brief.destination = "Substack newsletter";
+    doc.sections[0].kind = "Hook";
+    doc.sections[0].label = "Unpublished section role";
+    doc.sections[0].content = [
+      {
+        type: "heading",
+        attrs: { level: 2 },
+        content: [{ type: "text", text: "An authored heading" }],
+      },
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: "A bold linked phrase",
+            marks: [
+              { type: "bold" },
+              { type: "link", attrs: { href: "https://example.com" } },
+            ],
+          },
+          { type: "hardBreak" },
+          { type: "text", text: "New line", marks: [{ type: "italic" }] },
+        ],
+      },
+      {
+        type: "blockquote",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "An authored quote" }],
+          },
+        ],
+      },
+      {
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "An authored list item" }],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        type: "codeBlock",
+        attrs: { language: "js" },
+        content: [{ type: "text", text: "const value = 1;" }],
+      },
+    ];
+    doc.sections[1].placement = "parked";
+    doc.sections[1].content = paragraphs("Private parked prose");
+    doc.revisionPlan = [
+      {
+        id: "note",
+        sectionId: doc.sections[0].id,
+        text: "Internal revision note",
+        createdAt: doc.createdAt,
+        completedAt: null,
+      },
+    ];
+    await request.put(`/api/documents/${doc.id}`, { data: doc });
+    const baseline = await (
+      await request.get(`/api/documents/${doc.id}`)
+    ).json();
+    const calls: any[] = [];
+    page.on("request", (event) => {
+      if (event.url().endsWith("/api/ai")) calls.push(event.postDataJSON());
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page
+      .getByRole("button", { name: "Document View", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Copy whole piece" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Destination from Brief: Substack newsletter"),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Copy whole piece" }).click();
+    await expect(page.getByRole("status")).toContainText("Copied whole piece");
+    const clip = await page.evaluate(async () => {
+      const item = (await navigator.clipboard.read())[0];
+      return {
+        plain: await (await item.getType("text/plain")).text(),
+        html: await (await item.getType("text/html")).text(),
+      };
+    });
+    expect(clip.plain).toMatch(/^Nothing Important\n\nAn authored heading/);
+    expect(clip.html).toContain("<h1>Nothing Important</h1>");
+    expect(clip.html).toContain("<strong>A bold linked phrase</strong>");
+    expect(clip.html).toContain('href="https://example.com/"');
+    for (const value of Object.values(clip))
+      expect(value).not.toMatch(
+        /Private parked prose|Internal revision note|Substack newsletter|Unpublished section role|source quotation/,
+      );
+    await page.evaluate(() => {
+      const original = URL.createObjectURL.bind(URL);
+      URL.createObjectURL = (blob) => {
+        (window as any).lastDeliveryMime = blob.type;
+        return original(blob);
+      };
+    });
+    await page.getByText("Download", { exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "PDF", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "PDF", exact: true }),
+    ).toBeHidden();
+    for (const [label, extension, mime] of [
+      ["PDF", "pdf", "application/pdf"],
+      [
+        "Word document (.docx)",
+        "docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ],
+      ["Markdown (.md)", "md", "text/markdown"],
+    ] as const) {
+      await page.getByText("Download", { exact: true }).click();
+      const [item] = await Promise.all([
+        page.waitForEvent("download"),
+        page.getByRole("button", { name: label, exact: true }).click(),
+      ]);
+      expect(item.suggestedFilename()).toBe(`Nothing Important.${extension}`);
+      const bytes = readFileSync((await item.path())!);
+      expect(bytes.length).toBeGreaterThan(extension === "md" ? 40 : 200);
+      if (extension === "pdf")
+        expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+      if (extension === "docx")
+        expect(bytes.subarray(0, 2).toString()).toBe("PK");
+      if (extension === "md") {
+        expect(bytes.toString()).toContain("# Nothing Important");
+        expect(bytes.toString()).toContain("```js\nconst value = 1;\n```");
+        expect(bytes.toString()).not.toMatch(
+          /Private parked prose|Internal revision note|Substack newsletter/,
+        );
+      }
+      expect(
+        await page.evaluate(() => (window as any).lastDeliveryMime),
+      ).toContain(mime);
+    }
+    await expect(page.getByRole("status")).toContainText("Downloaded Markdown");
+    await page.getByText("Ship / Send", { exact: true }).click();
+    await expect(
+      page.getByText("Direct Send is not connected.", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Download for Obsidian" }),
+    ).toBeEnabled();
+    const [obsidian] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download for Obsidian" }).click(),
+    ]);
+    expect(obsidian.suggestedFilename()).toBe("Nothing Important.md");
+    expect(readFileSync((await obsidian.path())!, "utf8")).not.toMatch(
+      /^---\n|Private parked prose/,
+    );
+    expect(calls).toHaveLength(0);
+    await expect(page.getByTestId("save-state")).toHaveText("Saved");
+    const saved = await (await request.get(`/api/documents/${doc.id}`)).json();
+    expect(documentText(saved)).toBe(documentText(doc));
+    expect(saved.draftRevision).toBe(baseline.draftRevision);
+    expect(saved.revisionPlan).toEqual(doc.revisionPlan);
+    expect(saved.pieceMemory).toEqual(doc.pieceMemory);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width + 1);
+  });
+
+test("Document View Copy falls back to titled plain text and reports blocked clipboard truthfully", async ({
+  page,
+  request,
+}) => {
+  const doc = await seed(request, "The writer's own text.");
+  await open(page);
+  await page
+    .getByRole("button", { name: "Document View", exact: true })
+    .click();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "write", {
+      configurable: true,
+      value: async () => {
+        throw new Error("No rich clipboard");
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Copy whole piece" }).click();
+  await expect(page.getByRole("status")).toContainText("Copied to clipboard");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(
+    /^A place for my words\n\nThe writer's own text\./,
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: async () => {
+        throw new Error("No clipboard permission");
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Copy whole piece" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Clipboard access was blocked",
+  );
+  expect(
+    documentText(await (await request.get(`/api/documents/${doc.id}`)).json()),
+  ).toBe(documentText(doc));
+});
+
 test("ordinary editing, native clipboard shortcuts, rich paste, undo and redo", async ({
   page,
   request,

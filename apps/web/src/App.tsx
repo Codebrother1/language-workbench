@@ -53,6 +53,13 @@ import {
 } from "lucide-react";
 import { useWorkspace, type Workspace } from "./useWorkspace";
 import {
+  deliveryPiece,
+  deliveryFilename,
+  deliveryMarkdown,
+  deliveryPDF,
+  deliveryDOCX,
+} from "./delivery";
+import {
   documentText,
   draftSections,
   parkedSections,
@@ -1458,6 +1465,7 @@ export default function App() {
     id?: string;
   } | null>(null);
   const [menu, setMenu] = useState(false);
+  const [deliveryPending, setDeliveryPending] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -2215,6 +2223,32 @@ export default function App() {
     void w.setPreviewVisible(true);
     requestAnimationFrame(() => w.focusSection(id, true));
   };
+  const downloadPiece = async (format: "pdf" | "docx" | "md") => {
+    setDeliveryPending(true);
+    try {
+      const piece = deliveryPiece(w.doc);
+      const file =
+        format === "pdf"
+          ? await deliveryPDF(piece)
+          : format === "docx"
+            ? await deliveryDOCX(piece)
+            : deliveryMarkdown(piece);
+      const mime =
+        format === "md"
+          ? "text/markdown;charset=utf-8"
+          : format === "pdf"
+            ? "application/pdf"
+            : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      download(deliveryFilename(piece, format), file, mime);
+      w.setNotice(
+        `Downloaded ${format === "md" ? "Markdown" : format.toUpperCase()}`,
+      );
+    } catch (error) {
+      w.setError((error as Error).message || "Could not download this piece.");
+    } finally {
+      setDeliveryPending(false);
+    }
+  };
   return (
     <div
       className={
@@ -2593,11 +2627,7 @@ export default function App() {
                 </Button>
                 <Button
                   onClick={() => {
-                    download(
-                      filename + ".md",
-                      toMarkdown(w.doc),
-                      "text/markdown",
-                    );
+                    void downloadPiece("md");
                     setMenu(false);
                   }}
                 >
@@ -2889,6 +2919,86 @@ export default function App() {
             }}
           >
             <Toolbar w={w} />
+            {w.layout.primaryView === "document" && !parkedFocusId && (
+              <div className="delivery-toolbar" aria-label="Finished piece">
+                <Button onClick={() => void w.copyDocument()}>
+                  <Copy size={14} /> Copy whole piece
+                </Button>
+                <details className="delivery-download">
+                  <summary>
+                    Download <ChevronDown size={14} />
+                  </summary>
+                  <div
+                    className="delivery-download-menu"
+                    role="group"
+                    aria-label="Download format"
+                  >
+                    {(["pdf", "docx", "md"] as const).map((format) => (
+                      <Button
+                        key={format}
+                        disabled={deliveryPending}
+                        onClick={(event) => {
+                          const menu = event.currentTarget.closest("details");
+                          menu?.removeAttribute("open");
+                          menu?.querySelector<HTMLElement>("summary")?.focus();
+                          void downloadPiece(format);
+                        }}
+                      >
+                        {format === "pdf"
+                          ? "PDF"
+                          : format === "docx"
+                            ? "Word document (.docx)"
+                            : "Markdown (.md)"}
+                      </Button>
+                    ))}
+                  </div>
+                </details>
+                <details className="delivery-download">
+                  <summary>
+                    Ship / Send <ChevronDown size={14} />
+                  </summary>
+                  <div
+                    className="delivery-download-menu delivery-ship-menu"
+                    role="group"
+                    aria-label="Ship options"
+                  >
+                    <p className="small">
+                      Notion · Copy this piece, then paste into Notion. Direct
+                      Send is not connected.
+                    </p>
+                    <Button
+                      onClick={(event) => {
+                        const menu = event.currentTarget.closest("details");
+                        menu?.removeAttribute("open");
+                        menu?.querySelector<HTMLElement>("summary")?.focus();
+                        void w.copyDocument();
+                      }}
+                    >
+                      Copy for Notion
+                    </Button>
+                    <p className="small">
+                      Obsidian · Download Markdown to place in your vault.
+                    </p>
+                    <Button
+                      disabled={deliveryPending}
+                      onClick={(event) => {
+                        const menu = event.currentTarget.closest("details");
+                        menu?.removeAttribute("open");
+                        menu?.querySelector<HTMLElement>("summary")?.focus();
+                        void downloadPiece("md");
+                      }}
+                    >
+                      Download for Obsidian
+                    </Button>
+                  </div>
+                </details>
+                {w.doc.brief.destination.trim() && (
+                  <span className="small muted delivery-destination">
+                    Destination from Brief: {w.doc.brief.destination}
+                  </span>
+                )}
+              </div>
+            )}
             <div
               className={
                 "selected-preview-heading" +

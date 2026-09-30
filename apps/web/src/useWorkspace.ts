@@ -1,4 +1,5 @@
 import type { InsertionAnchor } from "./SectionInsertion";
+import { deliveryHTML, deliveryPiece, deliveryText } from "./delivery";
 import { closeHistory } from "@tiptap/pm/history";
 import {
   useCallback,
@@ -3359,27 +3360,18 @@ export function useWorkspace() {
     }
   };
   const copyDocument = async () => {
+    const piece = deliveryPiece(current.current);
+    const plain = deliveryText(piece);
     try {
-      if (!editor) throw new Error("No editor");
-      const html = document.createElement("div");
-      html.innerHTML = editor.getHTML();
-      const draftIds = new Set(draftSections(current.current).map((s) => s.id));
-      html
-        .querySelectorAll("section[data-writing-section]")
-        .forEach((section) => {
-          if (!draftIds.has(section.id)) section.remove();
-        });
       await navigator.clipboard.write([
         new ClipboardItem({
-          "text/plain": new Blob([documentText(current.current)], {
-            type: "text/plain",
-          }),
-          "text/html": new Blob([html.innerHTML], { type: "text/html" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
+          "text/html": new Blob([deliveryHTML(piece)], { type: "text/html" }),
         }),
       ]);
-      setNotice("Copied document with formatting");
+      setNotice("Copied whole piece with formatting");
     } catch {
-      await copy(documentText(current.current));
+      await copy(plain);
     }
   };
   const draftRevision =

@@ -372,7 +372,7 @@ export function useWayfinding(w: Workspace) {
         void w.ask("diagnose", "critique");
         return;
       case "copy-document":
-        void w.copy(documentText(w.doc));
+        void w.copyDocument();
         return;
       case "insert": {
         if (!w.ready) return;

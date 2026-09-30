@@ -3,6 +3,9 @@ import {
   documentSchema,
   documentTarget,
   documentText,
+  assemblePiece,
+  renderPieceText,
+  renderPieceMarkdown,
   draftSections,
   parkedSections,
   toMarkdown,
@@ -651,6 +654,38 @@ describe("removeSection", () => {
         newSection("Freeform", "Not empty"),
       ),
     ).toThrow("empty Freeform");
+  });
+});
+
+describe("assembled delivery source", () => {
+  it("uses current draft order and authored formatting but excludes parked material and metadata", () => {
+    const doc = richDocument();
+    doc.title = "Nothing Important";
+    doc.sections[0].content.push({
+      type: "codeBlock",
+      attrs: { language: "js" },
+      content: [{ type: "text", text: "const x = 1;" }],
+    });
+    const parked = newSection("Freeform", "Private parked prose");
+    parked.placement = "parked";
+    doc.sections.push(parked);
+    doc.brief.destination = "Notion";
+    const original = structuredClone(doc);
+    const piece = assemblePiece(doc);
+    expect(piece.title).toBe("Nothing Important");
+    expect(piece.sections).toHaveLength(2);
+    expect(renderPieceText(piece, true)).toContain(
+      "Nothing Important\n\nAlpha beta",
+    );
+    const markdown = renderPieceMarkdown(piece);
+    expect(markdown).toContain(
+      "# Nothing Important\n\n> [**Alpha beta**](https://example.com/)",
+    );
+    expect(markdown).toContain("```js\nconst x = 1;\n```");
+    expect(markdown).not.toMatch(
+      /Private parked prose|Keep this distinction|Notion|Point|My observation|Local instruction/,
+    );
+    expect(doc).toEqual(original);
   });
 });
 

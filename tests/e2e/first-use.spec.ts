@@ -326,7 +326,7 @@ test("command palette keyboard navigation discovers existing tools without gener
   await command(page, "copy document");
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe("A sentence about language.");
+    .toBe("A new thought\n\nA sentence about language.");
   expect(calls).toEqual([]);
   expect(await canonical(request, doc.id)).toBe("A sentence about language.");
 });
