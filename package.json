@@ -1,5 +1,7 @@
 {
   "name": "language-workbench",
+  "productName": "Language Workbench",
+  "main": "desktop/main.mjs",
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.34.5",
@@ -10,23 +12,56 @@
     "dev": "concurrently -k -n api,web \"pnpm --filter @workbench/server dev\" \"pnpm --filter @workbench/web dev\"",
     "build": "pnpm --filter @workbench/web build && pnpm --filter @workbench/server build",
     "start": "pnpm --filter @workbench/server start",
+    "desktop:dev": "pnpm build && ELECTRON_RUN_AS_NODE= electron .",
+    "desktop:build": "pnpm build && electron-builder --mac dir --arm64 --publish never",
+    "desktop:smoke": "node tests/desktop-smoke.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "test:production": "node tests/production-smoke.mjs",
-    "format": "prettier --write \"apps/*/src/**/*.{ts,tsx,css}\" \"packages/*/src/*.ts\" \"tests/**/*.{ts,mjs}\" \"*.{ts,json,yaml}\""
+    "format": "prettier --write \"apps/*/src/**/*.{ts,tsx,css}\" \"packages/*/src/*.ts\" \"tests/**/*.{ts,mjs}\" \"desktop/*.{mjs,cjs}\" \"*.{ts,json,yaml}\""
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "@sparticuz/chromium": "^153.0.0",
     "@types/node": "^24.0.0",
     "concurrently": "^9.2.0",
+    "electron": "39.3.0",
+    "electron-builder": "26.0.12",
     "fflate": "0.8.2",
     "pdfjs-dist": "4.10.38",
     "prettier": "^3.9.9",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "dotenv": "16.6.0",
+    "express": "5.1.0",
+    "openai": "6.0.0",
+    "zod": "3.25.76"
+  },
+  "build": {
+    "appId": "dev.languageworkbench.app",
+    "productName": "Language Workbench",
+    "asar": true,
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "desktop/main.mjs",
+      "desktop/preload.cjs",
+      "desktop/runtime.mjs",
+      "apps/server/dist/**",
+      "apps/server/package.json",
+      "apps/web/dist/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.productivity",
+      "identity": null
+    }
   }
 }

@@ -37,6 +37,21 @@ Open **http://127.0.0.1:4318**. The Node server serves both the built frontend a
 
 No proprietary hosting service is needed: clone/copy the Git repository, install its locked dependencies, and run it locally. The private database and `.env` are not a substitute for a backup and should not be committed to Git.
 
+## macOS desktop app
+
+The desktop shell is Electron around the **same built frontend and local Express/SQLite backend**; Node is embedded in the app. No terminal, pnpm, cloud server, account or Vite server is needed to launch the built app. The existing `pnpm dev` and `pnpm build && pnpm start` browser workflows above remain unchanged.
+
+```sh
+pnpm desktop:dev     # builds the app, then opens an isolated desktop-development window
+pnpm desktop:build   # produces dist-desktop/mac-arm64/Language Workbench.app
+```
+
+Copy the `.app` into Applications in Finder, then open it normally. Local unsigned builds may prompt for explicit approval in macOS. Quit the app before installing a replacement build; app updates do not remove user data. Desktop development uses `data/desktop-dev/`, the packaged app uses **`~/Library/Application Support/Language Workbench/workbench.sqlite`**, and automated tests use temporary databases. The app picks a free loopback port automatically and shuts its backend down on quit; the browser server still uses port 4318. A second app launch focuses the existing window rather than opening another backend.
+
+The packaged app starts with its own empty DB. It never moves or opens the repository's development DB. To bring in existing work, export document JSON in the browser app and use **Import JSON** in the desktop app; import the Personal Library separately if needed. For a full SQLite restore, quit both apps first and preserve the current destination directory before copying a backup. Before opening an existing desktop DB, the app takes a WAL-aware timestamped backup in `backups/`; it does not automatically delete old backups. Startup details and failures are recorded in `logs/desktop.log` in the same app data directory. **AI providers → Open desktop data folder** opens that location.
+
+For OpenAI Direct in the installed app, put `OPENAI_API_KEY=...` in a local `.env` file in that desktop data folder and restart. The key is read only by the backend; do not include the repository's `.env` in the app bundle. Other provider settings, model catalog refresh and routing remain the same. The renderer has no Node access; it receives only a narrowly scoped action to open the data folder. Document View Copy, PDF, DOCX and Markdown exports remain available; downloads prompt for a normal save destination. Direct Notion send, sync, signing, notarization and auto-update are not included.
+
 ## Start without setup
 
 Open a new document and use **Talk or type a thought**, or simply click the page and write. Wispr uses your normal desktop hotkey. The Writing Brief is optional and presented as **What are you making?**—before, during, or after writing. **Piece memory** in Document actions is also optional: keep your own purpose, open questions, decisions, next move and session note with this document. It is separate from the draft and Writing Brief. A grounded suggestion can copy an explicit earlier writer-authored Lab question for review; it does not call a model or save anything until accepted.

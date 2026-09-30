@@ -68,9 +68,15 @@ function ProviderCard({
       )}
       {keys[p.id] && (
         <p className="small muted">
-          Set {keys[p.id]} in the backend’s root .env and restart. No key is
-          entered or stored in the browser.
+          {window.workbenchDesktop && p.id === "openai"
+            ? "Desktop: place OPENAI_API_KEY=your-key in a .env file in the desktop data folder, then restart the app. The key stays in this local backend folder, never in the frontend or bundle."
+            : `Set ${keys[p.id]} in the backend’s root .env and restart. No key is entered or stored in the browser.`}
         </p>
+      )}
+      {p.id === "openai" && window.workbenchDesktop && (
+        <Button onClick={() => void window.workbenchDesktop?.openDataFolder()}>
+          Open desktop data folder
+        </Button>
       )}
       {p.id === "openai" && (
         <p className="small muted">
