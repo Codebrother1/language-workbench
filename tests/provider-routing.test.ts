@@ -54,6 +54,7 @@ let directory: string,
 let calls: { url: string; body: any }[], fail: boolean;
 let discovered: string[], discoveryBody: "valid" | "malformed" | "empty";
 let catalogFailure: "none" | "server" | "timeout";
+let connectionFailure: "none" | "server" | "network";
 function fixture() {
   const document = newDocument("draft", "They were larping as experts.");
   const settings = defaultSettings();
@@ -89,6 +90,13 @@ async function start(
       if (String(url).endsWith("/models") && catalogFailure === "server")
         return new Response(JSON.stringify({ error: { message: key } }), {
           status: 500,
+          headers: { "content-type": "application/json" },
+        });
+      if (String(url).endsWith("/responses") && connectionFailure === "network")
+        throw new Error("Synthetic network failure");
+      if (String(url).endsWith("/responses") && connectionFailure === "server")
+        return new Response(JSON.stringify({ error: { message: key } }), {
+          status: 503,
           headers: { "content-type": "application/json" },
         });
       if (fail || body?.model === "failing-model")
@@ -166,6 +174,7 @@ beforeEach(async () => {
   discovered = ["gpt-4.1-mini", "unknown-capabilities"];
   discoveryBody = "valid";
   catalogFailure = "none";
+  connectionFailure = "none";
   await start();
 });
 afterEach(async () => {
@@ -773,7 +782,31 @@ describe("provider catalog, environment boundary and persistence", () => {
       })
     ).json();
     expect(test.ok).toBe(false);
+    expect(test.message).toMatch(/authentication|project access/i);
     expect(JSON.stringify(test)).not.toContain(key);
+    fail = false;
+    connectionFailure = "server";
+    const unavailable = await (
+      await api("/api/providers/openai/test", "POST", {
+        modelId: openai.modelId,
+      })
+    ).json();
+    expect(unavailable).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/connection failed/i),
+    });
+    expect(JSON.stringify(unavailable)).not.toContain(key);
+    connectionFailure = "network";
+    expect(
+      (
+        await (
+          await api("/api/providers/openai/test", "POST", {
+            modelId: openai.modelId,
+          })
+        ).json()
+      ).message,
+    ).toMatch(/connection failed/i);
+    connectionFailure = "none";
     expect(
       (
         await api("/api/providers/openai", "PATCH", {

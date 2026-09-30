@@ -53,6 +53,7 @@
       "desktop/main.mjs",
       "desktop/preload.cjs",
       "desktop/runtime.mjs",
+      "desktop/credentials.mjs",
       "apps/server/dist/**",
       "apps/server/package.json",
       "apps/web/dist/**",

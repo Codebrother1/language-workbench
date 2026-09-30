@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Workspace, api } from "./useWorkspace";
 import {
   type ProviderDescriptor,
@@ -19,6 +19,60 @@ function ProviderCard({
   const [modelId, setModelId] = useState(""),
     [pending, setPending] = useState(false),
     [status, setStatus] = useState("");
+  const [credentialStatus, setCredentialStatus] = useState<{
+    configured: boolean;
+    source: string;
+    canStore: boolean;
+  } | null>(null);
+  const [secretMode, setSecretMode] = useState<"add" | "replace" | null>(null);
+  const [secret, setSecret] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const secretInput = useRef<HTMLInputElement>(null);
+  const desktop = p.id === "openai" ? window.workbenchDesktop : undefined;
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    void desktop
+      .openAIStatus()
+      .then((next) => {
+        if (active) setCredentialStatus(next);
+      })
+      .catch(() => {
+        if (active)
+          setStatus("Credential status is unavailable. Check the desktop log.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [desktop, p.configured]);
+  const changeKey = async (remove: boolean) => {
+    if (!desktop) return;
+    setPending(true);
+    setStatus("");
+    try {
+      const next = remove
+        ? await desktop.removeOpenAIKey()
+        : await desktop.saveOpenAIKey(secret);
+      setCredentialStatus(next);
+      setSecret("");
+      setSecretMode(null);
+      setConfirmRemove(false);
+      await w.refreshCatalog();
+      setStatus(
+        remove
+          ? "Local API key removed. Model selections were kept; no fallback was used."
+          : "API key saved locally. Test the connection or refresh models explicitly.",
+      );
+    } catch {
+      setStatus(
+        remove
+          ? "Could not remove the key. The previous credential was retained where possible."
+          : "Could not save the key securely. The previous credential was retained where possible.",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
   const run = async (path: string, method = "POST", body: unknown = {}) => {
     setPending(true);
     setStatus("");
@@ -62,21 +116,134 @@ function ProviderCard({
           <span className="tag">Not implemented</span>
         )}
       </div>
-      <p>{p.status}</p>
+      <p>
+        {desktop && !p.configured && p.enabled
+          ? "Not configured: add an API key to enable OpenAI Direct."
+          : p.status}
+      </p>
       {p.credentialSuffix && (
         <p className="small">Credential: ••••{p.credentialSuffix}</p>
       )}
       {keys[p.id] && (
         <p className="small muted">
-          {window.workbenchDesktop && p.id === "openai"
-            ? "Desktop: place OPENAI_API_KEY=your-key in a .env file in the desktop data folder, then restart the app. The key stays in this local backend folder, never in the frontend or bundle."
+          {desktop
+            ? "The API key stays on this Mac in OS-backed encrypted storage; it is not included in writing exports. Legacy desktop .env and process environment keys are still recognized."
             : `Set ${keys[p.id]} in the backend’s root .env and restart. No key is entered or stored in the browser.`}
         </p>
       )}
-      {p.id === "openai" && window.workbenchDesktop && (
-        <Button onClick={() => void window.workbenchDesktop?.openDataFolder()}>
-          Open desktop data folder
-        </Button>
+      {desktop && (
+        <div className="desktop-credential-controls">
+          <p className="small muted" role="status">
+            {credentialStatus?.source === "environment"
+              ? "Configured from external environment or legacy .env. A key saved here takes precedence."
+              : credentialStatus?.source === "unavailable"
+                ? "The saved key is unavailable from secure storage; replace or remove it."
+                : credentialStatus?.configured
+                  ? "API key saved on this Mac · hidden"
+                  : "No desktop API key configured."}
+          </p>
+          {credentialStatus && !credentialStatus.canStore && (
+            <p className="small muted" role="alert">
+              Secure desktop storage is unavailable. An existing server
+              environment key may still work; no key will be saved from this
+              screen.
+            </p>
+          )}
+          {!secretMode && !confirmRemove && (
+            <div className="row wrap">
+              <Button
+                disabled={pending || !credentialStatus?.canStore}
+                onClick={() => {
+                  setSecretMode(
+                    credentialStatus?.configured ||
+                      credentialStatus?.source === "unavailable"
+                      ? "replace"
+                      : "add",
+                  );
+                  requestAnimationFrame(() => secretInput.current?.focus());
+                }}
+              >
+                {credentialStatus?.configured ||
+                credentialStatus?.source === "unavailable"
+                  ? "Replace key"
+                  : "Add API key"}
+              </Button>
+              {(credentialStatus?.configured ||
+                credentialStatus?.source === "unavailable") && (
+                <Button
+                  disabled={pending}
+                  onClick={() => setConfirmRemove(true)}
+                >
+                  Remove key
+                </Button>
+              )}
+            </div>
+          )}
+          {secretMode && (
+            <div className="credential-entry">
+              <Field
+                label={
+                  secretMode === "add"
+                    ? "New OpenAI API key"
+                    : "Replacement OpenAI API key"
+                }
+              >
+                <input
+                  ref={secretInput}
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={secret}
+                  onChange={(event) => setSecret(event.target.value)}
+                />
+              </Field>
+              <div className="row wrap">
+                <Button
+                  disabled={pending || secret.trim().length < 8}
+                  onClick={() => void changeKey(false)}
+                >
+                  Save API key
+                </Button>
+                <Button
+                  disabled={pending}
+                  onClick={() => {
+                    setSecret("");
+                    setSecretMode(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+          {confirmRemove && (
+            <div
+              className="credential-entry"
+              role="group"
+              aria-label="Confirm API key removal"
+            >
+              <p>
+                Remove the locally configured API key? Documents and model
+                routes stay intact. OpenAI will be unavailable until you add a
+                new key. Any legacy .env file remains untouched.
+              </p>
+              <div className="row wrap">
+                <Button disabled={pending} onClick={() => void changeKey(true)}>
+                  Confirm remove key
+                </Button>
+                <Button
+                  disabled={pending}
+                  onClick={() => setConfirmRemove(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+          <Button onClick={() => void desktop.openDataFolder()}>
+            Open desktop data folder
+          </Button>
+        </div>
       )}
       {p.id === "openai" && (
         <p className="small muted">

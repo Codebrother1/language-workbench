@@ -63,6 +63,18 @@ export async function startDesktopBackend({
       await loadServer();
     repository = createRepository(dataDir);
     const registry = new ProviderRegistry({ repository, env });
+    const configureOpenAI = (key) => {
+      const settings = repository.getSettings();
+      if (!settings.routing?.applicationDefault)
+        repository.saveSettings({
+          ...settings,
+          routing: {
+            ...settings.routing,
+            applicationDefault: registry.applicationDefault,
+          },
+        });
+      return registry.setOpenAICredential(key);
+    };
     const app = createApp({
       repository,
       provider: new MockProvider(),
@@ -91,7 +103,7 @@ export async function startDesktopBackend({
       });
       return stopping;
     };
-    activeBackend = { port, url, stop };
+    activeBackend = { port, url, stop, configureOpenAI };
     return activeBackend;
   } catch (error) {
     repository?.close();

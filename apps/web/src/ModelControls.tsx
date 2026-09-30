@@ -21,8 +21,9 @@ export function modelLabel(
     " · " +
     (p?.displayName ?? ref.providerId) +
     (p?.id === "openai" &&
-    p.lastRefreshedAt &&
-    (!model || model.availability !== "available")
+    (!p.configured ||
+      !p.enabled ||
+      (p.lastRefreshedAt && (!model || model.availability !== "available")))
       ? " · Unavailable"
       : "")
   );

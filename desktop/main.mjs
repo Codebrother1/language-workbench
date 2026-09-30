@@ -1,8 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
-import { appendFileSync, chmodSync, existsSync, mkdirSync } from "node:fs";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  safeStorage,
+  session,
+  shell,
+} from "electron";
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import dotenv from "dotenv";
+import { createDesktopCredentialStore } from "./credentials.mjs";
 import {
   desktopPaths,
   desktopSmokeProfile,
@@ -61,11 +77,14 @@ else {
     }
   };
   let preflightError = null;
+  let legacyEnv = {};
   try {
     mkdirSync(join(dataDir, "logs"), { recursive: true, mode: 0o700 });
     const localEnv = join(dataDir, ".env");
-    if (existsSync(localEnv)) chmodSync(localEnv, 0o600);
-    dotenv.config({ path: localEnv, quiet: true });
+    if (existsSync(localEnv)) {
+      chmodSync(localEnv, 0o600);
+      legacyEnv = dotenv.parse(readFileSync(localEnv));
+    }
     log(
       `Starting ${productName} ${app.getVersion()} (${app.isPackaged ? "packaged" : "desktop development"})`,
     );
@@ -109,6 +128,22 @@ else {
         return;
       }
       try {
+        const credentialStore = createDesktopCredentialStore({
+          dir: dataDir,
+          safeStorage,
+          externalKey: process.env.OPENAI_API_KEY || legacyEnv.OPENAI_API_KEY,
+        });
+        const key = credentialStore.resolveKey();
+        if (credentialStore.status().source === "unavailable")
+          log(
+            "Stored OpenAI credential is unavailable; inference is disabled until replaced.",
+          );
+        const providerEnv = {
+          ...process.env,
+          OPENAI_API_KEY: key ?? undefined,
+          OPENAI_MODEL: process.env.OPENAI_MODEL || legacyEnv.OPENAI_MODEL,
+          WORKBENCH_DESKTOP: "1",
+        };
         const loadServer = () =>
           import(
             pathToFileURL(join(appRoot, "apps", "server", "dist", "index.js"))
@@ -117,7 +152,7 @@ else {
         backend = await startDesktopBackend({
           dataDir,
           webDir: paths.webDir,
-          env: process.env,
+          env: providerEnv,
           loadServer,
           log,
         });
@@ -183,19 +218,73 @@ else {
             const exportsDir = join(dataDir, "exports");
             mkdirSync(exportsDir, { recursive: true, mode: 0o700 });
             item.setSavePath(join(exportsDir, item.getFilename()));
+            item.once("done", (_done, state) => {
+              if (state === "completed")
+                writeFileSync(
+                  join(exportsDir, `${item.getFilename()}.done`),
+                  "ok",
+                  { mode: 0o600 },
+                );
+            });
           } else
             item.setSaveDialogOptions({
               title: "Save finished piece",
               defaultPath: join(app.getPath("downloads"), item.getFilename()),
             });
         });
-        ipcMain.handle("workbench:open-data-folder", (event) => {
+        const authorize = (event) => {
           if (
             event.sender.id !== window.webContents.id ||
             new URL(event.sender.getURL()).origin !== origin
           )
-            return;
+            throw new Error(
+              "Desktop settings are only available in the local app window.",
+            );
+        };
+        ipcMain.handle("workbench:open-data-folder", (event) => {
+          authorize(event);
           return shell.openPath(dataDir);
+        });
+        ipcMain.handle("workbench:openai-status", (event) => {
+          authorize(event);
+          return credentialStore.status();
+        });
+        ipcMain.handle("workbench:openai-save", (event, value) => {
+          authorize(event);
+          try {
+            const key = value?.trim();
+            if (typeof key !== "string" || key.length < 8 || key.length > 512)
+              throw new Error("Invalid key");
+            const previous = credentialStore.resolveKey();
+            backend.configureOpenAI(key);
+            try {
+              return credentialStore.save(key);
+            } catch (error) {
+              backend.configureOpenAI(previous);
+              throw error;
+            }
+          } catch {
+            throw new Error(
+              "Could not save the local API key securely. The previous key was retained where possible.",
+            );
+          }
+        });
+        ipcMain.handle("workbench:openai-remove", (event) => {
+          authorize(event);
+          try {
+            const previous = credentialStore.resolveKey();
+            backend.configureOpenAI(null);
+            try {
+              return credentialStore.remove();
+            } catch (error) {
+              backend.configureOpenAI(previous);
+              throw error;
+            }
+          } catch {
+            throw new Error(
+              "Could not remove the local API key. Check the desktop data folder.",
+            );
+          }
         });
         await window.loadURL(origin);
         const loaded = await window.webContents

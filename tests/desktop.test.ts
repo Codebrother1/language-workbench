@@ -119,12 +119,41 @@ describe("desktop runtime isolation and lifecycle", () => {
     ).rejects.toThrow();
     expect(readFileSync(path, "utf8")).toBe("not a directory");
   });
+  it("pins an external OpenAI default on removal instead of silently falling back to Offline", async () => {
+    const dir = mkdtempSync(join(directory, "external-"));
+    backend = await startDesktopBackend({
+      dataDir: dir,
+      webDir: undefined,
+      env: { WORKBENCH_DESKTOP: "1", OPENAI_API_KEY: "sk-external-test-key" },
+      loadServer: async () => ({
+        createApp,
+        createRepository,
+        ProviderRegistry,
+        MockProvider,
+      }),
+      log: () => {},
+    });
+    backend.configureOpenAI(null);
+    const settings = await (await fetch(backend.url + "/api/settings")).json();
+    expect(settings.routing.applicationDefault).toEqual({
+      providerId: "openai",
+      modelId: "gpt-4.1-mini",
+    });
+    const catalog = await (await fetch(backend.url + "/api/providers")).json();
+    expect(
+      catalog.providers.find((p: any) => p.id === "openai").configured,
+    ).toBe(false);
+    expect(catalog.applicationDefault).toEqual({
+      providerId: "openai",
+      modelId: "gpt-4.1-mini",
+    });
+  });
   it("starts exactly one loopback backend on an available port and closes without losing its data", async () => {
     const dir = mkdtempSync(join(directory, "server-"));
     const options = {
       dataDir: dir,
       webDir: undefined,
-      env: {},
+      env: { WORKBENCH_DESKTOP: "1" },
       loadServer: async () => ({
         createApp,
         createRepository,
@@ -138,6 +167,25 @@ describe("desktop runtime isolation and lifecycle", () => {
     expect(
       (await (await fetch(backend.url + "/api/health")).json()).provider,
     ).toBe("mock");
+    backend.configureOpenAI("sk-disposable-desktop-fixture");
+    const catalog = await (await fetch(backend.url + "/api/providers")).json();
+    expect(catalog.providers.find((p: any) => p.id === "openai")).toMatchObject(
+      { configured: true, credentialSuffix: null },
+    );
+    expect(catalog.applicationDefault).toEqual({
+      providerId: "mock",
+      modelId: "conservative",
+    });
+    backend.configureOpenAI(null);
+    expect(
+      (
+        await (await fetch(backend.url + "/api/providers")).json()
+      ).providers.find((p: any) => p.id === "openai").configured,
+    ).toBe(false);
+    expect(
+      (await (await fetch(backend.url + "/api/settings")).json()).routing
+        .applicationDefault,
+    ).toEqual({ providerId: "mock", modelId: "conservative" });
     await expect(startDesktopBackend(options)).rejects.toThrow(
       /already running/i,
     );

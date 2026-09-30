@@ -2391,6 +2391,26 @@ summary {
 .provider-card .row p {
   margin: 0;
 }
+.desktop-credential-controls {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.desktop-credential-controls p {
+  margin: 0;
+}
+.credential-entry {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.credential-entry input {
+  width: 100%;
+  max-width: 450px;
+}
 .segmented {
   display: flex;
   gap: 6px;

@@ -21,6 +21,7 @@ export type ProviderRegistryOptions = {
   repository: Repository;
   env?: Record<string, string | undefined>;
   client?: OpenAIClient;
+  clientFactory?: (key: string) => OpenAIClient;
 };
 const specs = [
   ["mock", "Offline", ""],
@@ -95,11 +96,13 @@ export class ProviderRegistry {
   readonly applicationDefault: ModelRef;
   private readonly repository: Repository;
   private readonly env: Record<string, string | undefined>;
-  private readonly client?: OpenAIClient;
+  private client?: OpenAIClient;
+  private readonly clientFactory: (key: string) => OpenAIClient;
   constructor({
     repository,
     env = process.env,
     client,
+    clientFactory,
   }: ProviderRegistryOptions) {
     this.repository = repository;
     this.env = env;
@@ -110,15 +113,24 @@ export class ProviderRegistry {
           modelId: env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
         }
       : { providerId: "mock", modelId: "conservative" };
-    this.client = key
-      ? (client ??
+    this.clientFactory =
+      clientFactory ??
+      ((apiKey) =>
         new OpenAI({
-          apiKey: key,
+          apiKey,
           timeout: 60_000,
           maxRetries: 1,
           logLevel: "off",
-        }))
-      : undefined;
+        }));
+    this.client = key ? (client ?? this.clientFactory(key)) : undefined;
+  }
+  setOpenAICredential(key: string | null): ProviderDescriptor {
+    const trimmed = key?.trim();
+    const next = trimmed ? this.clientFactory(trimmed) : undefined;
+    if (trimmed) this.env.OPENAI_API_KEY = trimmed;
+    else delete this.env.OPENAI_API_KEY;
+    this.client = next;
+    return this.get("openai");
   }
   get(id: string): ProviderDescriptor {
     const spec = specs.find((s) => s[0] === id);
@@ -185,7 +197,11 @@ export class ProviderRegistry {
       implemented,
       configured,
       enabled,
-      credentialSuffix: key && key.length > 4 ? key.slice(-4) : null,
+      credentialSuffix: this.env.WORKBENCH_DESKTOP
+        ? null
+        : key && key.length > 4
+          ? key.slice(-4)
+          : null,
       status: !implemented
         ? "Architecture/settings only: adapter not implemented; no requests are sent."
         : !configured
@@ -448,7 +464,9 @@ export class ProviderRegistry {
         message:
           error instanceof APIError
             ? error.message
-            : "Connection test failed. Check credentials, model access and provider availability.",
+            : [401, 403].includes((error as { status?: number })?.status ?? 0)
+              ? "OpenAI authentication or project access failed. Check this API key and project."
+              : "Provider connection failed. Check network, model access and provider availability.",
       };
     }
   }
