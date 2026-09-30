@@ -833,6 +833,10 @@ test("Preview focus temporarily expands and restores the exact saved pane arrang
   const preview = page.locator('[data-pane="preview"]');
   const inspector = page.locator('[data-pane="inspector"]');
   await expect(workbench).toBeVisible();
+  await expect(inspector).toBeVisible();
+  await expect(workbench).toHaveCSS("flex-grow", "55");
+  await expect(preview).toHaveCSS("flex-grow", "30");
+  await expect(inspector).toHaveCSS("flex-grow", "15");
   const before = (await preview.boundingBox())!.width;
   await page.getByRole("button", { name: "Focus preview" }).click();
   await expect(page.getByTestId("preview-reading-state")).toHaveCount(0);

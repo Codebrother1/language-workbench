@@ -8,6 +8,10 @@ data/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+provider-credentials.json
 playwright-report/
 test-results/
 *.log

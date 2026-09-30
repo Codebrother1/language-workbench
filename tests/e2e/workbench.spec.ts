@@ -11,6 +11,7 @@ import {
   newSection,
   defaultSettings,
   documentText,
+  toMarkdown,
   targetFor,
   emptyWorkbench,
   paragraphs,
@@ -4034,6 +4035,12 @@ test("section copy and whole-document copy are exact; cross-section AI is disabl
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(documentText(doc));
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("button", { name: "Copy body as Markdown" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(toMarkdown(doc));
+  expect(toMarkdown(doc)).not.toContain(doc.title);
   await page.getByTestId("writing-editor").click();
   await page.keyboard.press("ControlOrMeta+a");
   await expect(page.getByRole("button", { name: /Diagnose this/ })).toHaveCount(

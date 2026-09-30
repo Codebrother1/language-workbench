@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
   readFileSync,
+  copyFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,6 +14,7 @@ import { createApp } from "../apps/server/src/app";
 import { createRepository } from "../apps/server/src/repository";
 import { ProviderRegistry } from "../apps/server/src/provider-registry";
 import { MockProvider } from "../apps/server/src/mock-provider";
+import { newDocument } from "../packages/domain/src/index";
 import {
   desktopPaths,
   desktopSmokeProfile,
@@ -82,6 +84,70 @@ describe("desktop runtime isolation and lifecycle", () => {
         name.endsWith(".sqlite"),
       ),
     ).toHaveLength(1);
+  });
+  it("restores a WAL-aware backup of an older version-one document into a separate disposable profile", async () => {
+    const working = mkdtempSync(join(directory, "working-"));
+    const restored = mkdtempSync(join(directory, "restored-"));
+    const sourcePath = join(working, "workbench.sqlite");
+    const db = new DatabaseSync(sourcePath);
+    db.exec(
+      "PRAGMA journal_mode=WAL; CREATE TABLE documents (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL);",
+    );
+    const legacy: any = newDocument(
+      "Before the change",
+      "Original authored prose.",
+    );
+    delete legacy.revisionPlan;
+    delete legacy.pieceMemory;
+    delete legacy.sections[0].placement;
+    delete legacy.sections[0].workbench;
+    db.prepare(
+      "INSERT INTO documents (id, revision, body) VALUES (?, ?, ?)",
+    ).run(legacy.id, legacy.revision, JSON.stringify(legacy));
+    const backupPath = await backupDesktopDatabase(working);
+    expect(backupPath).not.toBeNull();
+    db.prepare("UPDATE documents SET body=?, revision=1 WHERE id=?").run(
+      JSON.stringify({ ...legacy, title: "Changed working copy", revision: 1 }),
+      legacy.id,
+    );
+    db.close();
+    copyFileSync(backupPath!, join(restored, "workbench.sqlite"));
+    backend = await startDesktopBackend({
+      dataDir: restored,
+      webDir: undefined,
+      env: { WORKBENCH_DESKTOP: "1" },
+      loadServer: async () => ({
+        createApp,
+        createRepository,
+        ProviderRegistry,
+        MockProvider,
+      }),
+      log: () => {},
+    });
+    const response = await fetch(`${backend.url}/api/documents/${legacy.id}`);
+    expect(response.status).toBe(200);
+    const recovered = await response.json();
+    expect(recovered.title).toBe("Before the change");
+    expect(recovered.sections[0].placement).toBe("draft");
+    expect(recovered.sections[0].content).toEqual(legacy.sections[0].content);
+    expect(recovered.revisionPlan).toEqual([]);
+    expect(recovered.pieceMemory.purpose).toBe("");
+    const changed = new DatabaseSync(sourcePath, { readOnly: true });
+    expect(
+      JSON.parse(
+        String(
+          changed
+            .prepare("SELECT body FROM documents WHERE id=?")
+            .get(legacy.id)?.body,
+        ),
+      ).title,
+    ).toBe("Changed working copy");
+    changed.close();
+    expect(
+      readdirSync(join(restored, "backups")).some((file) =>
+        file.endsWith(".sqlite"),
+      ),
+    ).toBe(true);
   });
   it("reports missing packaged frontend instead of opening a blank window or creating a database", async () => {
     const dataDir = mkdtempSync(join(directory, "missing-"));

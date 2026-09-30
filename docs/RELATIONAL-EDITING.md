@@ -6,10 +6,9 @@ This is the implemented behavior in the working tree based on `daec692`, not a c
 
 ## Launch this repository
 
-The handoff path is `/agent/workspace/language-workbench`. Use **Node 22.17.0 or newer** (built-in `node:sqlite`) and **pnpm 10.34.5**. Node 24 LTS is also supported; a SQLite experimental warning alone is not a startup failure.
+Run from the root of your own clone. Use **Node 22.17.0 or newer** (built-in `node:sqlite`) and **pnpm 10.34.5**. Node 24 LTS is also supported; a SQLite experimental warning alone is not a startup failure. For current commands and desktop/BYOK behavior, use [DEVELOPMENT.md](DEVELOPMENT.md) and [DESKTOP.md](DESKTOP.md); this checkpoint's verification counts are historical.
 
 ```sh
-cd /agent/workspace/language-workbench # or the root of your own clone
 node --version                      # v22.17.0 or newer
 npm install --global pnpm@10.34.5    # only if needed
 pnpm --version                      # 10.34.5

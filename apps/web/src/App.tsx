@@ -2623,7 +2623,7 @@ export default function App() {
                   }}
                 >
                   <Copy size={14} />
-                  Copy Markdown
+                  Copy body as Markdown
                 </Button>
                 <Button
                   onClick={() => {
